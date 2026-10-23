@@ -26,6 +26,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 . (Join-Path $ScriptDir 'archive_limits.ps1')
 . (Join-Path $ScriptDir 'native_process.ps1')
+. (Join-Path $ScriptDir 'archive_sandbox.ps1')
 Initialize-NativeTextCapture
 
 function Format-Duration([double]$Seconds) {
@@ -439,43 +440,13 @@ function Copy-WithProgress {
     return $copied
 }
 
-function Expand-ZipWithProgress([string]$ZipPath, [string]$Directory) {
-    $archive = (Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy)
+function Expand-ZipWithProgress([string]$ZipPath,[string]$Directory) {
+    $archive=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
     try {
-        $checksums=Get-ZipChecksums $ZipPath $archive.Entries.Count
-        $entryIndex=0
-        $prefix = [IO.Path]::GetFullPath($Directory) + [IO.Path]::DirectorySeparatorChar
-        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-        [long]$totalBytes = 0
-        foreach ($entry in $archive.Entries) { $totalBytes += $entry.Length }
-        [long]$done = 0
-        foreach ($entry in $archive.Entries) {
-            $expectedCrc=$checksums[$entryIndex]; $entryIndex++
-            $relative = $entry.FullName.Replace('\', '/').Replace('/', [IO.Path]::DirectorySeparatorChar)
-            if ($relative.Contains(':') -or [IO.Path]::IsPathRooted($relative)) { throw 'Unsafe ZIP entry path.' }
-            $target = [IO.Path]::GetFullPath((Join-Path $Directory $relative))
-            if (-not $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'ZIP entry leaves temporary folder.' }
-            if (-not $seen.Add($target)) { throw "Duplicate ZIP entry: $($entry.FullName)" }
-            if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
-                if ($entry.Length -ne 0 -or $expectedCrc -ne 0) {throw ('ZIP directory entry contains data or an invalid checksum: '+$entry.FullName)}
-                [void][IO.Directory]::CreateDirectory($target)
-                continue
-            }
-            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
-            $source = $null; $dest = $null
-            try {
-                $source = $entry.Open()
-                $dest = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
-                $copied = Copy-WithProgress $source $dest $done $totalBytes 0 0.15 'Extracting ZIP' $entry.FullName $expectedCrc $entry.Length
-                if ($copied -ne $entry.Length) { throw "Incomplete extraction: $($entry.FullName)" }
-                $done += $copied
-            } finally {
-                if ($dest) { $dest.Dispose() }; if ($source) { $source.Dispose() }
-            }
-            [IO.File]::SetLastWriteTimeUtc($target, $entry.LastWriteTime.UtcDateTime)
-        }
-    } finally { $archive.Dispose() }
-    Show-Progress 0.15 'Extracting ZIP' 'Extraction complete' 100 -Force
+        Show-Progress 0 'Extracting ZIP in sandbox' ([IO.Path]::GetFileName($ZipPath)) 0 -Force
+        $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $archive -Profile Floppy -Operation Extract -Destination $Directory -Progress {param($index,$count,$done,$length) Show-Progress (0.15*($index+$done/[Math]::Max(1,$length))/[Math]::Max(1,$count)) 'Extracting ZIP in sandbox' ('Entry {0}/{1}' -f ($index+1),$count) (100*$done/[Math]::Max(1,$length))}
+    } finally {$archive.Dispose()}
+    Show-Progress 0.15 'Extracting ZIP' 'Sandbox extraction complete' 100 -Force
 }
 
 function Assert-G64([string]$Path) {
@@ -506,7 +477,7 @@ function Assert-G64([string]$Path) {
 }
 
 function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Index, [int]$Count, [string]$DisplayName) {
-    $capture = New-Object OptiMiyoo.NativeNibCapture($NibConv, $InputPath, $OutputPath)
+    $capture = New-NativeNibCapture $NibConv $InputPath $OutputPath
     $phase = 'Starting'; [double]$fraction = 0; $trackDetail = 'waiting for nibconv output'
     $conversionProblem = $null
     $diskClock = [Diagnostics.Stopwatch]::StartNew()
@@ -540,6 +511,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
         if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
         if ($capture.Child.ExitCode -ne 0) { throw "nibconv exit code $($capture.Child.ExitCode)." }
         if ($conversionProblem) { throw $conversionProblem }
+        $capture.Export()
         if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output. See the log for its messages.' }
         Assert-G64 $OutputPath
         Show-Progress (0.15 + 0.65 * (($Index + 1) / $Count)) 'Converting disk images' `
@@ -587,34 +559,17 @@ function New-ZipWithProgress([string]$Directory, [string]$Destination) {
         }
     } finally { $archive.Dispose() }
     Show-Progress 0.95 'Re-zipping' 'Output ZIP created; verifying contents' 100 -Force
-    $archive = (Open-ArchiveWithBudget -Path $Destination -Profile Floppy)
+    $archive=Open-ArchiveWithBudget -Path $Destination -Profile Floppy
     try {
-        $checksums=Get-ZipChecksums $Destination $archive.Entries.Count
-        $entryIndex=0
-        if ($archive.Entries.Count -ne $expected.Count) { throw 'Output ZIP entry count mismatch.' }
-        [long]$done = 0
-        foreach ($entry in $archive.Entries) {
-            $expectedCrc=$checksums[$entryIndex]; $entryIndex++
-            if (-not $expected.ContainsKey($entry.FullName)) { throw 'Unexpected ZIP entry.' }
-            $item = $expected[$entry.FullName]
-            if ($entry.Length -ne $item.Length) { throw "ZIP length mismatch: $($entry.FullName)" }
-            if ($null -eq $item.Hash) {
-                if ($expectedCrc -ne 0) {throw ('ZIP directory CRC mismatch: '+$entry.FullName)}
-                continue
-            }
-            $source = $null; $sha = $null; $hashStream = $null
-            try {
-                $source = $entry.Open(); $sha = [Security.Cryptography.SHA256]::Create()
-                $hashStream = New-Object Security.Cryptography.CryptoStream([IO.Stream]::Null, $sha, [Security.Cryptography.CryptoStreamMode]::Write)
-                $done += Copy-WithProgress $source $hashStream $done $totalBytes 0.95 0.04 'Verifying output ZIP' $entry.FullName $expectedCrc $entry.Length
-                $hashStream.FlushFinalBlock()
-                $actual = [BitConverter]::ToString($sha.Hash).Replace('-', '')
-                if ($actual -ne $item.Hash) { throw "ZIP content mismatch: $($entry.FullName)" }
-            } finally {
-                if ($hashStream) { $hashStream.Dispose() }; if ($sha) { $sha.Dispose() }; if ($source) { $source.Dispose() }
-            }
+        if($archive.Entries.Count -ne $expected.Count){throw 'Output ZIP entry count mismatch.'}
+        $actual=Invoke-ArchiveSandbox -ZipPath $Destination -Archive $archive -Profile Floppy -Operation Hash -Progress {param($index,$count,$done,$length) Show-Progress (0.95+0.04*($index+$done/[Math]::Max(1,$length))/[Math]::Max(1,$count)) 'Verifying output ZIP in sandbox' ('Entry {0}/{1}' -f ($index+1),$count) (100*$done/[Math]::Max(1,$length))}
+        foreach($entry in $archive.Entries) {
+            if(-not $expected.ContainsKey($entry.FullName)){throw 'Unexpected ZIP entry.'}
+            $item=$expected[$entry.FullName]
+            if($entry.Length -ne $item.Length){throw 'ZIP length mismatch.'}
+            if($null -ne $item.Hash -and (-not $actual.ContainsKey($entry.FullName) -or $actual[$entry.FullName].Hash -cne $item.Hash)){throw 'ZIP content mismatch.'}
         }
-    } finally { $archive.Dispose() }
+    } finally {$archive.Dispose()}
 }
 
 function New-FolderWithProgress([string]$Directory, [string]$Destination) {

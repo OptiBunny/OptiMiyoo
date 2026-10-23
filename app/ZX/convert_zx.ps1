@@ -39,6 +39,7 @@ $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'source_policy.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'archive_limits.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'native_process.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'archive_sandbox.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'overwrite_prompt.ps1')
 $script:ChooseSourcePolicy=($Format -eq 'Ask' -and -not $PSBoundParameters.ContainsKey('SourcePolicy'))
 $script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
@@ -138,96 +139,81 @@ function Test-BundledEngine([string]$EnginePath) {
 }
 
 function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$TimeoutMs) {
-    $psi = New-Object -TypeName System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $EnginePath
-    $psi.Arguments = $Arguments
-    $psi.WorkingDirectory = Split-Path -Parent $EnginePath
-    # HxC's file APIs use narrow strings on Windows. Staged media have ASCII
-    # names; use those names relative to a Unicode-capable process working
-    # directory, so neither user filenames nor a Unicode TEMP path reach fopen.
+    Initialize-NativeTextCapture
+    Initialize-NativeSandbox
+    $engineDirectory=Split-Path -Parent $EnginePath
+    $inputPath=$null;$outputPath=$null;$outputName=$null
     $inputArgument=[regex]::Match($Arguments,'(?i)(?:^|\s)-finput:"([^"]+)"')
     if ($inputArgument.Success) {
         $inputPath=$inputArgument.Groups[1].Value
-        $workDirectory=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($inputPath))
-        $psi.WorkingDirectory=$workDirectory
-        $psi.Arguments=$psi.Arguments.Replace(('-finput:"'+$inputPath+'"'),('-finput:"'+[IO.Path]::GetFileName($inputPath)+'"'))
         $outputArgument=[regex]::Match($Arguments,'(?i)(?:^|\s)-foutput:"([^"]+)"')
         if ($outputArgument.Success) {
             $outputPath=$outputArgument.Groups[1].Value
+            $inputDirectory=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($inputPath))
             $outputDirectory=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($outputPath))
-            if (-not $outputDirectory.Equals($workDirectory,[StringComparison]::OrdinalIgnoreCase)) {
-                throw 'Native HxC input and output must share the isolated staging directory.'
+            if (-not $outputDirectory.Equals($inputDirectory,[StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Native HxC input and output must share the staging directory.'
             }
-            $psi.Arguments=$psi.Arguments.Replace(('-foutput:"'+$outputPath+'"'),('-foutput:"'+[IO.Path]::GetFileName($outputPath)+'"'))
-        }
-        # Preserve the bundled engine's configuration when changing its cwd.
-        $config=Join-Path (Split-Path -Parent $EnginePath) 'config.script'
-        if (Test-Path -LiteralPath $config -PathType Leaf) {
-            [IO.File]::Copy($config,(Join-Path $workDirectory 'config.script'),$true)
+            $outputName='output.dsk'
         }
     }
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-
-    # Limit DLL search fallbacks to the bundled/explicitly selected runtime
-    # and Windows itself; unrelated PATH applications are not runtime sources.
-    $nativePath=New-Object 'System.Collections.Generic.List[string]'
-    $nativePath.Add((Split-Path -Parent $EnginePath))
-    if ($script:EngineRuntimeDirs.ContainsKey($EnginePath)) {
-        $runtimeDir=[string]$script:EngineRuntimeDirs[$EnginePath]
-        if (-not [string]::IsNullOrWhiteSpace($runtimeDir)) {$nativePath.Add($runtimeDir)}
+    # Copy only the selected engine's known runtime files. The converter gets
+    # read access to these copies, never to the installed application or PATH.
+    $runtimeFiles=New-Object 'System.Collections.Generic.List[string]'
+    foreach ($name in @('libhxcfe.dll','libusbhxcfe.dll','CAPSImg.dll','config.script',
+                       'libgcc_s_dw2-1.dll','libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
+        $candidate=Join-Path $engineDirectory $name
+        if (-not [IO.File]::Exists($candidate) -and $script:EngineRuntimeDirs.ContainsKey($EnginePath)) {
+            $candidate=Join-Path ([string]$script:EngineRuntimeDirs[$EnginePath]) $name
+        }
+        if ([IO.File]::Exists($candidate)) {$runtimeFiles.Add($candidate)}
     }
-    $nativePath.Add([Environment]::SystemDirectory)
-    $nativePath.Add([Environment]::GetFolderPath([Environment+SpecialFolder]::Windows))
-    $psi.EnvironmentVariables['PATH']=$nativePath -join ';'
-
-    $process = New-Object -TypeName System.Diagnostics.Process
-    $process.StartInfo = $psi
-    $stdoutCapture=$null;$stderrCapture=$null
-    Initialize-NativeTextCapture
+    $process=$null;$stdoutCapture=$null;$stderrCapture=$null
     try {
-        [void]$process.Start()
+        # WOW64 cannot initialize this engine in LPAC. Select ordinary
+        # AppContainer for the bundled x86 engine before launch; it still has
+        # zero capabilities, read-only inputs, and no child-process permission.
+        $useLpac=([IO.Path]::GetFileName($engineDirectory) -ine 'x86')
+        $process=[OptiMiyoo.NativeSandboxJob]::Create($EnginePath,$runtimeFiles.ToArray(),$inputPath,$outputName,$useLpac)
+        $nativeArguments=$Arguments
+        if ($inputPath) {
+            $nativeArguments=$nativeArguments.Replace(('-finput:"'+$inputPath+'"'),('-finput:"'+$process.InputRelativePath+'"'))
+        }
+        if ($outputPath) {
+            $nativeArguments=$nativeArguments.Replace(('-foutput:"'+$outputPath+'"'),('-foutput:"'+$process.OutputName+'"'))
+        }
+        $process.Start($nativeArguments)
         $stdoutCapture=New-Object OptiMiyoo.NativeTextCapture($process.StandardOutput,1048576)
         $stderrCapture=New-Object OptiMiyoo.NativeTextCapture($process.StandardError,1048576)
         $timer=[Diagnostics.Stopwatch]::StartNew()
         do {
             $finished=$process.WaitForExit(125)
+            # HxC uses the bounded full diagnostic text below, not progress lines.
+            # Consume the queue so ordinary verbose output does not fill it.
+            while ($null -ne $stdoutCapture.NextLine()) {}
+            while ($null -ne $stderrCapture.NextLine()) {}
             $detail=Get-EngineLabel $EnginePath
             if ($script:CurrentZXItem) {$detail=$script:CurrentZXItem}
-            Show-Stage 0 'Running HxC / waiting for engine output' $detail
+            Show-Stage 0 'Running isolated HxC / waiting for engine output' $detail
         } while (-not $finished -and $timer.ElapsedMilliseconds -lt $TimeoutMs -and -not $stdoutCapture.LimitExceeded -and -not $stderrCapture.LimitExceeded)
-        if (-not $finished) {
-            try { $process.Kill() } catch {}
-            try { [void]$process.WaitForExit(5000) } catch {}
-        } else {
-            try { [void]$process.WaitForExit(5000) } catch {}
-        }
-
+        if (-not $finished) {$process.Kill();[void]$process.WaitForExit(5000)}
         $stdoutReady=$stdoutCapture.Wait(5000);$stderrReady=$stderrCapture.Wait(5000)
         if ($stdoutCapture.LimitExceeded -or $stderrCapture.LimitExceeded) {throw 'HxC diagnostic-output limit exceeded; original kept.'}
         if (-not $stdoutReady -or -not $stderrReady) {throw 'HxC diagnostic capture did not finish; original kept.'}
         if ($stdoutCapture.Failure -or $stderrCapture.Failure) {throw 'HxC diagnostic capture failed; original kept.'}
         $stdout=$stdoutCapture.Text();$stderr=$stderrCapture.Text()
-
         $exitCode = if ($finished) { $process.ExitCode } else { -999 }
+        if ($finished -and $exitCode -eq 0 -and $outputPath) {$process.Export($outputPath)}
         return [PSCustomObject]@{
             ExitCode = $exitCode
             Output = (($stdout + "`r`n" + $stderr).Trim())
             TimedOut = (-not $finished)
         }
     } finally {
-        # Dispose releases handles; explicitly stop a running engine on any
-        # exit path, including an interrupted run or a display/log exception.
-        try {
-            if (-not $process.HasExited) {
-                $process.Kill()
-                [void]$process.WaitForExit(5000)
-            }
-        } catch {}
-        if ($stdoutCapture) {$stdoutCapture.Dispose()};if ($stderrCapture) {$stderrCapture.Dispose()}
-        try { $process.Dispose() } catch {}
+        # Killing the Job closes every isolated process before scratch cleanup.
+        try {if ($process) {Close-NativeSandboxJob $process}} finally {
+            if ($stdoutCapture) {$stdoutCapture.Dispose()};if ($stderrCapture) {$stderrCapture.Dispose()}
+        }
     }
 }
 
@@ -851,43 +837,21 @@ function Get-ZipChecksums([string]$Path,[int]$EntryCount) {
     return ,([OptiMiyoo.ZipCrc32]::ReadChecksums($Path,$EntryCount))
 }
 
-function Expand-OneZipIPF([string]$ZipPath, [string]$EntryName) {
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_' + [Guid]::NewGuid().ToString('N'))
+function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
+    $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_'+[Guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($tempRoot)
-    $zip=$null; $inputStream=$null; $output=$null; $complete=$false
+    $zip=$null;$complete=$false
     try {
-        $zip=(Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy)
-        $checksums=Get-ZipChecksums $ZipPath $zip.Entries.Count
-        $entry=$null; $entryIndex=-1
-        for ($i=0; $i -lt $zip.Entries.Count; $i++) {
-            if ($zip.Entries[$i].FullName -ceq $EntryName) {
-                if ($entry) {throw ('Duplicate IPF entry inside ZIP: '+$EntryName)}
-                $entry=$zip.Entries[$i]; $entryIndex=$i
-            }
-        }
-        if (-not $entry) {throw ('IPF entry not found inside ZIP: '+$EntryName)}
+        $zip=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
+        $matches=@();for($i=0;$i -lt $zip.Entries.Count;$i++){if($zip.Entries[$i].FullName -ceq $EntryName){$matches+=,$i}}
+        if($matches.Count -ne 1){throw 'Missing or duplicate IPF entry in ZIP.'}
+        Show-Stage 0 'Preparing IPF from ZIP in sandbox' $EntryName 0
         $tempFile=Join-Path $tempRoot 'disk.ipf'
-        $inputStream=$entry.Open(); $output=[IO.File]::Create($tempFile)
-        $crc=New-Object OptiMiyoo.ZipCrc32
-        $buffer=New-Object byte[] 1048576; [long]$total=0
-        while (($n=$inputStream.Read($buffer,0,$buffer.Length)) -gt 0) {
-            if ($n -gt $entry.Length-$total) {throw 'ZIP entry expanded beyond its declared size; source kept.'}
-            $output.Write($buffer,0,$n); $crc.Update($buffer,$n); $total+=$n
-            Show-Stage 0 'Preparing IPF from ZIP' $EntryName (100*$total/[Math]::Max(1,$entry.Length))
-        }
-        if ($total -ne $entry.Length) {throw ('Incomplete ZIP entry: '+$EntryName)}
-        $crc.Verify($checksums[$entryIndex],$EntryName)
-        $output.Flush(); $output.Dispose(); $output=$null
-        $complete=$true
-        return [PSCustomObject]@{Path=$tempFile; TempRoot=$tempRoot}
+        $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $matches[0] -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 0 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
+        $complete=$true;return [pscustomobject]@{Path=$tempFile;TempRoot=$tempRoot}
     } finally {
-        # Release file handles before removing a failed staging directory on Windows.
-        if ($output) {$output.Dispose()}
-        if ($inputStream) {$inputStream.Dispose()}
-        if ($zip) {$zip.Dispose()}
-        if (-not $complete -and (Test-Path -LiteralPath $tempRoot)) {
-            Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())
-        }
+        if($zip){$zip.Dispose()}
+        if(-not $complete -and (Test-Path -LiteralPath $tempRoot)){Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())}
     }
 }
 
@@ -972,35 +936,25 @@ function Test-DSK([string]$Path) {
     finally {if ($stream) {$stream.Dispose()}}
 }
 
-function Test-ZipDskPackage([string]$ZipPath, [string]$ExpectedEntryName) {
-    $zip = $null
-    $stream = $null
+function Test-ZipDskPackage([string]$ZipPath,[string]$ExpectedEntryName) {
+    $zip=$null;$stream=$null;$tempRoot=$null
     try {
-        if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) { return $false }
-        $zip = (Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy)
-        $entries = @($zip.Entries | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Name) })
-        if ($entries.Count -ne 1) { return $false }
-        $entry = $entries[0]
-        if ($entry.Name -ne $ExpectedEntryName) { return $false }
-        if ([IO.Path]::GetExtension($entry.Name) -ine '.dsk') { return $false }
-        $stream=$entry.Open()
-        if (-not (Test-DskStream $stream $entry.Length)) {return $false}
-        $stream.Dispose(); $stream=$entry.Open()
-
-        $checksums=Get-ZipChecksums $ZipPath $zip.Entries.Count
-        $entryIndex=$zip.Entries.IndexOf($entry)
-        $crc=New-Object OptiMiyoo.ZipCrc32
-        # Validate all bytes, including corruption that still decompresses normally.
-        $scratch = New-Object -TypeName byte[] -ArgumentList 65536
-        [long]$total = 0
-        while (($n = $stream.Read($scratch, 0, $scratch.Length)) -gt 0) {if ($n -gt $entry.Length-$total) {return $false};$crc.Update($scratch,$n); $total += $n}
-        $crc.Verify($checksums[$entryIndex],$entry.FullName)
-        return ($total -eq $entry.Length)
-    } catch {
-        return $false
-    } finally {
-        if ($stream) { try { $stream.Dispose() } catch {} }
-        if ($zip) { try { $zip.Dispose() } catch {} }
+        if(-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)){return $false}
+        $zip=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
+        $entries=@($zip.Entries | Where-Object {-not [string]::IsNullOrWhiteSpace($_.Name)})
+        if($entries.Count -ne 1){return $false}
+        $entry=$entries[0]
+        if($entry.Name -ne $ExpectedEntryName -or [IO.Path]::GetExtension($entry.Name) -ine '.dsk'){return $false}
+        $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('ZX_CHECK_'+[Guid]::NewGuid().ToString('N'))
+        [void][IO.Directory]::CreateDirectory($tempRoot)
+        $tempFile=Join-Path $tempRoot 'disk.dsk'
+        $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $zip.Entries.IndexOf($entry) -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 0 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
+        $stream=[IO.File]::OpenRead($tempFile)
+        return (Test-DskStream $stream $entry.Length)
+    } catch {return $false}
+    finally {
+        if($stream){$stream.Dispose()};if($zip){$zip.Dispose()}
+        if($tempRoot -and (Test-Path -LiteralPath $tempRoot)){Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())}
     }
 }
 

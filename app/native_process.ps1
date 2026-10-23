@@ -1,4 +1,5 @@
-﻿# Bound diagnostics before they reach PowerShell or a log. Read fixed chunks,
+﻿. (Join-Path $PSScriptRoot 'native_sandbox.ps1')
+# Bound diagnostics before they reach PowerShell or a log. Read fixed chunks,
 # because line events and ReadToEndAsync can allocate without a size limit.
 function Initialize-NativeTextCapture {
     if ('OptiMiyoo.NativeTextCapture' -as [type]) {return}
@@ -66,36 +67,55 @@ namespace OptiMiyoo {
             try {worker.Wait(1000);} catch {}
         }
     }
-    public sealed class NativeNibCapture : IDisposable {
-        public readonly Process Child=new Process();
-        private NativeTextCapture output,error;
-        public bool LimitExceeded {get {return (output!=null && output.LimitExceeded) || (error!=null && error.LimitExceeded);}}
-        public bool CaptureFailed {get {return (output!=null && output.Failure!=null) || (error!=null && error.Failure!=null);}}
-        public NativeNibCapture(string exe,string input,string destination) {
-            string directory=Path.GetDirectoryName(Path.GetFullPath(input));
-            if (!String.Equals(directory,Path.GetDirectoryName(Path.GetFullPath(destination)),StringComparison.OrdinalIgnoreCase))
-                throw new IOException("Native NIB input and output must share the isolated staging directory.");
-            Child.StartInfo=new ProcessStartInfo {
-                FileName=exe,WorkingDirectory=directory,
-                Arguments="-v \""+Path.GetFileName(input)+"\" \""+Path.GetFileName(destination)+"\"",
-                UseShellExecute=false,CreateNoWindow=true,
-                RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true
-            };
-            try {
-                if (!Child.Start()) throw new IOException("Could not start nibconv.");
-                Child.StandardInput.Close();
-                output=new NativeTextCapture(Child.StandardOutput,1048576);
-                error=new NativeTextCapture(Child.StandardError,1048576);
-            } catch {Dispose();throw;}
-        }
-        public string NextLine() {return output.NextLine() ?? error.NextLine();}
-        public bool WaitOutput(int milliseconds) {return output.Wait(milliseconds) && error.Wait(milliseconds);}
-        public void Dispose() {
-            try {if (!Child.HasExited) {Child.Kill();Child.WaitForExit(5000);}} catch {}
-            if (output!=null) output.Dispose();if (error!=null) error.Dispose();
-            Child.Dispose();
-        }
-    }
 }
 '@
+}
+
+# The trusted host imports one output only after a successful isolated run.
+# Native code never receives permission to write SRC, DST or the app directory.
+function New-NativeNibCapture([string]$Executable,[string]$InputPath,[string]$OutputPath) {
+    Initialize-NativeSandbox
+    Initialize-NativeTextCapture
+    $inputDirectory=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($InputPath))
+    $outputDirectory=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($OutputPath))
+    if (-not $inputDirectory.Equals($outputDirectory,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Native NIB input and output must share the staging directory.'
+    }
+    $job=$null;$stdout=$null;$stderr=$null
+    try {
+        $job=[OptiMiyoo.NativeSandboxJob]::Create($Executable,[string[]]@(),$InputPath,'output.g64',$true)
+        $job.Start(('-v "'+$job.InputRelativePath+'" "'+$job.OutputName+'"'))
+        $stdout=New-Object OptiMiyoo.NativeTextCapture($job.StandardOutput,1048576)
+        $stderr=New-Object OptiMiyoo.NativeTextCapture($job.StandardError,1048576)
+        $capture=[pscustomobject]@{Child=$job;Output=$stdout;Error=$stderr;Destination=$OutputPath}
+        $capture | Add-Member ScriptProperty LimitExceeded {return ($this.Output.LimitExceeded -or $this.Error.LimitExceeded)}
+        $capture | Add-Member ScriptProperty CaptureFailed {return ($this.Output.Failure -or $this.Error.Failure)}
+        $capture | Add-Member ScriptMethod NextLine {
+            $line=$this.Output.NextLine()
+            if ($null -ne $line) {return $line}
+            return $this.Error.NextLine()
+        }
+        $capture | Add-Member ScriptMethod WaitOutput {
+            param([int]$Milliseconds)
+            $outReady=$this.Output.Wait($Milliseconds);$errReady=$this.Error.Wait($Milliseconds)
+            return ($outReady -and $errReady)
+        }
+        $capture | Add-Member ScriptMethod Export {$this.Child.Export($this.Destination)}
+        $capture | Add-Member ScriptMethod Dispose {
+            try {Close-NativeSandboxJob $this.Child} finally {$this.Output.Dispose();$this.Error.Dispose()}
+        }
+        return $capture
+    } catch {
+        if ($job) {Close-NativeSandboxJob $job}
+        if ($stdout) {$stdout.Dispose()};if ($stderr) {$stderr.Dispose()}
+        throw
+    }
+}
+
+function Close-NativeSandboxJob($Job) {
+    if (-not $Job) {return}
+    $Job.Dispose()
+    if ($Job.CleanupWarning) {
+        Write-Warning ('Temporary sandbox files were kept at '+$Job.RootPath+'. '+$Job.CleanupWarning)
+    }
 }

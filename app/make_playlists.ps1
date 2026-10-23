@@ -24,6 +24,7 @@ $NibConv=Join-Path $ScriptDir 'tools/nibconv.exe'
 . (Join-Path $ScriptDir 'source_policy.ps1')
 . (Join-Path $ScriptDir 'archive_limits.ps1')
 . (Join-Path $ScriptDir 'native_process.ps1')
+. (Join-Path $ScriptDir 'archive_sandbox.ps1')
 . (Join-Path $ScriptDir 'overwrite_prompt.ps1')
 . (Join-Path $ScriptDir 'media_validation.ps1')
 . (Join-Path $ScriptDir 'core_support.ps1')
@@ -58,7 +59,7 @@ function Assert-G64([string]$Path) {
 }
 
 function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Index, [int]$Count, [string]$DisplayName) {
-    $capture = New-Object OptiMiyoo.NativeNibCapture($NibConv, $InputPath, $OutputPath)
+    $capture = New-NativeNibCapture $NibConv $InputPath $OutputPath
     $phase = 'Starting'; [double]$fraction = 0; $trackDetail = 'waiting for nibconv output'
     $conversionProblem = $null
     $diskClock = [Diagnostics.Stopwatch]::StartNew()
@@ -90,6 +91,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
         if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
         if ($capture.Child.ExitCode -ne 0) { throw "nibconv exit code $($capture.Child.ExitCode)." }
         if ($conversionProblem) { throw $conversionProblem }
+        $capture.Export()
         if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output. See the log for its messages.' }
         Assert-G64 $OutputPath
         Show-Stage 0.8 'Converted disk' $DisplayName
@@ -479,7 +481,7 @@ function Copy-FileVerified([string]$Source,[string]$Destination,[string]$Name) {
         if ($inputStream) { $inputStream.Dispose() }
     }
 }
-function Get-ZipDisks([IO.Compression.ZipArchive]$Archive) {
+function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     $seen=New-Object 'System.Collections.Generic.Dictionary[string,bool]' ([StringComparer]::OrdinalIgnoreCase)
     $disks=New-Object 'System.Collections.Generic.List[string]'
     foreach ($entry in $Archive.Entries) {
@@ -506,8 +508,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive) {
     foreach ($name in @($disks | Where-Object {[IO.Path]::GetExtension($_) -eq '.cue'})) {
         $entry=$Archive.GetEntry($name); $cueStream=$null
         try {
-            $cueStream=$entry.Open()
-            $text=Read-OptiBoundedText $cueStream 1MB ('CUE '+$name) $entry.Length
+            $text=Read-SandboxedZipText $ZipPath $Archive $entry 1MB
             $lines=[regex]::Split($text,'\r\n|\r|\n')
             $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
             foreach ($track in @(Get-CueReferences @($lines) $name)) {
@@ -543,35 +544,14 @@ function Assert-ZipExtractionNames([IO.Compression.ZipArchive]$Archive) {
     }
 }
 function Read-ZipContents([IO.Compression.ZipArchive]$Archive,[string]$Destination,[string]$ZipPath) {
-    if ($Destination) {Assert-ZipExtractionNames $Archive}
-    $checksums=Get-ZipChecksums $ZipPath $Archive.Entries.Count
-    $manifest=@{}; $index=0
-    foreach ($entry in $Archive.Entries) {
-        $expectedCrc=$checksums[$index]; $index++
-        $name=$entry.FullName.TrimEnd('/')
-        if ($Destination) { $target=Join-Path $Destination $name.Replace('/',[IO.Path]::DirectorySeparatorChar) }
-        if ($entry.FullName.EndsWith('/')) {
-            if ($entry.Length -ne 0 -or $expectedCrc -ne 0) {throw ('Invalid ZIP directory data or CRC: '+$entry.FullName+'. Archive is damaged; source kept.')}
-            if ($Destination) { [void][IO.Directory]::CreateDirectory($target) }
-            continue
-        }
-        $inputStream=$null; $outputStream=$null
-        try {
-            $inputStream=$entry.Open()
-            if ($Destination) {
-                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
-                $outputStream=[IO.File]::Open($target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
-            } else { $outputStream=[IO.Stream]::Null }
-            $hash=Copy-Stream $inputStream $outputStream $entry.Length $name 0.05 0.55 $expectedCrc
-            $manifest[$name]=[pscustomobject]@{Length=$entry.Length; Hash=$hash}
-        } finally {
-            if ($outputStream -and $Destination) { $outputStream.Dispose() }
-            if ($inputStream) { $inputStream.Dispose() }
-        }
-        Show-Stage (0.05+0.55*$index/[Math]::Max(1,$Archive.Entries.Count)) 'Checking ZIP contents' $name
-    }
+    if($Destination) {Assert-ZipExtractionNames $Archive}
+    Show-Stage 0.05 'Checking ZIP contents in sandbox' ([IO.Path]::GetFileName($ZipPath))
+    $operation='Hash';if($Destination){$operation='Extract'}
+    $manifest=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $Archive -Profile Media -Operation $operation -Destination $Destination -Progress {param($index,$count,$done,$length) Show-Stage (0.05+0.55*($index+$done/[Math]::Max(1,$length))/[Math]::Max(1,$count)) 'Checking ZIP contents in sandbox' ('Entry {0}/{1}' -f ($index+1),$count) (100*$done/[Math]::Max(1,$length))}
+    Show-Stage 0.6 'Checking ZIP contents' 'Sandbox verification complete'
     return $manifest
 }
+
 function Assert-FolderManifest([string]$Directory,[hashtable]$Manifest) {
     $files=@(Get-ChildItem -LiteralPath $Directory -Recurse -File -Force)
     if ($files.Count -ne $Manifest.Count) { throw 'Output folder file count does not match source.' }
@@ -829,7 +809,7 @@ function Get-GameMediaNames($Job,[string]$Storage='Auto') {
     if ($Job.Zip) {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
-            $diskNames=@(Get-ZipDisks $archive)
+            $diskNames=@(Get-ZipDisks $archive $job.Zip)
             $hasNib=@($diskNames | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count -gt 0
             if (-not $Job.Profile.Zip -or $Storage -eq 'Folders' -or $hasNib) {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
@@ -1018,7 +998,7 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames) {
             try {
                 if (-not $target.Folder) {
                     $oldArchive=Open-ArchiveWithBudget -Path $target.Destination -Profile Media
-                    $null=Get-ZipDisks $oldArchive
+                    $null=Get-ZipDisks $oldArchive $target.Destination
                 }
                 foreach ($name in $owned[$target.Destination]) {
                     if ([IO.Path]::GetExtension($name) -eq '.cue') {
@@ -1028,11 +1008,11 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames) {
                         } else {
                             $cueEntry=$oldArchive.GetEntry($name)
                             if ($null -eq $cueEntry) {throw 'An existing playlist references a missing CUE; output left alone.'}
-                            $cueStream=$cueEntry.Open()
+                            $cueStream=$null
                             try {
-                                $text=Read-OptiBoundedText $cueStream 1MB ('CUE '+$name) $cueEntry.Length
+                                $text=Read-SandboxedZipText $target.Destination $oldArchive $cueEntry 1MB
                                 $tracks=@(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $name)
-                            } finally {$cueStream.Dispose()}
+                            } finally {if($cueStream){$cueStream.Dispose()}}
                         }
                         foreach ($track in $tracks) {
                             $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
@@ -1599,7 +1579,7 @@ try {
                 $sourceLock=[IO.File]::Open($job.Zip,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
                 Assert-ArchiveBudget -Stream $sourceLock -Profile Media
                 $archive=New-Object IO.Compression.ZipArchive($sourceLock,[IO.Compression.ZipArchiveMode]::Read,$true)
-                $diskNames=@(Get-ZipDisks $archive)
+                $diskNames=@(Get-ZipDisks $archive $job.Zip)
                 $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
             } else {
                 $diskNames=@($job.Disks | ForEach-Object {$_.Name})

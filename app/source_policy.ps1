@@ -124,7 +124,12 @@ namespace OptiMiyoo {
                 // Create a locked delete-on-close guard before relaxing sharing.
                 // Ancestors remain nonempty because their child directory is pinned.
                 string guard = Path.Combine(full, ".optimiyoo-" + Guid.NewGuid().ToString("N") + ".lease");
-                lease.directoryGuard = CreateFileW(guard, 0x80010000U, 1, IntPtr.Zero, 1, 0x04000102U, IntPtr.Zero);
+                // The directory may fit MAX_PATH while its internal guard does
+                // not. Parents were validated above; use an absolute Win32 path
+                // for this fixed, generated leaf without relaxing any lease.
+                string nativeGuard = guard.StartsWith(@"\\?\", StringComparison.Ordinal) ? guard :
+                    (guard.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + guard.Substring(2) : @"\\?\" + guard);
+                lease.directoryGuard = CreateFileW(nativeGuard, 0x80010000U, 1, IntPtr.Zero, 1, 0x04000102U, IntPtr.Zero);
                 if (lease.directoryGuard.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not protect transaction directory.");
                 foreach (string ancestor in chain) lease.parents.Add(OpenHandle(ancestor, true, false, 3));
                 return lease;

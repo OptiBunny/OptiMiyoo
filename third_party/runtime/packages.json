@@ -1,0 +1,32 @@
+[
+  {
+    "architecture": "x64",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libstdc%2B%2B-16.2.0-6-any.pkg.tar.zst",
+    "sha256": "924b47e8c3e20b6448e29d3333acc638a4f4783c1c45230e09673532f9c4f198"
+  },
+  {
+    "architecture": "x64",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libgcc-16.2.0-6-any.pkg.tar.zst",
+    "sha256": "e0815432c4225892b0eef57055fe507fa0b9a036436f046605f6629696bd1b88"
+  },
+  {
+    "architecture": "x64",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r495.g63ebe6cdb-2-any.pkg.tar.zst",
+    "sha256": "e657ade501916ef2f0ff8b5f5d93dc65d39f1a0ec66cfee8206026b240f60518"
+  },
+  {
+    "architecture": "x86",
+    "url": "https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libstdc%2B%2B-16.2.0-6-any.pkg.tar.zst",
+    "sha256": "f04dfa26fe948b9a2166cfb39d5128c6a1fc48a10aba36ebf83b7f784c7b9b21"
+  },
+  {
+    "architecture": "x86",
+    "url": "https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libgcc-16.2.0-6-any.pkg.tar.zst",
+    "sha256": "7b89855e761f98b16608160771976f12e4075b28224ff9405fcf09ed37ddec44"
+  },
+  {
+    "architecture": "x86",
+    "url": "https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libwinpthread-14.0.0.r495.g63ebe6cdb-1-any.pkg.tar.zst",
+    "sha256": "7f29ceb7b4f57ef27d0fbcc9b72534e90f9cf37c7801affdd1ec224e91285230"
+  }
+]

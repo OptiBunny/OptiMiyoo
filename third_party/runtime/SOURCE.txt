@@ -1,0 +1,38 @@
+MinGW runtime DLLs bundled locally for CAPSIMG
+
+Unmodified official MSYS2 packages, verified against the published SHA-256.
+Only the required libstdc++, libgcc and winpthread DLLs are included.
+The original licenses accompany them. No global PATH changes are made.
+
+GCC source/build package:
+https://mirror.msys2.org/mingw/sources/mingw-w64-gcc-16.2.0-6.src.tar.zst
+GCC source repository: https://gcc.gnu.org/git/gitweb.cgi?p=gcc.git
+MSYS2 build recipes: https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-gcc
+Winpthreads source/build packages:
+https://mirror.msys2.org/mingw/sources/mingw-w64-winpthreads-14.0.0.r495.g63ebe6cdb-2.src.tar.zst
+https://mirror.msys2.org/mingw/sources/mingw-w64-winpthreads-14.0.0.r495.g63ebe6cdb-1.src.tar.zst
+
+x64
+https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libstdc%2B%2B-16.2.0-6-any.pkg.tar.zst
+SHA-256 924b47e8c3e20b6448e29d3333acc638a4f4783c1c45230e09673532f9c4f198
+
+x64
+https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libgcc-16.2.0-6-any.pkg.tar.zst
+SHA-256 e0815432c4225892b0eef57055fe507fa0b9a036436f046605f6629696bd1b88
+
+x64
+https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r495.g63ebe6cdb-2-any.pkg.tar.zst
+SHA-256 e657ade501916ef2f0ff8b5f5d93dc65d39f1a0ec66cfee8206026b240f60518
+
+x86
+https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libstdc%2B%2B-16.2.0-6-any.pkg.tar.zst
+SHA-256 f04dfa26fe948b9a2166cfb39d5128c6a1fc48a10aba36ebf83b7f784c7b9b21
+
+x86
+https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libgcc-16.2.0-6-any.pkg.tar.zst
+SHA-256 7b89855e761f98b16608160771976f12e4075b28224ff9405fcf09ed37ddec44
+
+x86
+https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libwinpthread-14.0.0.r495.g63ebe6cdb-1-any.pkg.tar.zst
+SHA-256 7f29ceb7b4f57ef27d0fbcc9b72534e90f9cf37c7801affdd1ec224e91285230
+

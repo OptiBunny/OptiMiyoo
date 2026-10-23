@@ -1,0 +1,14 @@
+CAPSIMG / Software Preservation Society library
+Original source project: https://github.com/FrodeSolheim/capsimg
+RetroArch package information: https://github.com/rsn8887/capsimg
+
+Windows DLLs match the Capsimg_for_Retroarch.zip asset from release 1.2:
+https://github.com/rsn8887/capsimg/releases/tag/1.2
+Both supplied version files report 5.1fs3.
+x64 SHA-256: 8b6d28253abf807d93789fd228240e76c376ad418bb9c392fe23b8cc22b08cb7
+x86 SHA-256: 579db482ee32ecc61a24b110bd97f4b0591395651d19510f86fff80d7fd33e14
+
+CAPSIMG-source.zip is a reference source snapshot from FrodeSolheim/capsimg,
+commit ed4cb0912fb1a2a0d5203111c6f6abd50d411b56. It has not been established
+as the exact build source of the supplied 5.1fs3 binaries. No rebuild claim
+is made. Original license and notices are retained in LICENSE.txt/source.

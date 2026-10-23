@@ -1,0 +1,13 @@
+# Local game collections and generated outputs.
+/SRC/*
+!/SRC/.gitkeep
+/DST/*
+!/DST/.gitkeep
+*.log
+OptiMiyoo_*.csv
+__pycache__/
+*.pyc
+/dist/
+
+# Local runtime selection can contain a personal absolute path.
+/app/ZX/runtime-path.txt

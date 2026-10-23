@@ -1,0 +1,2 @@
+# Preserve imported Windows files' BOMs and line endings on every platform.
+* -text

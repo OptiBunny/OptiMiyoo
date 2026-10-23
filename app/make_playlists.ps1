@@ -15,8 +15,13 @@ param(
     [switch]$ZXConvert,
     [switch]$C64Convert,
     [ValidateSet('Keep','Remove','Folders')][string]$C64Mode='Keep',
-    [ValidateSet('Ask','LooseDSK','ZipDSK')][string]$ZXFormat='Ask'
+    [ValidateSet('Ask','LooseDSK','ZipDSK')][string]$ZXFormat='Ask',
+    [ValidateSet('Main','C64','ZX')][string]$StartPage='Main'
 )
+. (Join-Path $PSScriptRoot 'application_entry.ps1')
+if (-not (Test-ApplicationWorker)) {
+    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent $PSScriptRoot) -Entry Playlist -Arguments $PSBoundParameters)
+}
 $script:AppVersion='1.0.0'
 $ErrorActionPreference='Stop'
 $ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -148,6 +153,7 @@ function Get-NaturalDiskKey([string]$Name) {
 }
 
 function Assert-PlainOutputParents([string]$Path, [string]$Root) {
+    if (Get-Command Get-ApplicationValidationRoot -ErrorAction SilentlyContinue) {$Root=Get-ApplicationValidationRoot $Path $Root}
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
     $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
     while ($parent -and $parent.Length -ge $rootFull.Length) {
@@ -1097,7 +1103,7 @@ function Get-FolderManifest([string]$Directory) {
 function Convert-NibSet([string[]]$Names,[string]$Directory) {
     $nibs=@($Names | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'})
     if ($nibs.Count -eq 0) {return $Names}
-    if (-not (Test-Path -LiteralPath $NibConv -PathType Leaf)) {throw 'nibconv.exe is missing. Extract the complete release ZIP.'}
+    if (-not (Test-ApplicationWorker) -and -not (Test-Path -LiteralPath $NibConv -PathType Leaf)) {throw 'nibconv.exe is missing. Extract the complete release ZIP.'}
     $targets=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in $nibs) {
         $target=[IO.Path]::ChangeExtension($name,'.g64')
@@ -1198,6 +1204,7 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
 }
 
 function Invoke-MenuWorker([string]$Path,[hashtable]$Arguments) {
+    if (Test-ApplicationWorker) {return (Invoke-ApplicationMenuWorker $Path $Arguments)}
     # Restore before handing over so the child captures the real console state.
     Restore-Display
     $code=1
@@ -1228,7 +1235,7 @@ function Read-RunNavigation([string]$Page,[int]$Code) {
 }
 
 function Invoke-OptiMenu([object[]]$Profiles) {
-    $page='Main'; $profile=$null; $lastCode=0
+    $page=$StartPage; $profile=$null; $lastCode=0
     $menuOnionRoot=$OnionRoot
     $common=@{Root=$Root; Existing=$Existing; NoAnimation=$NoAnimation; NoColor=$NoColor; DisplayEffect=$DisplayEffect}
     while ($true) {
@@ -1301,7 +1308,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  3. Folder output / KEEP originals in SRC'
             Write-MenuLine '  4. Folder output / REMOVE originals after verified success'
             Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $answer=Read-MenuChoice 'Choose mode [Enter = 1]'
+            if (Test-ApplicationWorker) {$answer=[string](Invoke-ApplicationRpc -Operation Policy.C64 -Payload @{}).Answer}
+            else {$answer=Read-MenuChoice 'Choose mode [Enter = 1]'}
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer='1'}
@@ -1362,6 +1370,11 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $workerArgs.Storage=$storageChoice; $workerArgs.NoPause=$true
             $workerArgs.OnionRoot=$menuOnionRoot
         } elseif ($page -eq 'SD') {
+            if (Test-ApplicationWorker) {
+                $selected=Invoke-ApplicationRpc -Operation SD.Select -Payload @{}
+                if ($selected.Cancelled) {$page='Main';continue}
+                return 0
+            }
             $pageName='Onion SD setup'
             Show-MenuTitle $pageName
             Write-MenuLine '  Enter the SD card root (for example E:\).'
@@ -1380,12 +1393,18 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if (Test-Path -LiteralPath (Join-Path $workerArgs.OnionRoot 'RetroArch/.retroarch/cores') -PathType Container) {$menuOnionRoot=$workerArgs.OnionRoot}
         }
         if ($page -in 'Storage','ZX') {
-            $policyChoice=Read-SourcePolicy $pageName
+            if (Test-ApplicationWorker) {
+                $operation='Playlist';$chosenFormat='LooseDSK';$chosenStorage='Auto'
+                if ($page -eq 'ZX') {$operation='ZX';$chosenFormat=$workerArgs.Format}
+                else {$chosenStorage=$workerArgs.Storage}
+                $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage $chosenFormat
+            } else {$policyChoice=Read-SourcePolicy $pageName}
             if ($policyChoice -eq 'Back') {continue}
             if ($policyChoice -eq 'Exit') {return $lastCode}
             $workerArgs.SourcePolicy=$policyChoice
         }
         $lastCode=Invoke-MenuWorker $worker $workerArgs
+        if (Test-ApplicationWorker) {return $lastCode}
         $next=Read-RunNavigation $pageName $lastCode
         if ($next -eq 'Exit') {return $lastCode}
         if ($next -eq 'Main') {$page='Main'}
@@ -1454,7 +1473,8 @@ try {
     Write-Event 'OUTPUT' (Join-Path $Root 'DST')
     Write-Host '  Existing outputs: Y / N / A / S. Skipping keeps the original.'
     Write-Host '  Single media stays visible in DST. Playlists require 2+ images.'
-    Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant()+' originals. Skipped/failed inputs stay in SRC.')
+    if (Test-ApplicationWorker) {Write-Host '  Working on staged copies. Originals are handled after verification.'}
+    else {Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant()+' originals. Skipped/failed inputs stay in SRC.')}
     Write-Host '  Auto storage keeps Amiga/VICE ZIPs; other systems use loose images.'
     Write-Host '  Support follows Onion defaults or the selected core on the supplied SD card.' -ForegroundColor Yellow
     Show-ConversionStart $System
@@ -1552,6 +1572,7 @@ try {
     }
     Complete-PreparationProgress
     foreach ($job in $jobs) {
+        Set-ApplicationCurrentJob $job.Source
         $profile=$job.Profile; $script:DiskExtensions=@($profile.Extensions)
         $script:UiGame=$job.Stem; $script:UiSystem=$job.System; $script:UiLastStage=''
         Write-Event 'GAME' ('{0}/{1} | {2}/{3}' -f ($script:Processed+1),$script:Total,$job.System,$job.Source)
@@ -1702,6 +1723,7 @@ try {
             Show-Stage 0.95 'Installing verified game output' $job.Source
             $commit=Install-PlaylistSet $items $null $false $overwrite $retired
             Complete-SourcePolicyJob $sourcePlan $job.SourceId $sourceHashes $items
+            Complete-ApplicationCurrentJob
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}
             $script:Ok++; $script:UiMood='happy'; $script:UiPercent=100
             if ($isMulti) {
@@ -1768,12 +1790,14 @@ try {
     Write-RetroStripe
     Write-Event 'DONE' ('{0} written | {1} skipped/unsupported | {2} failed' -f $script:Ok,$script:Skipped,$script:Failed)
     if ($script:Failed -eq 0 -and $sourceSummary.Failed -eq 0 -and -not $script:ReportProblem -and $script:Ok -gt 0) {Write-Host ('  '+(Color-Text 'MIO > Processing complete. All queued sets were handled.' '249;172;204'))}
-    Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
-    Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
+    if (-not (Test-ApplicationWorker)) {
+        Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
+        Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
+    }
     Write-Host ('  Elapsed: '+(Format-Duration $script:Clock.Elapsed.TotalSeconds))
     if ($jobs.Count -eq 0) {Write-Host '  No matching input images/ZIPs found in the selected SRC folders.' -ForegroundColor Yellow}
-    if ($reportSaved) {Write-Host ('  Report: '+$reportPath)}
-    Write-Host ('  Log: '+$logPath)
+    if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-Host ('  Report: '+$reportPath)}
+    if (-not (Test-ApplicationWorker)) {Write-Host ('  Log: '+$logPath)} else {Write-Host '  Waiting for independent verification and publication.'}
     Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'
     if ($script:Failed -gt 0 -or $script:ReportProblem -or $sourceSummary.Failed -gt 0) {$exitCode=1}

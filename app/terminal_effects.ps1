@@ -135,6 +135,7 @@ function Read-OptiTerminalFragment([string]$Path) {
 }
 
 function Set-OptiTerminalCrtMode([ValidateSet('CRT','Smooth','Paused')][string]$Mode) {
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return [bool](Invoke-ApplicationRpc -Operation Display.Mode -Payload @{Mode=$Mode}).Enabled}
     $profileId='{062ba315-bc8f-42eb-a971-d0eb828209dd}'
     if ($env:WT_PROFILE_ID -ne $profileId -or $env:OPTIMIYOO_CRT_HOST -cne '1' -or -not $env:LOCALAPPDATA) {return $false}
     try {

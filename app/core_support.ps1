@@ -142,11 +142,14 @@ function Assert-PlainOnionPath([string]$Path,[string]$Root) {
     # Inspect every existing ancestor, including those above the selected root.
     # Native leases pin these checked paths while reading or editing them.
     $current=$full
+    $workBoundary=$null
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {$workBoundary=Get-ApplicationValidationRoot $Path ([IO.Path]::GetPathRoot($Path))}
     while ($current) {
         if (Test-Path -LiteralPath $current) {
             $item=Get-Item -LiteralPath $current -Force -ErrorAction Stop
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'SD path contains a link; left unchanged.'}
         }
+        if ($workBoundary -and $current.Equals($workBoundary,[StringComparison]::OrdinalIgnoreCase)) {break}
         $current=[IO.Path]::GetDirectoryName($current)
     }
 }

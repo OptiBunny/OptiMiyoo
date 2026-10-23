@@ -8,6 +8,10 @@ param([string]$Root,[ValidateSet('Ask','LooseDSK','ZipDSK')][string]$Format='Ask
 # ZX IPF / ZIP -> DSK Converter v2.3 - console edition
 # Windows PowerShell 5.1 compatible. No GUI. Keep originals is the default.
 
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'application_entry.ps1')
+if (-not (Test-ApplicationWorker)) {
+    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry ZX -Arguments $PSBoundParameters)
+}
 $ErrorActionPreference = 'Stop'
 
 $script:Version = '2.3'
@@ -55,6 +59,7 @@ function Format-Duration([double]$Seconds) {
 
 
 function Assert-PlainOutputParents([string]$Path, [string]$Root) {
+    if (Get-Command Get-ApplicationValidationRoot -ErrorAction SilentlyContinue) {$Root=Get-ApplicationValidationRoot $Path $Root}
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
     $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
     while ($parent -and $parent.Length -ge $rootFull.Length) {
@@ -130,6 +135,7 @@ function Get-EngineLabel([string]$Path) {
 }
 
 function Test-BundledEngine([string]$EnginePath) {
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return $true}
     if (-not (Test-Path -LiteralPath $EnginePath -PathType Leaf)) { return $false }
     $dir = Split-Path -Parent $EnginePath
     foreach ($name in @('libhxcfe.dll','config.script','CAPSImg.dll')) {
@@ -139,6 +145,7 @@ function Test-BundledEngine([string]$EnginePath) {
 }
 
 function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$TimeoutMs) {
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationEngineText $EnginePath $Arguments $TimeoutMs)}
     Initialize-NativeTextCapture
     Initialize-NativeSandbox
     $engineDirectory=Split-Path -Parent $EnginePath
@@ -389,6 +396,7 @@ function Test-CapsIPFEngine([string]$EnginePath, [string]$InputPath) {
 }
 
 function Prompt-CapsRuntimeDirectory {
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {Write-Status 'WARN' 'Restore the complete bundled converter files, then retry.';return $null}
     $answer=Read-DisplayInput 'MinGW runtime folder' 'ZX Spectrum / runtime setup' @(
         'The 32-bit CAPSImg fallback needs libstdc++-6.dll,',
         'libgcc_s_dw2-1.dll and libwinpthread-1.dll.',
@@ -1177,11 +1185,13 @@ function Show-Summary {
     Write-Host ('  Skipped   : {0}' -f $script:Skipped) -ForegroundColor Yellow
     Write-Host ('  Failed    : {0}' -f $script:Failed) -ForegroundColor Magenta
     Write-Host ('  Total     : {0}' -f $script:Total) -ForegroundColor White
-    Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
-    Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
+    if (-not (Test-ApplicationWorker)) {
+        Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
+        Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
+    }
     Write-LogFile ('Originals: {0} removed; {1} kept; {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
     Write-Host '  +-----------------------------------------------------+' -ForegroundColor Cyan
-    Write-Host ('  Log: ' + $script:LogPath) -ForegroundColor DarkGray
+    if (-not (Test-ApplicationWorker)) {Write-Host ('  Log: ' + $script:LogPath) -ForegroundColor DarkGray} else {Write-Host '  Waiting for independent verification and publication.'}
     Write-Host ''
     Write-LogFile ''
     Write-LogFile ('Converted: ' + $script:Converted)
@@ -1206,7 +1216,8 @@ function Main {
     $script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
     $script:Clock.Restart()
     Start-Log
-    Write-Status 'INFO' ('Source policy: '+$SourcePolicy.ToUpperInvariant()+'. Skipped/failed inputs stay in SRC.')
+    if (Test-ApplicationWorker) {Write-Status 'INFO' 'Working on staged copies. Originals are handled after verification.'}
+    else {Write-Status 'INFO' ('Source policy: '+$SourcePolicy.ToUpperInvariant()+'. Skipped/failed inputs stay in SRC.')}
     if ($script:OutputMode -eq 'ZipDSK') {
         Write-Status 'INFO' 'Output mode: one ZIP per converted DSK.'
     } else {
@@ -1314,6 +1325,7 @@ function Main {
 
     $index = 0
     foreach ($item in $items) {
+        Set-ApplicationCurrentJob $item.DisplayName
         $index++
         $tempRoot=$null; $workOutPath=$null; $workZipPath=$null; $sourceLease=$null
         $script:PreservedZXWorkPath=$null
@@ -1402,6 +1414,7 @@ function Main {
                     $outputHash=Commit-DskSafely $workOutPath $outPath
                 }
                 Complete-SourcePolicyJob $script:SourcePlan $item.SourceId $sourceHashes @([pscustomobject]@{Destination=$outPath;Folder=$false;Hash=$outputHash})
+                Complete-ApplicationCurrentJob
                 $script:Converted++
                 $note = ''
                 if ($result.PSObject.Properties['UsedFallback'] -and $result.UsedFallback) { $note = ' (fallback engine succeeded)' }

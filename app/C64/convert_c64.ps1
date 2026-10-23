@@ -11,6 +11,10 @@ param(
     [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT'
 )
 
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'application_entry.ps1')
+if (-not (Test-ApplicationWorker)) {
+    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry C64 -Arguments $PSBoundParameters)
+}
 $script:ConverterVersion = '2.1'
 $script:AppVersion = '1.0.0'
 
@@ -728,6 +732,7 @@ function New-GamePlaylist([string]$Directory, [string]$MediaPath, [string]$Desti
 }
 
 function Assert-PlainOutputParents([string]$Path, [string]$Root) {
+    if (Get-Command Get-ApplicationValidationRoot -ErrorAction SilentlyContinue) {$Root=Get-ApplicationValidationRoot $Path $Root}
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
     $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
     while ($parent -and $parent.Length -ge $rootFull.Length) {
@@ -869,9 +874,12 @@ try {
     }
     if (-not $SourcePolicy) {$SourcePolicy='Keep'; if ($Mode -eq 'Remove') {$SourcePolicy='Remove'}}
     $removeOriginals=($SourcePolicy -eq 'Remove')
-    Write-C64Text ('  Source policy: '+$SourcePolicy.ToUpperInvariant()) -ForegroundColor Cyan
-    if ($removeOriginals) {Write-C64Text '  Originals are removed only after ALL their outputs are verified in DST.' -ForegroundColor Magenta}
-    else {Write-C64Text '  Originals stay in SRC.' -ForegroundColor Cyan}
+    if (Test-ApplicationWorker) {Write-C64Text '  Working on staged copies. Originals are handled after verification.' -ForegroundColor Cyan}
+    else {
+        Write-C64Text ('  Source policy: '+$SourcePolicy.ToUpperInvariant()) -ForegroundColor Cyan
+        if ($removeOriginals) {Write-C64Text '  Originals are removed only after ALL their outputs are verified in DST.' -ForegroundColor Magenta}
+        else {Write-C64Text '  Originals stay in SRC.' -ForegroundColor Cyan}
+    }
     Write-C64Text '  Multi-disk: Game.m3u + .hidden/Game.zip (or a folder in options 3/4).' -ForegroundColor Cyan
     Write-C64Text '  Already-converted G64 ZIPs are supported; nibconv is needed only for NIB/NBZ.'
     Write-C64Text '  Existing outputs: Yes / No / Yes to all / No to all (all modes).'
@@ -927,6 +935,7 @@ try {
         foreach ($job in $jobs) {
             $zip = $job.Zip
             $relativeZip = $zip.FullName.Substring($sourcePrefix.Length)
+            Set-ApplicationCurrentJob $relativeZip
             $plan=$job.Plan
             $relativeOutput=$plan.RelativeData
             $isMulti=$plan.Multi
@@ -973,7 +982,7 @@ try {
                         continue
                     }
                 }
-                if ($job.NibImages -gt 0 -and -not (Test-Path -LiteralPath $NibConv -PathType Leaf)) {
+                if ($job.NibImages -gt 0 -and -not (Test-ApplicationWorker) -and -not (Test-Path -LiteralPath $NibConv -PathType Leaf)) {
                     throw 'This ZIP contains NIB/NBZ images. Restore app/tools/nibconv.exe, then retry. Original kept.'
                 }
                 $zip.Refresh(); $sourceLength = $zip.Length; $sourceTime = $zip.LastWriteTimeUtc
@@ -1065,6 +1074,7 @@ try {
                     $installItems=@($fileItem)
                     $playlistCommit=Install-PlaylistSet $installItems $null $false $overwrite $plan.Retired
                 }
+                Complete-ApplicationCurrentJob
                 $didOverwrite = $playlistCommit -and $playlistCommit.Replaced
                 if ($didOverwrite) { $script:Overwritten++ }
                 $result.Result = 'Written'
@@ -1127,8 +1137,10 @@ try {
         Write-C64Text ('  Multi-disk M3U playlists written: {0:N0}' -f $script:Playlists) -ForegroundColor Cyan
         Write-C64Text ('  Failed: {0:N0}' -f $script:Failed) -ForegroundColor Magenta
         Write-C64Text ('  Disk images saved: {0:N0}/{1:N0}   Elapsed: {2}' -f $script:SavedImages, $script:TotalImages, (Format-Duration $script:Clock.Elapsed.TotalSeconds)) -ForegroundColor Gray
-        Write-C64Text ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
-        Write-C64Text ('  Originals removed from SRC: {0:N0}   Kept in SRC: {1:N0}   Removal failures: {2:N0}' -f $script:Removed, ($script:Total - $script:Removed), $script:RemoveFailed) -ForegroundColor White
+        if (-not (Test-ApplicationWorker)) {
+            Write-C64Text ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
+            Write-C64Text ('  Originals removed from SRC: {0:N0}   Kept in SRC: {1:N0}   Removal failures: {2:N0}' -f $script:Removed, ($script:Total - $script:Removed), $script:RemoveFailed) -ForegroundColor White
+        }
         $attention = @($results | Where-Object { $_.Result -in 'Skipped', 'Failed' -or ($removeOriginals -and $_.Original -eq 'Kept in SRC') })
         if ($attention.Count -gt 0) {
             Write-C64Text "`n  SKIPPED / FAILED / ORIGINALS KEPT:" -ForegroundColor Yellow
@@ -1140,10 +1152,10 @@ try {
             }
             if ($attention.Count -gt 25) { Write-C64Text ('  ...and {0:N0} more; see the CSV report.' -f ($attention.Count - 25)) }
         }
-        if ($reportSaved) {Write-C64Text "`n  Results for EVERY source ZIP: $reportPath" -ForegroundColor Cyan}
+        if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-C64Text "`n  Results for EVERY source ZIP: $reportPath" -ForegroundColor Cyan}
         if ($script:ReportProblem) {Write-C64Text '  Reporting failed. Conversion results above may be incomplete in the log or CSV.' -ForegroundColor Yellow}
         Write-C64Text "  Output: $destinationRoot"
-        Write-C64Text "  Log: $logPath"
+        if (-not (Test-ApplicationWorker)) {Write-C64Text "  Log: $logPath"} else {Write-C64Text '  Waiting for independent verification and publication.'}
         if ($script:Failed -gt 0) { $exitCode = 1; Write-C64Text '  Failed conversions keep their original ZIPs. See the report for details.' -ForegroundColor Magenta }
         if ($script:RemoveFailed -gt 0 -or $script:ReportProblem) { $exitCode = 1 }
     } else {

@@ -1,5 +1,9 @@
 ﻿#requires -Version 5.1
 param([string]$OnionRoot,[switch]$NoPause)
+. (Join-Path $PSScriptRoot 'application_entry.ps1')
+if (-not (Test-ApplicationWorker)) {
+    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent $PSScriptRoot) -Entry SD -Arguments $PSBoundParameters)
+}
 $ErrorActionPreference='Stop'
 $exitCode=0
 $ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -193,7 +197,7 @@ try {
         }
     }
     Write-OnionText ("$changed system setup(s) updated; $unsupported unsupported/unverified. Selected cores preserved.")
-    if ($changed -gt 0) {Write-OnionText ('Original config.json files: '+$backupRoot); Write-OnionText 'Refresh the Onion game list.'}
+    if ($changed -gt 0 -and -not (Test-ApplicationWorker)) {Write-OnionText ('Original config.json files: '+$backupRoot); Write-OnionText 'Refresh the Onion game list.'}
 } catch {$exitCode=1; Write-OnionText ('ERROR: '+$_.Exception.Message)} finally {if ($rootLease) {$rootLease.Dispose()}}
 if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
 exit $exitCode

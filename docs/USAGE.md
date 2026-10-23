@@ -1,7 +1,12 @@
 # Using OptiMiyoo
 
+This guide follows the current source code. The published **1.0.0** download is
+unchanged and does not include the application-wide isolation described below.
+
 Extract the complete ZIP to a writable folder and run `OptiMiyoo.bat`.
-Requires Windows 10/11 x64 and PowerShell 5.1+. Converter tools are included;
+Requires Windows 10 version 1809 or newer / Windows 11 x64, Windows PowerShell
+5.1 and the built-in .NET Framework. PowerShell 7 can also launch the app;
+the isolated interface uses Windows PowerShell 5.1. Converter tools are included;
 ROMs, BIOS files, and Onion cores are not.
 
 [Menus](#menu-guide) · [Game files](#prepare-a-batch) · [Systems](#systems-and-rom-folders)
@@ -114,26 +119,30 @@ metadata is refused and originals are kept.
 
 ### Processing isolation
 
-Native converters run in a Windows AppContainer with no network capabilities or
-permission to start other processes. They receive private copies of their runtime
-and input, with write access to a temporary output folder. ZIP payloads are read
-by a separate AppContainer worker through a read-only archive handle. This applies
-to ZIP processing in menus **1–10**, **C**, and **Z**, including NIB conversion
-invoked by **2** and **7**.
+Menus **1–10**, **C**, **Z** and **S** keep the normal app window while the interface
+and processing scripts run in a [Windows AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation). Network capabilities and
+child-process creation are disabled. The app works on private input snapshots;
+its code is read-only. Native converters and ZIP payload readers run in separate
+AppContainers with bounded resources and private output folders.
 
-The trusted application still handles menus, bounded archive metadata and CUE
-text, playlist planning, output verification and installation, and authorized
-removal of originals. OptiMiyoo grants the workers no write access to `SRC`, `DST`,
-or the installed application. If Windows cannot establish isolation, processing stops
-and keeps the originals; it does not retry with ordinary user permissions.
+A trusted host prepares snapshots, presents file-policy and overwrite prompts,
+and verifies and installs outputs after the application worker stops. It alone
+performs approved original-file removal, SD configuration updates and Terminal
+CRT settings changes. No original-folder permissions are widened. If isolation
+cannot start, the operation stops and originals stay in place.
 
-The 64-bit converters use the stricter low-privilege AppContainer mode. The
-managed ZIP worker and 32-bit HxC fallback use ordinary AppContainer mode for
-runtime compatibility, which also permits access to resources explicitly shared
-with all application packages.
-These restrictions are an additional boundary, not a virtual machine or a
-guarantee that a malicious file is harmless. Temporary storage must support
-Windows file permissions and have space for the staged output.
+The app, managed ZIP reader and 32-bit HxC fallback use ordinary AppContainer for
+runtime compatibility. This still permits baseline Windows reads and access to
+resources explicitly shared with all application packages. The 64-bit converters
+use the stricter low-privilege mode. This is process isolation, not a virtual
+machine or device sandbox; it does not guarantee that malicious files are harmless
+or that every attached filesystem has equivalent protection.
+
+`TEMP` must be on a local NTFS volume. Allow space for the selected input copies,
+existing outputs needed for conflict handling, and new output files. Large batches
+take extra time to copy, and startup prepares the trusted helper assemblies.
+The combined `SRC` and `DST` snapshot is limited to 100,000 files and directories;
+split larger collections before starting the app.
 
 Processing is local. Logs and CSV reports can include game names and full local
 paths; review them before sharing and leave diagnostic files off the SD card.

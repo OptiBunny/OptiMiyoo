@@ -74,6 +74,7 @@ namespace OptiMiyoo {
 # The trusted host imports one output only after a successful isolated run.
 # Native code never receives permission to write SRC, DST or the app directory.
 function New-NativeNibCapture([string]$Executable,[string]$InputPath,[string]$OutputPath) {
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (New-ApplicationNativeCapture Nib Convert $InputPath $OutputPath)}
     Initialize-NativeSandbox
     Initialize-NativeTextCapture
     $inputDirectory=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($InputPath))

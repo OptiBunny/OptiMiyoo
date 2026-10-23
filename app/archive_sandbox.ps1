@@ -121,6 +121,7 @@ function Invoke-ArchiveSandbox {
           [ValidateSet('Media','Floppy')][string]$Profile='Media',
           [ValidateSet('Hash','Extract','Read','File')][string]$Operation='Hash',
           [int]$EntryIndex=-1,[string]$Destination,[long]$MaximumBytes=16777216,[scriptblock]$Progress=$null)
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationArchive @PSBoundParameters)}
     Initialize-NativeSandbox;Initialize-NativeTextCapture
     $exeBytes=Get-ArchiveSandboxExecutableBytes
     $toolRoot=Join-Path ([IO.Path]::GetTempPath()) ('oas_'+[Guid]::NewGuid().ToString('N').Substring(0,16))

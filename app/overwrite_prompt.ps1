@@ -15,6 +15,7 @@ function Get-OverwritePathRows([string[]]$Paths) {
 
 function Read-OverwriteChoice([string]$Title,[string[]]$Paths,[string[]]$Warnings,
                               [string[]]$Choices,[string]$Prompt) {
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Read-ApplicationOverwriteChoice)}
     # 44 cells is the menu text width at the supported 76-column minimum.
     # Keep twelve body rows so every page also fits a 19-row terminal.
     $fixed=@(Get-MenuRows (@($Warnings)+@($Choices)) 44)

@@ -10,7 +10,7 @@ including C64 NIB/NBZ → G64 and ZX Spectrum IPF → DSK conversion.
 
 ## Quick start
 
-**Windows 10/11 x64 · PowerShell 5.1+ · Converter tools included**
+**Windows 10 (1809+) / 11 x64 · Windows PowerShell 5.1 · Converter tools included**
 
 1. Download the Windows ZIP from the release assets and extract it to a writable folder.
 2. Put one system's games in `SRC`, then run **`OptiMiyoo.bat`**.
@@ -20,6 +20,11 @@ including C64 NIB/NBZ → G64 and ZX Spectrum IPF → DSK conversion.
 
 Originals are kept by default. **D** runs a demo without changing game files.
 ROMs, BIOS files, and Onion cores are not included.
+
+The current source code adds Windows process isolation around the normal app
+window, with a trusted host for approved file changes. This is **not yet included
+in the published 1.0.0 download**. See [processing isolation](docs/USAGE.md#processing-isolation)
+for its requirements and temporary disk-space needs.
 
 **1.0.0 — Initial public release**
 

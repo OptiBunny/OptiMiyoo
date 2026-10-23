@@ -135,16 +135,19 @@ function Invoke-ApplicationPolicyPrompt {
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Auto','Folders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
-          [string[]]$ConflictPaths=@(),[switch]$Folder)
+          [string[]]$ConflictPaths=@(),[switch]$Folder,
+          [switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     # Validate before taking terminal ownership. Callers must resolve conflict
     # capabilities through the host broker; never pass child-supplied filenames.
     $parameters=@{Kind=$Kind;Operation=$Operation;System=$System;Storage=$Storage;Format=$Format;ConflictPaths=$ConflictPaths;Folder=$Folder}
     $model=Get-ApplicationPromptModel @parameters
-    $paused=$false;$display=$false;$result=$null
+    $paused=$false;$display=$false;$result=$null;$previousEffect=$script:DisplayEffect
     try {
         [void]$Session.PauseRelay()
         if(-not $Session.IsRelayPaused){throw 'The application relay did not surrender the parent console.'}
         $paused=$true
+        $script:DisplayEffect=$DisplayEffect
         Initialize-Display;$display=$true
         $invalid=$false;$page=0
         while($true) {
@@ -178,6 +181,7 @@ function Invoke-ApplicationPolicyPrompt {
     } finally {
         try {if($display){Restore-Display}}
         finally {
+            $script:DisplayEffect=$previousEffect
             if($paused) {
                 if($Session.HasExited){throw 'The isolated application exited before the policy choice could be delivered.'}
                 [void]$Session.ResumeRelay()

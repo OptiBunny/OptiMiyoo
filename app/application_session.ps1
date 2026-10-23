@@ -145,11 +145,15 @@ namespace OptiMiyoo {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetNumberOfConsoleInputEvents(IntPtr handle,out uint count);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ReadConsoleInput(IntPtr handle,[Out] InputRecord[] records,uint length,out uint read);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool WriteConsole(IntPtr handle,string text,uint length,out uint written,IntPtr reserved);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool CancelIoEx(SafeFileHandle handle,IntPtr overlapped);
   public const int MaximumFrameBytes=1048576;
   private static readonly UTF8Encoding Utf8=new UTF8Encoding(false,true);
   private readonly object consoleGate=new object(),rpcGate=new object(),inputGate=new object();
   private readonly Queue<ApplicationRequest> requests=new Queue<ApplicationRequest>();
   private readonly AutoResetEvent requestReady=new AutoResetEvent(false);
+  private readonly AutoResetEvent inputReady=new AutoResetEvent(false);
+  private readonly Queue<string> inputQueue=new Queue<string>();
+  private int queuedInputCharacters;
   private readonly TerminalSequenceFilter filter=new TerminalSequenceFilter();
   private readonly List<SafeFileHandle> pins=new List<SafeFileHandle>();
   private IDisposable parentLease;
@@ -158,7 +162,7 @@ namespace OptiMiyoo {
   private FileStream terminalOutput,terminalInput,requestInput,responseOutput;
   private SafeFileHandle terminalReadHandle;
   private StreamWriter keyWriter;
-  private Thread outputThread,inputThread,rpcThread;
+  private Thread outputThread,inputThread,inputWriterThread,rpcThread;
   private HashSet<string> operations;
   private volatile bool stopping,paused;
   private bool started,disposed,consoleSaved;
@@ -247,7 +251,7 @@ namespace OptiMiyoo {
     IntPtr childRequest,childResponse;Check(DuplicateHandle(GetCurrentProcess(),reqWrite,process,out childRequest,0,false,2),"Transfer request handle");Check(DuplicateHandle(GetCurrentProcess(),resRead,process,out childResponse,0,false,2),"Transfer response handle");string handlesFile=Path.Combine(controlPath,"rpc-handles.txt");File.WriteAllLines(handlesFile,new string[]{childRequest.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture),childResponse.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)},Encoding.ASCII);Pin(handlesFile,false);
     terminalReadHandle=new SafeFileHandle(termRead,true);terminalOutput=new FileStream(terminalReadHandle,FileAccess.Read,1,false);termRead=IntPtr.Zero;terminalInput=new FileStream(new SafeFileHandle(keyWrite,true),FileAccess.Write);keyWrite=IntPtr.Zero;keyWriter=new StreamWriter(terminalInput,new UTF8Encoding(false),1024);keyWriter.AutoFlush=true;
     requestInput=new FileStream(new SafeFileHandle(reqRead,true),FileAccess.Read,1,false);reqRead=IntPtr.Zero;responseOutput=new FileStream(new SafeFileHandle(resWrite,true),FileAccess.Write);resWrite=IntPtr.Zero;
-    if(Interactive)SaveConsole();outputThread=ThreadFor(OutputLoop);rpcThread=ThreadFor(RequestLoop);if(Interactive)inputThread=ThreadFor(InputLoop);Check(ResumeThread(pi.thread)!=0xffffffff,"Resume isolated application");
+    if(Interactive)SaveConsole();outputThread=ThreadFor(OutputLoop);rpcThread=ThreadFor(RequestLoop);inputWriterThread=ThreadFor(InputWriterLoop);if(Interactive)inputThread=ThreadFor(InputLoop);Check(ResumeThread(pi.thread)!=0xffffffff,"Resume isolated application");
    }catch{Dispose();throw;}
    finally{Close(ref pi.thread);Close(ref termRead);Close(ref termWrite);Close(ref keyRead);Close(ref keyWrite);Close(ref reqRead);Close(ref reqWrite);Close(ref resRead);Close(ref resWrite);if(attributes!=IntPtr.Zero){DeleteProcThreadAttributeList(attributes);Marshal.FreeHGlobal(attributes);}foreach(IntPtr p in new IntPtr[]{cap,child,list,environment})if(p!=IntPtr.Zero)Marshal.FreeHGlobal(p);}
   }
@@ -261,7 +265,11 @@ namespace OptiMiyoo {
     while(true){uint available;if(!PeekNamedPipe(terminalReadHandle,IntPtr.Zero,0,IntPtr.Zero,out available,IntPtr.Zero))break;if(available==0){lock(consoleGate){lastDrained=Stopwatch.GetTimestamp();}Thread.Sleep(5);continue;}count=terminalOutput.Read(bytes,0,(int)Math.Min((uint)bytes.Length,available));if(count==0)break;Interlocked.Exchange(ref outputInFlight,1);int length=decoder.GetChars(bytes,0,count,chars,0);received+=count;if(rate.ElapsedMilliseconds>=1000){received=0;rate.Restart();}if(received>16777216)throw new IOException("Application terminal output limit exceeded.");lock(consoleGate){lastOutput=Stopwatch.GetTimestamp();if(!paused&&!stopping){string safe=filter.Feed(new string(chars,0,length));if(safe.Length!=0)WriteTerminal(safe);}else filter.Reset();Interlocked.Exchange(ref outputInFlight,0);}}
    }catch(Exception){if(!stopping&&!HasExited)Fail("Application terminal channel failed.");try{byte[] drain=new byte[8192];while(terminalOutput.Read(drain,0,drain.Length)>0){}}catch{}}finally{Interlocked.Exchange(ref outputInFlight,0);}
   }
-  private void SendKeys(string text){if(text==null||text.Length==0)return;lock(inputGate){if(!stopping){keyWriter.Write(text);keyWriter.Flush();}}}
+  // Never write the ConPTY pipe while holding the trusted prompt/display gate.
+  // A stalled consumer gets bounded buffering, then termination, not a frozen UI.
+  private void SendKeys(string text){if(text==null||text.Length==0)return;bool overflow=false;lock(inputGate){if(stopping||paused)return;if(text.Length>8192-queuedInputCharacters)overflow=true;else{inputQueue.Enqueue(text);queuedInputCharacters+=text.Length;}}if(overflow){Fail("Application stopped consuming keyboard input.");return;}inputReady.Set();}
+  private void ClearQueuedInput(){lock(inputGate){inputQueue.Clear();queuedInputCharacters=0;}}
+  private void InputWriterLoop(){try{while(!stopping&&!HasExited){string text=null;lock(inputGate){if(!paused&&inputQueue.Count>0){text=inputQueue.Dequeue();queuedInputCharacters-=text.Length;}}if(text==null){inputReady.WaitOne(50);continue;}keyWriter.Write(text);keyWriter.Flush();}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard channel failed.");}}
   private static string KeyText(ConsoleKeyInfo key){
    bool control=(key.Modifiers&ConsoleModifiers.Control)!=0,alt=(key.Modifiers&ConsoleModifiers.Alt)!=0;string value=null;
    switch(key.Key){case ConsoleKey.Enter:value="\r";break;case ConsoleKey.Backspace:value="\x7f";break;case ConsoleKey.Escape:value="\x1b";break;case ConsoleKey.UpArrow:value="\x1b[A";break;case ConsoleKey.DownArrow:value="\x1b[B";break;case ConsoleKey.RightArrow:value="\x1b[C";break;case ConsoleKey.LeftArrow:value="\x1b[D";break;case ConsoleKey.Home:value="\x1b[H";break;case ConsoleKey.End:value="\x1b[F";break;case ConsoleKey.Delete:value="\x1b[3~";break;case ConsoleKey.Insert:value="\x1b[2~";break;case ConsoleKey.PageUp:value="\x1b[5~";break;case ConsoleKey.PageDown:value="\x1b[6~";break;default:if(key.KeyChar!=0)value=key.KeyChar.ToString();break;}
@@ -270,7 +278,7 @@ namespace OptiMiyoo {
   }
   private void WriteTerminal(string text){if(!Interactive){Console.Write(text);return;}uint written;Check(WriteConsole(GetStdHandle(-11),text,(uint)text.Length,out written,IntPtr.Zero)&&written==text.Length,"Write host terminal");}
   private void InputLoop(){try{InputRecord[] records=new InputRecord[1];while(!stopping&&!HasExited){lock(consoleGate){if(!paused){uint available;Check(GetNumberOfConsoleInputEvents(GetStdHandle(-10),out available),"Inspect host input");if(available>0){uint count;Check(ReadConsoleInput(GetStdHandle(-10),records,1,out count),"Read host input");InputRecord record=records[0];if(count==1&&record.EventType==1&&record.KeyDown!=0){ConsoleKeyInfo key=new ConsoleKeyInfo(record.Character,(ConsoleKey)record.VirtualKey,(record.Control&0x10)!=0,(record.Control&3)!=0,(record.Control&12)!=0);if(key.Key==ConsoleKey.C&&(key.Modifiers&ConsoleModifiers.Control)!=0){Stop();break;}string text=KeyText(key);for(int repeat=0;repeat<Math.Max(1,Math.Min(32,(int)record.Repeat));repeat++)SendKeys(text);}}short w=(short)Math.Max(20,Math.Min(300,Console.WindowWidth)),h=(short)Math.Max(6,Math.Min(120,Console.WindowHeight));if(w!=columns||h!=rows){int hr=ResizePseudoConsole(pseudo,new COORD{X=w,Y=h});if(hr<0)Marshal.ThrowExceptionForHR(hr);columns=w;rows=h;}}}Thread.Sleep(8);}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard/resize channel failed.");}}
-  public void PauseRelay(){if(!Interactive||!started||disposed||stopping)throw new InvalidOperationException("An interactive application relay is required for a trusted prompt.");lock(consoleGate){paused=true;pauseStarted=Stopwatch.GetTimestamp();filter.Reset();WriteTerminal("\x1b[0m\x1b[r\x1b[?25h\x1b[2J\x1b[H");Console.Title="OptiMiyoo";Check(FlushConsoleInputBuffer(GetStdHandle(-10)),"Flush pre-prompt input");}}
+  public void PauseRelay(){if(!Interactive||!started||disposed||stopping)throw new InvalidOperationException("An interactive application relay is required for a trusted prompt.");lock(consoleGate){paused=true;ClearQueuedInput();pauseStarted=Stopwatch.GetTimestamp();filter.Reset();WriteTerminal("\x1b[0m\x1b[r\x1b[?25h\x1b[2J\x1b[H");Console.Title="OptiMiyoo";Check(FlushConsoleInputBuffer(GetStdHandle(-10)),"Flush pre-prompt input");}}
   public void ResumeRelay(){
    if(!paused||disposed||stopping)throw new InvalidOperationException("The application relay cannot resume.");Stopwatch watch=Stopwatch.StartNew();
    while(watch.ElapsedMilliseconds<2000){lock(consoleGate){double quiet=(Stopwatch.GetTimestamp()-lastOutput)*1000.0/Stopwatch.Frequency;if(lastDrained>=pauseStarted&&Interlocked.CompareExchange(ref outputInFlight,0,0)==0&&quiet>=50){Check(FlushConsoleInputBuffer(GetStdHandle(-10)),"Flush prompt input");filter.Reset();WriteTerminal("\x1b[0m\x1b[r\x1b[2J\x1b[H");Console.Title="OptiMiyoo";paused=false;return;}}Thread.Sleep(10);}
@@ -298,10 +306,11 @@ namespace OptiMiyoo {
    BoundCleanup();for(int retry=0;;retry++){try{Policy("DeleteOwned",RootPath,Path.GetDirectoryName(RootPath));break;}catch(Win32Exception e){if(retry>=7||(e.NativeErrorCode!=5&&e.NativeErrorCode!=32&&e.NativeErrorCode!=33&&e.NativeErrorCode!=145))throw;Thread.Sleep(Math.Min(100*(1<<retry),1000));if(!Directory.Exists(RootPath))break;}}
   }
   public void Dispose(){
-   if(disposed)return;disposed=true;stopping=true;paused=true;requestReady.Set();if(job!=IntPtr.Zero)TerminateJobObject(job,137);if(process!=IntPtr.Zero){if(!HasExited)TerminateProcess(process,137);WaitForExit(5000);}
+   if(disposed)return;disposed=true;stopping=true;paused=true;requestReady.Set();inputReady.Set();ClearQueuedInput();if(job!=IntPtr.Zero)TerminateJobObject(job,137);if(process!=IntPtr.Zero){if(!HasExited)TerminateProcess(process,137);WaitForExit(5000);}
+   if(terminalInput!=null){try{CancelIoEx(terminalInput.SafeFileHandle,IntPtr.Zero);}catch{}}
    if(terminalInput!=null){try{terminalInput.Dispose();}catch{}}if(requestInput!=null){try{requestInput.Dispose();}catch{}}if(responseOutput!=null){try{responseOutput.Dispose();}catch{}}
    if(pseudo!=IntPtr.Zero){ClosePseudoConsole(pseudo);pseudo=IntPtr.Zero;}if(terminalOutput!=null){try{terminalOutput.Dispose();}catch{}}
-   foreach(Thread thread in new Thread[]{inputThread,outputThread,rpcThread})if(thread!=null&&thread!=Thread.CurrentThread)thread.Join(1000);
+   foreach(Thread thread in new Thread[]{inputThread,inputWriterThread,outputThread,rpcThread})if(thread!=null&&thread!=Thread.CurrentThread)thread.Join(1000);
    Close(ref process);Close(ref job);if(sid!=IntPtr.Zero){FreeSid(sid);sid=IntPtr.Zero;}if(profile!=null){int hr=DeleteAppContainerProfile(profile);if(hr<0)CleanupWarning="Application profile cleanup failed ("+hr.ToString("X8")+").";profile=null;}
    try{Cleanup();}catch(Exception e){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+e.Message+" Retained application scratch: "+RootPath;}finally{foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
    if(consoleSaved){lock(consoleGate){try{WriteTerminal("\x1b[0m\x1b[r\x1b[?25h");Console.CursorVisible=previousCursor;Console.TreatControlCAsInput=previousControlC;Console.Title=previousTitle;SetConsoleMode(GetStdHandle(-10),previousInputMode);SetConsoleMode(GetStdHandle(-11),previousOutputMode);}catch{}consoleSaved=false;}}

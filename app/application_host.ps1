@@ -44,14 +44,14 @@ function Invoke-ApplicationHostRequest {
         'Policy.Source' {
             if ($State.Broker.ActiveBatch -or $State.Completed) {throw 'A batch is already active.'}
             $selection=Get-ApplicationSelection $payload
-            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind SourcePolicy @selection
+            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind SourcePolicy @selection -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             $State.Grant=$null
             if ($choice.SourcePolicy) {$selection.SourcePolicy=$choice.SourcePolicy;$State.Grant=$selection}
             return @{Choice=$choice.Choice}
         }
         'Policy.C64' {
             if ($State.Broker.ActiveBatch -or $State.Completed) {throw 'A batch is already active.'}
-            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind C64Mode -Operation C64 -System COMMODORE
+            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind C64Mode -Operation C64 -System COMMODORE -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             $State.Grant=$null
             if ($choice.SourcePolicy) {$State.Grant=@{Operation='C64';System='COMMODORE';Storage=$choice.Storage;Format='LooseDSK';SourcePolicy=$choice.SourcePolicy}}
             return @{Choice=$choice.Choice;Answer=$choice.Answer}
@@ -65,17 +65,19 @@ function Invoke-ApplicationHostRequest {
             return @{BatchId=$State.BatchView.BatchId;WorkRoot=$State.BatchView.WorkRoot;Operation=$State.BatchView.Operation;JobCount=$State.BatchView.Jobs.Count}
         }
         'Batch.Jobs' {
-            if (-not $State.BatchView -or [string]$payload.BatchId -cne $State.BatchView.BatchId -or $payload.Offset -isnot [int]) {throw 'Invalid batch page.'}
-            $offset=[int]$payload.Offset;$total=$State.BatchView.Jobs.Count
+            if (-not $State.BatchView -or [string]$payload.BatchId -cne $State.BatchView.BatchId -or ($payload.Offset -isnot [int] -and $payload.Offset -isnot [long])) {throw 'Invalid batch page.'}
+            $offset=[long]$payload.Offset;$total=$State.BatchView.Jobs.Count
             if ($offset -lt 0 -or $offset -gt $total) {throw 'Invalid batch page offset.'}
-            $rows=@();$next=$offset
+            $rows=New-Object 'System.Collections.Generic.List[object]';$next=$offset;$bytes=2
             while ($next -lt $total -and $rows.Count -lt 200) {
-                $candidate=@($rows)+@($State.BatchView.Jobs[$next])
-                if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $candidate -Depth 6 -Compress)) -gt 524288) {break}
-                $rows=$candidate;$next++
+                $row=$State.BatchView.Jobs[$next]
+                $length=[Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $row -Depth 6 -Compress))
+                if ($rows.Count) {$length++}
+                if ($bytes+$length -gt 524288) {break}
+                $rows.Add($row);$bytes+=$length;$next++
             }
             if ($next -eq $offset -and $next -lt $total) {throw 'Batch row exceeds its response limit.'}
-            return @{Jobs=$rows;NextOffset=$next;More=($next -lt $total)}
+            return @{Jobs=$rows.ToArray();NextOffset=$next;More=($next -lt $total)}
         }
         'Policy.Overwrite' {
             $batch=$State.Broker.ActiveBatch
@@ -83,7 +85,7 @@ function Invoke-ApplicationHostRequest {
             $conflict=Get-ApplicationBrokerConflict $State.Broker $batch.BatchId ([string]$payload.ConflictId)
             $choice=$conflict.Decision
             if ($choice -eq 'Pending') {
-                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -Format $batch.Format -ConflictPaths $conflict.Paths -Folder:$conflict.Folder
+                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -Format $batch.Format -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
                 $choice=$prompt.Choice
                 Set-ApplicationBrokerOverwrite $State.Broker $batch.BatchId $conflict.ConflictId $choice
             }
@@ -102,7 +104,7 @@ function Invoke-ApplicationHostRequest {
         }
         'SD.Select' {
             if ($State.Broker.ActiveBatch) {throw 'Finish the active batch first.'}
-            $root=Invoke-ApplicationSdFolderPrompt -Session $State.Session
+            $root=Invoke-ApplicationSdFolderPrompt -Session $State.Session -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             if (-not $root) {return @{Cancelled=$true}}
             $State.NextOnionRoot=$root;$State.StopRequested=$true
             return @{Accepted=$true}
@@ -110,6 +112,11 @@ function Invoke-ApplicationHostRequest {
         'Display.Mode' {
             $mode=[string]$payload.Mode
             if ($mode -notin 'CRT','Smooth','Paused') {throw 'Unknown display mode.'}
+            if ($payload.PSObject.Properties['Preference']) {
+                $preference=[string]$payload.Preference
+                if ($preference -notin 'CRT','Smooth') {throw 'Unknown display preference.'}
+                $State.DisplayEffect=$preference
+            }
             return @{Enabled=[bool](Set-OptiTerminalCrtMode $mode)}
         }
         {$_ -in 'Native.Start','Native.Read','Native.Stop'} {
@@ -213,14 +220,16 @@ function Invoke-ApplicationHost {
     if ($Arguments.Root) {$originalRoot=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath([string]$Arguments.Root)}
     $originalArguments=$Arguments.Clone()
     $menu=($Entry -eq 'Playlist' -and -not $Arguments.System -and -not $Arguments.C64Convert -and -not $Arguments.ZXConvert -and -not $Arguments.PrepareOnion -and -not $Arguments.Preview)
-    if ($Arguments.C64Convert) {$Entry='C64';$Arguments.Mode=$Arguments.C64Mode}
-    elseif ($Arguments.ZXConvert) {$Entry='ZX';$Arguments.Format=$Arguments.ZXFormat}
+    if ($Arguments.C64Convert) {$Entry='C64';$Arguments.Mode='Keep';if ($Arguments.C64Mode) {$Arguments.Mode=$Arguments.C64Mode}}
+    elseif ($Arguments.ZXConvert) {$Entry='ZX';$Arguments.Format='Ask';if ($Arguments.ZXFormat) {$Arguments.Format=$Arguments.ZXFormat}}
     elseif ($Arguments.PrepareOnion) {$Entry='SD'}
     Initialize-ApplicationSession
     $startPage='Main'
+    if ($Arguments.StartPage) {$startPage=[string]$Arguments.StartPage}
     if (($Entry -eq 'C64' -and -not $Arguments.Mode) -or ($Entry -eq 'ZX' -and (-not $Arguments.Format -or $Arguments.Format -eq 'Ask'))) {
         $startPage=$Entry;$Entry='Playlist';$menu=$true
     }
+    $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
     $again=$true;$exitCode=1;$selectedOnionRoot=$originalArguments.OnionRoot
     while ($again) {
         $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
@@ -228,17 +237,16 @@ function Invoke-ApplicationHost {
             Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan
             $session=[OptiMiyoo.ApplicationSession]::Create()
             $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
-            if ($selectedOnionRoot) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath}
+            if ($selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath}
             $receipts=[pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=(New-Object Collections.ArrayList)}
-            if ($Entry -ne 'SD') {
+            if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
                 $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath -OnionRoot $selectedOnionRoot
                 $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
             }
             $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
-            $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null}
-            $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect='CRT'}
+            $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
+            $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
             foreach ($key in 'NoAnimation','NoColor','NoPause','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
-            if ($Arguments.DisplayEffect) {$worker.DisplayEffect=[string]$Arguments.DisplayEffect}
             if ($menu) {$worker.StartPage=$startPage}
             if ($sd) {$worker.OnionRoot=$sd.StagedRoot}
             $batch=$null
@@ -258,6 +266,7 @@ function Invoke-ApplicationHost {
             }
             Write-ApplicationBootstrap $session $Entry $worker $batch
             $operations=[string[]]@('Policy.Source','Policy.C64','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Mode','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
+            if ($Arguments.Preview) {$operations=[string[]]@('Display.Mode')}
             $session.Start('boot.ps1',[string[]]$staged.Assemblies,$operations)
             $exitCode=Invoke-ApplicationHostLoop $state
             if ($native) {Close-ApplicationJobBroker $native}
@@ -281,6 +290,7 @@ function Invoke-ApplicationHost {
             if ($sd) {Close-ApplicationSdSession -Session $sd}
             if ($session) {$session.Dispose();if ($session.CleanupWarning) {Write-Warning $session.CleanupWarning}}
         }
+        if ($state) {$displayEffect=$state.DisplayEffect}
         if ($state -and $state.Result) {
             Write-Host ('Published: {0}; failed: {1}; originals removed: {2}.' -f $state.Result.Written,$state.Result.Failed,$state.Result.Removed)
             foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.SourceKey+': '+$result.Result+' / '+$result.Detail))}
@@ -300,6 +310,7 @@ function Invoke-ApplicationHost {
                 Write-Host 'Press Enter for the main menu, or Q to exit.'
                 do {$key=[Console]::ReadKey($true)} while ($key.Key -ne [ConsoleKey]::Enter -and $key.Key -ne [ConsoleKey]::Q)
                 $again=($key.Key -eq [ConsoleKey]::Enter)
+                if ($again) {$startPage='Main'}
             }
         }
         if ($sdResult) {

@@ -137,6 +137,9 @@ namespace OptiMiyoo {
   [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   private NativeSandboxProcess child;
+  private readonly object lifetimeGate=new object();
+  private System.Threading.Timer wallTimer;
+  private volatile bool wallTimeLimitExceeded;
   private bool disposed,started;
   private bool lpac;
   private List<IntPtr> inherited=new List<IntPtr>();
@@ -150,6 +153,8 @@ namespace OptiMiyoo {
   public string CleanupWarning {get;private set;}
   public int MemoryLimitMiB {get;set;}
   public int CpuTimeLimitSeconds {get;set;}
+  public int WallTimeLimitSeconds {get;set;}
+  public bool WallTimeLimitExceeded {get{return wallTimeLimitExceeded;}}
   public bool IsAppContainer {get {return child!=null && child.IsAppContainer;}}
   public bool RequestedLpac {get {return lpac;}}
   public uint Id {get {return child==null?0:child.Id;}}
@@ -194,7 +199,7 @@ namespace OptiMiyoo {
    guards.Add(new FileStream(Path.Combine(path,".optimiyoo-guard"),FileMode.CreateNew,FileAccess.ReadWrite,FileShare.Read,1,FileOptions.DeleteOnClose));
   }
   public static NativeSandboxJob Create(string exe,string[] runtimeFiles,string inputFile,string outputName,bool useLpac) {
-   NativeSandboxJob result=new NativeSandboxJob();result.MemoryLimitMiB=1024;result.CpuTimeLimitSeconds=300;result.lpac=useLpac;result.OutputName=String.IsNullOrEmpty(outputName)?null:outputName;
+   NativeSandboxJob result=new NativeSandboxJob();result.MemoryLimitMiB=1024;result.CpuTimeLimitSeconds=300;result.WallTimeLimitSeconds=300;result.lpac=useLpac;result.OutputName=String.IsNullOrEmpty(outputName)?null:outputName;
    if(!String.IsNullOrEmpty(outputName))PlainLeaf(outputName);
    try {
     string temp=Path.GetFullPath(Path.GetTempPath());NoLinkedParents(temp);
@@ -224,12 +229,15 @@ namespace OptiMiyoo {
    if(started||disposed)throw new InvalidOperationException("Sandbox sessions can start only once.");
    if(MemoryLimitMiB<64||MemoryLimitMiB>4096)throw new ArgumentOutOfRangeException("MemoryLimitMiB");
    if(CpuTimeLimitSeconds<1||CpuTimeLimitSeconds>1800)throw new ArgumentOutOfRangeException("CpuTimeLimitSeconds");
+   if(WallTimeLimitSeconds<1||WallTimeLimitSeconds>1800)throw new ArgumentOutOfRangeException("WallTimeLimitSeconds");
    started=true;
-   try {child=NativeSandboxProcess.Start(ExecutablePath,arguments??"",WorkPath,new string[]{Path.Combine(RootPath,"bin"),Path.Combine(RootPath,"input")},new string[]{WorkPath},lpac,false,MemoryLimitMiB,CpuTimeLimitSeconds,inherited.ToArray());}
+   // Polling is untrusted application behavior; an independent timer enforces
+   // elapsed time even when the caller abandons a sleeping native operation.
+   try {child=NativeSandboxProcess.Start(ExecutablePath,arguments??"",WorkPath,new string[]{Path.Combine(RootPath,"bin"),Path.Combine(RootPath,"input")},new string[]{WorkPath},lpac,false,MemoryLimitMiB,CpuTimeLimitSeconds,inherited.ToArray());wallTimer=new System.Threading.Timer(delegate(object ignored){lock(lifetimeGate){if(disposed||child==null||child.HasExited)return;wallTimeLimitExceeded=true;try{child.Kill();}catch{}}},null,checked(WallTimeLimitSeconds*1000),System.Threading.Timeout.Infinite);}
    finally {foreach(IntPtr handle in inherited)CloseHandle(handle);inherited.Clear();}
   }
   public bool WaitForExit(int milliseconds){if(child==null)throw new InvalidOperationException("Sandbox has not started.");return child.WaitForExit(milliseconds);}
-  public void Kill(){if(child!=null)child.Kill();}
+  public void Kill(){lock(lifetimeGate){if(child!=null)child.Kill();}}
   public void Export(string destination) {
    if(!HasExited||ExitCode!=0||OutputName==null)throw new InvalidOperationException("Only a successful sandbox output can be exported.");
    CopyOrdinary(Path.Combine(WorkPath,OutputName),destination,536870912L);
@@ -256,8 +264,8 @@ namespace OptiMiyoo {
 
   }
   public void Dispose() {
-   if(disposed)return;disposed=true;
-   if(child!=null){child.Dispose();if(child.CleanupWarning!=null)CleanupWarning=child.CleanupWarning;child=null;}
+   lock(lifetimeGate){if(disposed)return;disposed=true;if(wallTimer!=null){wallTimer.Dispose();wallTimer=null;}
+   if(child!=null){child.Dispose();if(child.CleanupWarning!=null)CleanupWarning=child.CleanupWarning;child=null;}}
    foreach(IntPtr handle in inherited)CloseHandle(handle);inherited.Clear();
    try{Cleanup();}catch(Exception error){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+error.Message+" Retained scratch: "+RootPath;}
    finally{foreach(FileStream guard in guards)guard.Dispose();guards.Clear();foreach(SafeFileHandle directory in directories)directory.Dispose();directories.Clear();}

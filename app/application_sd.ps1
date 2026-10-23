@@ -219,10 +219,12 @@ function Read-ApplicationSdConsolePath {
 }
 
 function Invoke-ApplicationSdFolderPrompt {
-    param([Parameter(Mandatory=$true)]$Session)
-    $paused=$false;$display=$false;$selected=$null
+    param([Parameter(Mandatory=$true)]$Session,[switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+    $paused=$false;$display=$false;$selected=$null;$previousEffect=$script:DisplayEffect
     try {
         [void]$Session.PauseRelay();if(-not $Session.IsRelayPaused){throw 'The application relay did not surrender the parent console.'};$paused=$true
+        $script:DisplayEffect=$DisplayEffect
         Initialize-Display;$display=$true;$selected=Read-ApplicationSdConsolePath
         if($null -ne $selected) {
             if([string]::IsNullOrWhiteSpace($selected) -or -not [IO.Path]::IsPathRooted($selected) -or $selected.StartsWith('\\?\') -or $selected.StartsWith('\\.\')){throw 'Choose an absolute SD card folder.'}
@@ -230,7 +232,7 @@ function Invoke-ApplicationSdFolderPrompt {
         }
     }finally {
         try{if($display){Restore-Display}}
-        finally{if($paused){if($Session.HasExited){throw 'The isolated application exited during SD selection.'};[void]$Session.ResumeRelay()}}
+        finally{$script:DisplayEffect=$previousEffect;if($paused){if($Session.HasExited){throw 'The isolated application exited during SD selection.'};[void]$Session.ResumeRelay()}}
     }
     return $selected
 }

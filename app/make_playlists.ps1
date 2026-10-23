@@ -168,7 +168,7 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
     }
 }
 
-function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$LegacyFolder, [bool]$Overwrite, [object[]]$Retired=@()) {
+function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$LegacyFolder, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null) {
     # A playlist and its disk data are one replacement. Roll back both if either
     # install fails; never leave a new playlist pointing at missing/old data.
     $backups = New-Object 'System.Collections.Generic.List[object]'
@@ -208,7 +208,9 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
                 if (Test-Path -LiteralPath $item.Destination) {
                     $backup = Join-Path ([IO.Path]::GetDirectoryName($item.Destination)) ('.m3u_' + [Guid]::NewGuid().ToString('N') + '.backup')
                     Move-OutputPath $item.Destination $backup ([bool]$item.Folder)
-                    $backups.Add([pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder })
+                    $captured=[pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder; Guard=$null }
+                    $backups.Add($captured)
+                    if($ValidateBackup){$captured.Guard=& $ValidateBackup $captured.Path $captured.Backup $captured.Folder;if($null -eq $captured.Guard){throw 'Previous output verification did not return a guard.'}}
                     Write-Log ('BACKUP: {0} -> {1}' -f $item.Destination, $backup)
                 }
             }
@@ -227,6 +229,7 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
             $message = $_.Exception.Message
             foreach ($lock in $locks) { $lock.Dispose() }
             $locks.Clear()
+            foreach($backup in $backups){if($backup.Guard){$backup.Guard.Dispose();$backup.Guard=$null}}
             for ($i = $installed.Count - 1; $i -ge 0; $i--) {
                 $item = $installed[$i]
                 # A failed verification may mean another program replaced the
@@ -247,14 +250,14 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
             throw $message
         }
         foreach ($item in $backups) {
-            try { Remove-SourcePolicyOwnedPath $item.Backup ([IO.Path]::GetDirectoryName($item.Backup)) }
+            try {if($item.Guard){$item.Guard.Remove()}else{Remove-SourcePolicyOwnedPath $item.Backup ([IO.Path]::GetDirectoryName($item.Backup))}}
             catch {
                 Write-Log ('Previous output backup could not be removed: ' + $item.Backup)
                 Write-Notice 'WARNING' ('Previous output backup remains at: ' + $item.Backup)
             }
         }
         return [pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
-    } finally {foreach ($directoryLock in $directoryLocks) {$directoryLock.Dispose()}}
+    } finally {foreach($backup in $backups){if($backup.Guard){$backup.Guard.Dispose()}};foreach ($directoryLock in $directoryLocks) {$directoryLock.Dispose()}}
 }
 
 

@@ -139,6 +139,7 @@ function Invoke-ArchiveSandbox {
         if($Operation -eq 'Read' -and $Archive.Entries[$EntryIndex].Length -gt 16MB) {throw 'ZIP text entry exceeds the bounded in-memory read limit.'}
         $job=[OptiMiyoo.NativeSandboxJob]::Create($exe,[string[]]@(),$null,$null,$false)
         $job.CpuTimeLimitSeconds=1800
+        $job.WallTimeLimitSeconds=1800
         $inherited=$job.AddReadHandle($readLease.Stream.SafeFileHandle)
         $request=New-Object 'System.Collections.Generic.List[string]'
         $workerOperation=$Operation.ToLowerInvariant();if($Operation -eq 'File'){$workerOperation='extract'}

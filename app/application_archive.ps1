@@ -127,10 +127,15 @@ function Invoke-ApplicationArchiveRequest {
                     $task.DestinationLease.Dispose();$task.DestinationLease=$directoryLease
                 } elseif(Test-Path -LiteralPath $destination){throw 'Archive destination must be a new output in the active batch.'}
             }
+            # Compile the fixed installed service once in the trusted parent.
+            # Fresh runspaces receive only these bytes, never executable payloads
+            # from a request, so repeated archive calls do not rerun csc.
+            $workerBytes=Get-ArchiveSandboxExecutableBytes
             $script=@'
-param($CodeRoot,$InputPath,$InputLease,$Profile,$Operation,$EntryIndex,$Destination,$MaximumBytes,$ProgressQueue)
+param($CodeRoot,$InputPath,$InputLease,$Profile,$Operation,$EntryIndex,$Destination,$MaximumBytes,$ProgressQueue,[byte[]]$TrustedWorkerBytes)
 $ErrorActionPreference='Stop'
 foreach($helper in 'compile_support.ps1','source_policy.ps1','archive_limits.ps1','native_process.ps1','archive_sandbox.ps1'){. (Join-Path $CodeRoot $helper)}
+$script:ArchiveSandboxExecutableBytes=[byte[]]$TrustedWorkerBytes.Clone()
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $tokens=$null;$errors=$null
@@ -163,7 +168,7 @@ try {
 '@
             $task.PowerShell=[PowerShell]::Create()
             [void]$task.PowerShell.AddScript($script)
-            [void]$task.PowerShell.AddArgument($script:ApplicationArchiveCodeRoot).AddArgument($inputPath).AddArgument($task.InputLease).AddArgument([string]$Payload.Profile).AddArgument([string]$Payload.ArchiveOperation).AddArgument([int]$index).AddArgument($destination).AddArgument([long]$maximum).AddArgument($task.Queue)
+            [void]$task.PowerShell.AddArgument($script:ApplicationArchiveCodeRoot).AddArgument($inputPath).AddArgument($task.InputLease).AddArgument([string]$Payload.Profile).AddArgument([string]$Payload.ArchiveOperation).AddArgument([int]$index).AddArgument($destination).AddArgument([long]$maximum).AddArgument($task.Queue).AddArgument($workerBytes)
             $task.Async=$task.PowerShell.BeginInvoke();$script:ApplicationArchiveTasks[$key]=$task
             return [pscustomobject]@{State='Running';TaskId=$task.TaskId;Offset=0}
         } catch {Close-ApplicationArchiveTask $task;throw}
@@ -186,12 +191,15 @@ try {
         $count=[Math]::Min(65536,$task.Bytes.Length-$task.Offset)
         $encoded=[Convert]::ToBase64String($task.Bytes,$task.Offset,$count);$next+=$count;$more=$next -lt $task.Bytes.Length
     } else {
-        while($next -lt $task.Rows.Count -and $rows.Count -lt 200) {
-            $candidate=@($rows)+@($task.Rows[$next])
-            $json=ConvertTo-Json -InputObject $candidate -Depth 4 -Compress
-            if([Text.Encoding]::UTF8.GetByteCount($json) -gt 524288){break}
-            $rows=$candidate;$next++
+        $page=New-Object 'System.Collections.Generic.List[object]';$pageBytes=2
+        while($next -lt $task.Rows.Count -and $page.Count -lt 200) {
+            $row=$task.Rows[$next]
+            $rowBytes=[Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $row -Depth 4 -Compress))
+            $separator=0;if($page.Count){$separator=1}
+            if($pageBytes+$separator+$rowBytes -gt 524288){break}
+            $page.Add($row);$pageBytes+=$separator+$rowBytes;$next++
         }
+        $rows=$page.ToArray()
         if($next -eq $task.Offset -and $next -lt $task.Rows.Count){throw 'Archive result row cannot fit the response limit.'}
         $more=$next -lt $task.Rows.Count
     }

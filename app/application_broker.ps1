@@ -43,6 +43,8 @@ namespace OptiMiyoo {
         [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl,uint revision,out IntPtr descriptor,out uint size);
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateDirectoryW(string path,ref SecurityAttributes attributes);
         [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr pointer);
+        [StructLayout(LayoutKind.Sequential)] struct Disposition {public byte Delete;}
+        [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle,int kind,ref Disposition value,uint size);
         readonly List<SafeFileHandle> handles=new List<SafeFileHandle>();
         public static void CreatePrivateDirectory(string path) {
             string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
@@ -70,6 +72,75 @@ namespace OptiMiyoo {
         }
         public static uint LinkCount(SafeFileHandle handle) {Info info;if(!GetFileInformationByHandle(handle,out info))throw new Win32Exception(Marshal.GetLastWin32Error());return info.Links;}
         public void Dispose(){for(int i=handles.Count-1;i>=0;i--)handles[i].Dispose();handles.Clear();}
+        // A moved old output stays bound to its approved bytes until rollback or
+        // deletion. Deletion uses these same verified handles, never a new walk.
+        public sealed class Backup : IDisposable {
+            sealed class Entry : IDisposable {
+                internal SafeFileHandle Handle;internal FileStream Stream;
+                public void Dispose(){if(Stream!=null){Stream.Dispose();Stream=null;}if(Handle!=null){Handle.Dispose();Handle=null;}}
+            }
+            readonly List<Entry> entries=new List<Entry>();
+            IDisposable parents;
+            static IDisposable PinParent(string path) {
+                foreach(System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+                    Type policy=assembly.GetType("OptiMiyoo.SourceRemovalLeaseV128",false);
+                    if(policy!=null) {
+                        try{return (IDisposable)policy.GetMethod("OpenDirectory").Invoke(null,new object[]{path});}
+                        catch(System.Reflection.TargetInvocationException error){throw error.InnerException??error;}
+                    }
+                }
+                throw new IOException("Verified output directory helper is unavailable.");
+            }
+            internal static Backup Open(string path,bool folder,string[] names,long[] lengths,string[] hashes,string[] directories) {
+                Backup result=new Backup();
+                try {
+                    if(names.Length!=lengths.Length||names.Length!=hashes.Length)throw new IOException("Invalid approved backup manifest.");
+                    Dictionary<string,int> files=new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+                    HashSet<string> dirs=new HashSet<string>(directories,StringComparer.OrdinalIgnoreCase);
+                    for(int i=0;i<names.Length;i++)files.Add(names[i],i);
+                    string root=Path.GetFullPath(path),prefix=root+Path.DirectorySeparatorChar;
+                    result.parents=PinParent(Path.GetDirectoryName(root));
+                    Queue<string> pending=new Queue<string>();pending.Enqueue(root);int fileCount=0,dirCount=0;
+                    while(pending.Count>0) {
+                        string current=pending.Dequeue();bool isRoot=String.Equals(current,root,StringComparison.OrdinalIgnoreCase);
+                        string relative=isRoot?"":current.Substring(prefix.Length).Replace('\\','/');
+                        SafeFileHandle handle=CreateFileW(current,0x80010000,1,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+                        if(handle.IsInvalid){int error=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(error,"Could not freeze previous output backup.");}
+                        Entry entry=new Entry{Handle=handle};result.entries.Add(entry);Info info;
+                        if(!GetFileInformationByHandle(handle,out info))throw new Win32Exception(Marshal.GetLastWin32Error());
+                        bool directory=(info.Attributes&0x10)!=0;
+                        if((info.Attributes&0x400)!=0||(isRoot&&directory!=folder))throw new IOException("Previous output backup changed type or contains a link.");
+                        if(directory) {
+                            if(!isRoot&&!dirs.Contains(relative))throw new IOException("Previous output gained an unapproved directory; previous output kept.");
+                            dirCount++;if(dirCount>directories.Length+1)throw new IOException("Previous output directory inventory changed.");
+                            foreach(string child in System.IO.Directory.EnumerateFileSystemEntries(current)) {
+                                if(pending.Count+result.entries.Count>=names.Length+directories.Length+1)throw new IOException("Previous output gained an unapproved entry; previous output kept.");
+                                pending.Enqueue(child);
+                            }
+                        } else {
+                            int index;if(!files.TryGetValue(relative,out index)||info.Links!=1||(info.Attributes&1)!=0)throw new IOException("Previous output is unapproved, linked, or read-only; previous output kept.");
+                            entry.Stream=new FileStream(handle,FileAccess.Read);fileCount++;
+                            if(entry.Stream.Length!=lengths[index])throw new IOException("Previous output changed since approval; previous output kept.");
+                            using(System.Security.Cryptography.SHA256 sha=System.Security.Cryptography.SHA256.Create()) {
+                                string hash=BitConverter.ToString(sha.ComputeHash(entry.Stream)).Replace("-","");
+                                if(!String.Equals(hash,hashes[index],StringComparison.Ordinal))throw new IOException("Previous output changed since approval; previous output kept.");
+                            }
+                        }
+                    }
+                    if(fileCount!=names.Length||dirCount!=(folder?directories.Length+1:0))throw new IOException("Previous output inventory changed since approval; previous output kept.");
+                    return result;
+                } catch {result.Dispose();throw;}
+            }
+            public void Remove() {
+                for(int i=entries.Count-1;i>=0;i--) {
+                    Disposition disposition=new Disposition{Delete=1};
+                    if(!SetFileInformationByHandle(entries[i].Handle,4,ref disposition,1))throw new Win32Exception(Marshal.GetLastWin32Error(),"Verified previous output backup retained.");
+                    entries[i].Dispose();
+                }
+            }
+            public void Dispose(){for(int i=entries.Count-1;i>=0;i--)entries[i].Dispose();entries.Clear();if(parents!=null){parents.Dispose();parents=null;}}
+        }
+        public static Backup OpenBackup(string path,bool folder,string[] names,long[] lengths,string[] hashes,string[] directories){return Backup.Open(path,folder,names,lengths,hashes,directories);}
     }
 }
 '@
@@ -93,7 +164,7 @@ function Get-ApplicationBrokerRelative([string]$Path,[string]$Root) {
 
 function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$RequireSingleLink,[int]$MaximumEntries=100000,[switch]$MetadataOnly,[hashtable]$ExpectedFiles) {
     Initialize-ApplicationBrokerNative
-    $files=@{};$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0
+    $files=@{};$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0;$buffer=$null
     if($MaximumEntries -lt 1 -or $MaximumEntries -gt 1000000){throw 'Invalid broker snapshot entry limit.'}
     if($MetadataOnly -and $CopyTo){throw 'A metadata-only inventory cannot copy file data.'}
     if(-not [IO.Directory]::Exists($Root)) {
@@ -122,7 +193,7 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
                         if($null -ne $ExpectedFiles -and (-not $ExpectedFiles.ContainsKey($relative) -or $ExpectedFiles[$relative].Length -ne $lease.Stream.Length)){throw 'Staged snapshot has unexpected file names or lengths.'}
                         if($MetadataOnly){$files[$relative]=[pscustomobject]@{Hash='';Length=$lease.Stream.Length;Links=$links;LastWriteTimeUtc=$entry.LastWriteTimeUtc};$bytes+=$lease.Stream.Length;continue}
                         if($CopyTo){$target=Join-Path $CopyTo $relative.Replace('/',[IO.Path]::DirectorySeparatorChar);$output=[IO.File]::Open($target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)}
-                        $sha=[Security.Cryptography.SHA256]::Create();$buffer=New-Object byte[] 1048576;$length=0L
+                        $sha=[Security.Cryptography.SHA256]::Create();if($null -eq $buffer){$buffer=New-Object byte[] 1048576};$length=0L
                         while(($count=$lease.Stream.Read($buffer,0,$buffer.Length)) -gt 0){if($output){$output.Write($buffer,0,$count)};[void]$sha.TransformBlock($buffer,0,$count,$null,0);$length+=$count}
                         [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
                         if($length -ne $lease.Stream.Length){throw 'Broker snapshot changed while being copied.'}
@@ -206,7 +277,7 @@ function New-ApplicationBrokerSession {
     } finally {$workLease.Dispose()}
     $id=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
     $handle=[pscustomobject]@{Id=$id;OriginalRoot=$original;WorkRoot=$work;OnionRoot=$OnionRoot;SourceSnapshot=[pscustomobject]@{FileCount=$source.Files.Count;Bytes=$source.Bytes};DestinationSnapshot=[pscustomobject]@{FileCount=$destination.Files.Count;Bytes=$destination.Bytes};ActiveBatch=$null}
-    $script:ApplicationBrokerStates[$id]=[pscustomobject]@{Handle=$handle;Id=$id;OriginalRoot=$original;WorkRoot=$work;OnionRoot=$OnionRoot;SourceSnapshot=$source;DestinationSnapshot=$destination;Batch=$null;Closed=$false}
+    $script:ApplicationBrokerStates[$id]=[pscustomobject]@{Handle=$handle;Id=$id;OriginalRoot=$original;WorkRoot=$work;OnionRoot=$OnionRoot;SourceSnapshot=$source;DestinationSnapshot=$destination;DestinationTree=$null;Batch=$null;Closed=$false}
     return $handle
 }
 
@@ -550,6 +621,44 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
     }
 }
 
+function Get-ApplicationBrokerBackupManifest($State,[string]$Relative) {
+    # Each snapshot entry is indexed once. A folder replacement then visits only
+    # its descendants, rather than rescanning the entire DST for every game.
+    if($null -eq $State.DestinationTree) {
+        $tree=@{}
+        foreach($name in @('')+@($State.DestinationSnapshot.Directories)){$tree[$name]=[pscustomobject]@{Files=(New-Object 'Collections.Generic.List[string]');Children=(New-Object 'Collections.Generic.List[string]')}}
+        foreach($name in $State.DestinationSnapshot.Directories){$cut=$name.LastIndexOf('/');$parent='';if($cut -ge 0){$parent=$name.Substring(0,$cut)};$tree[$parent].Children.Add($name)}
+        foreach($name in $State.DestinationSnapshot.Files.Keys){$cut=$name.LastIndexOf('/');$parent='';if($cut -ge 0){$parent=$name.Substring(0,$cut)};$tree[$parent].Files.Add($name)}
+        $State.DestinationTree=$tree
+    }
+    if(-not $State.DestinationTree.ContainsKey($Relative)){throw 'An unapproved output directory appeared during publication; previous output kept.'}
+    $names=New-Object 'Collections.Generic.List[string]';$lengths=New-Object 'Collections.Generic.List[long]';$hashes=New-Object 'Collections.Generic.List[string]';$directories=New-Object 'Collections.Generic.List[string]'
+    $prefix=$Relative+'/'
+    $pending=New-Object 'Collections.Generic.Queue[string]';$pending.Enqueue($Relative)
+    while($pending.Count){
+        $node=$State.DestinationTree[$pending.Dequeue()]
+        foreach($name in $node.Files){$file=$State.DestinationSnapshot.Files[$name];$names.Add($name.Substring($prefix.Length));$lengths.Add($file.Length);$hashes.Add($file.Hash)}
+        foreach($name in $node.Children){$directories.Add($name.Substring($prefix.Length));$pending.Enqueue($name)}
+    }
+    return [pscustomobject]@{Names=$names.ToArray();Lengths=$lengths.ToArray();Hashes=$hashes.ToArray();Directories=$directories.ToArray()}
+}
+
+function Open-ApplicationBrokerBackup($State,[string]$Destination,[string]$Backup,[bool]$Folder,[scriptblock]$FolderManifest) {
+    $prefix=[IO.Path]::GetFullPath((Join-Path $State.OriginalRoot 'DST')).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    $full=[IO.Path]::GetFullPath($Destination)
+    if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'Backup destination is outside the approved output root.'}
+    $relative=$full.Substring($prefix.Length).Replace('\','/')
+    if($Folder) {
+        if(-not $FolderManifest){throw 'Approved folder manifest provider is unavailable.'}
+        $manifest=& $FolderManifest $State $relative
+    } else {
+        if(-not $State.DestinationSnapshot.Files.ContainsKey($relative)){throw 'An unapproved output file appeared during publication; previous output kept.'}
+        $file=$State.DestinationSnapshot.Files[$relative]
+        $manifest=[pscustomobject]@{Names=[string[]]@('');Lengths=[long[]]@($file.Length);Hashes=[string[]]@($file.Hash);Directories=[string[]]@()}
+    }
+    return [OptiMiyoo.ApplicationBrokerLease]::OpenBackup($Backup,$Folder,$manifest.Names,$manifest.Lengths,$manifest.Hashes,$manifest.Directories)
+}
+
 function Complete-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[Parameter(Mandatory=$true)][string]$BatchId,
           [string[]]$CompletedJobIds=@(),[Parameter(Mandatory=$true)]$ReceiptStore)
@@ -572,7 +681,10 @@ function Complete-ApplicationBrokerBatch {
                 Assert-ApplicationBrokerOwnership $batch $job $dst
                 # Reuse the established two-part transaction and rollback logic
                 # for all formats, including ZX's single-file output.
-                $commit=& $batch.SourceModule {param($items,$overwrite,$retired)Install-PlaylistSet $items $null $false $overwrite $retired} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired
+                $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock
+                $folderManifest=(Get-Command Get-ApplicationBrokerBackupManifest).ScriptBlock
+                $validateBackup={param($destination,$backup,$folder)& $backupFactory $state $destination $backup $folder $folderManifest}.GetNewClosure()
+                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator)Install-PlaylistSet $items $null $false $overwrite $retired -ValidateBackup $validator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
                 $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})

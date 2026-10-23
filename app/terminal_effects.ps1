@@ -135,7 +135,13 @@ function Read-OptiTerminalFragment([string]$Path) {
 }
 
 function Set-OptiTerminalCrtMode([ValidateSet('CRT','Smooth','Paused')][string]$Mode) {
-    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return [bool](Invoke-ApplicationRpc -Operation Display.Mode -Payload @{Mode=$Mode}).Enabled}
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {
+        $payload=@{Mode=$Mode}
+        # Effective shader mode can be Smooth because animation/color is off,
+        # or Paused during the demo. Neither should replace the user's choice.
+        if ($script:DisplayEffect -in 'CRT','Smooth') {$payload.Preference=[string]$script:DisplayEffect}
+        return [bool](Invoke-ApplicationRpc -Operation Display.Mode -Payload $payload).Enabled
+    }
     $profileId='{062ba315-bc8f-42eb-a971-d0eb828209dd}'
     if ($env:WT_PROFILE_ID -ne $profileId -or $env:OPTIMIYOO_CRT_HOST -cne '1' -or -not $env:LOCALAPPDATA) {return $false}
     try {

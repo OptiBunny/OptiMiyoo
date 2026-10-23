@@ -71,9 +71,11 @@ function Invoke-ApplicationNativeRequest {
                 if ($job.ExitCode -eq 0 -and -not $job.Failure -and $job.Destination) {
                     # Hash the inaccessible native output BEFORE giving any copy
                     # to the app. Child edits can never manufacture a receipt.
-                    $nativeOutput=Join-Path $job.Native.WorkPath $job.Native.OutputName
-                    $outputLease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($nativeOutput)
+                    $outputLease=$null
                     try {
+                        $nativeOutput=Join-Path $job.Native.WorkPath $job.Native.OutputName
+                        $outputLease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($nativeOutput)
+                        if ($outputLease.Stream.Length -gt 512MB) {throw 'Native output exceeds 512 MiB.'}
                         if ($job.ReceiptKind -eq 'Nib') {
                             $validator=Get-ApplicationBrokerModule Playlist
                             & $validator {param($path) Assert-G64 $path} $nativeOutput
@@ -89,7 +91,11 @@ function Invoke-ApplicationNativeRequest {
                             BatchId=$job.BatchId;Kind=$job.ReceiptKind;InputHash=$job.InputHash;
                             OutputHash=$hash;Length=$length;Success=$true
                         })
-                    } finally {$outputLease.Dispose()}
+                    } catch {
+                        # A failed import stays failed on every subsequent poll.
+                        # In particular, native exit 0 is not verified success.
+                        $job.Failure='Native output verification or import failed.'
+                    } finally {if ($outputLease) {$outputLease.Dispose()}}
                 }
             }
         }
@@ -147,6 +153,7 @@ function Invoke-ApplicationNativeRequest {
                 else {$arguments='-verbose -finput:"'+$job.Native.InputRelativePath+'" -conv:AMSTRADCPC_DSK -foutput:"'+$outputName+'"'}
             }
         }
+        $job.Native.WallTimeLimitSeconds=$job.Timeout
         $job.Native.Start($arguments)
         $job.Out=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardOutput,1048576)
         $job.Err=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardError,1048576)

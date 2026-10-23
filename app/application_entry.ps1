@@ -30,16 +30,15 @@ function Set-ApplicationCurrentJob([string]$SourceKey) {
     if (-not (Test-ApplicationWorker)) {return}
     $context=$global:OptiMiyooApplicationContext
     $key=$SourceKey.Replace('\','/')
-    $matches=@($context.Jobs | Where-Object {$_.SourceKey.Replace('\','/') -ceq $key})
     $context.CurrentJob=$null
-    if ($matches.Count -eq 1) {$context.CurrentJob=$matches[0]}
+    if ($context.JobIndex.ContainsKey($key)) {$context.CurrentJob=$context.JobIndex[$key]}
 }
 
 function Complete-ApplicationCurrentJob {
     if (-not (Test-ApplicationWorker)) {return}
     $context=$global:OptiMiyooApplicationContext
     if (-not $context.CurrentJob -or $context.CurrentJob.BlockedReason) {throw 'The broker did not authorize this output set.'}
-    if (-not $context.Completed.Contains($context.CurrentJob.JobId)) {[void]$context.Completed.Add([string]$context.CurrentJob.JobId)}
+    if ($context.CompletedSet.Add([string]$context.CurrentJob.JobId)) {[void]$context.Completed.Add([string]$context.CurrentJob.JobId)}
 }
 
 function Read-ApplicationOverwriteChoice {
@@ -51,8 +50,16 @@ function Read-ApplicationOverwriteChoice {
 }
 
 function Set-ApplicationBatchContext($Batch) {
+    $index=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    foreach ($job in @($Batch.Jobs)) {
+        $key=$job.SourceKey.Replace('\','/')
+        # An ambiguous source never acquires a job capability. Keep the same
+        # exact-case matching while avoiding a full batch scan for every item.
+        if ($index.ContainsKey($key)) {$index[$key]=$null} else {$index.Add($key,$job)}
+    }
     $global:OptiMiyooApplicationContext=[pscustomobject]@{BatchId=$Batch.BatchId;WorkRoot=$Batch.WorkRoot;
-        Operation=$Batch.Operation;Jobs=@($Batch.Jobs);CurrentJob=$null;Completed=(New-Object 'System.Collections.Generic.List[string]')}
+        Operation=$Batch.Operation;Jobs=@($Batch.Jobs);JobIndex=$index;CurrentJob=$null;
+        Completed=(New-Object 'System.Collections.Generic.List[string]');CompletedSet=(New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal))}
 }
 
 function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {

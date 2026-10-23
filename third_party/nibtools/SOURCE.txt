@@ -11,9 +11,10 @@ nibconv.exe is unmodified from that official binary archive.
 SHA-256: fba8b5cb386ec371e736487ac31247f73b8cdec910eafd87236026a5b364ccbb
 
 The complete source snapshot published for the release is included as
-NIBTools-source-20241120.zip (repository commit prefix 7bd2089).
+NIBTools-source-20241120.zip (commit 7bd20898c325a0e0036167f5a8b2fa66319154d3).
 Source download: https://api.github.com/repos/rittwage/nibtools/zipball/20241120
-LICENSE.txt is the upstream repository's GPL-3.0 license text.
+LICENSE.txt is the GPL-3.0 text added by the upstream repository after that release:
+https://github.com/rittwage/nibtools/blob/a549c18c5267c2b1e595aa65396399e12a0201b5/LICENSE
 Original copyright and third-party notices remain in the source archive.
 
 README-upstream.txt describes all NIBTools programs, including hardware

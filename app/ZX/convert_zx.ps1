@@ -166,7 +166,7 @@ function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$Timeou
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
 
-    # CAPSImg builds supplied for RetroArch may depend on MinGW runtime DLLs.
+    # The x86 CAPSImg fallback depends on the bundled MinGW runtime DLLs.
     # If a runtime directory was resolved for this engine, prepend it only for
     # the child HxC process; the user's global PATH is not modified.
     if ($script:EngineRuntimeDirs.ContainsKey($EnginePath)) {
@@ -428,12 +428,12 @@ function Test-CapsIPFEngine([string]$EnginePath, [string]$InputPath) {
 }
 
 function Prompt-CapsRuntimeDirectory {
-    $answer=Read-DisplayInput 'RetroArch / MinGW runtime folder' 'ZX Spectrum / runtime setup' @(
-        'CAPSImg.dll needs the MinGW runtime used by RetroArch.',
-        'The supplied 64-bit CAPSImg needs libstdc++-6.dll.',
-        'The 32-bit fallback also needs libgcc_s_dw2-1.dll.',
-        'If RetroArch is installed on this PC, drag the folder containing',
-        'retroarch.exe and libstdc++-6.dll into this window, then press Enter.',
+    $answer=Read-DisplayInput 'MinGW runtime folder' 'ZX Spectrum / runtime setup' @(
+        'The 32-bit CAPSImg fallback needs libstdc++-6.dll,',
+        'libgcc_s_dw2-1.dll and libwinpthread-1.dll.',
+        'These files are included in the complete OptiMiyoo download.',
+        'To use another compatible set, drag its folder into this window.',
+        'A 32-bit RetroArch installation may also contain these libraries.',
         'Enter without a path, B or Q stops safely.') 'wait'
     if ($null -eq $answer) { return $null }
     $answer = $answer.Trim().Trim([char]34)

@@ -1,20 +1,19 @@
 # Third-party components
 
-OptiMiyoo bundles these tools and libraries unchanged. Their licenses, notices,
-source information, and supplied source archives are kept here.
+These tools and libraries are included for conversion on Windows. Their original
+licenses and notices are kept in the linked folders.
 
-| Component | Used for | Notices and source information |
+| Component | Used for | License and source details |
 | --- | --- | --- |
-| [NIBTools](https://github.com/rittwage/nibtools) | C64 NIB/NBZ conversion with `app/tools/nibconv.exe` | [nibtools](nibtools) |
-| [HxC Floppy Emulator](https://github.com/jfdelnero/HxCFloppyEmulator) | ZX IPF conversion, with x64 and x86 engines in `app/ZX/tools/hxc` | [hxc](hxc) |
-| [CAPSIMG](https://github.com/FrodeSolheim/capsimg) | IPF decoding by the ZX engines | [capsimg](capsimg) |
-| [MSYS2 runtimes](https://packages.msys2.org/) | Local GCC and winpthread dependencies of the engines | [runtime](runtime) |
+| [NIBTools](https://github.com/rittwage/nibtools), release 20241120 | `nibconv.exe` converts C64 NIB/NBZ images to G64. | [Details](nibtools/SOURCE.txt) · [License](nibtools/LICENSE.txt) |
+| [HxC Floppy Emulator](https://github.com/jfdelnero/HxCFloppyEmulator), 2.16.13.1 | Converts ZX Spectrum IPF images to DSK. | [Details](hxc/SOURCE.txt) · [Notices](hxc/COPYING_FULL) |
+| [CAPSIMG](https://github.com/FrodeSolheim/capsimg), FS-UAE Windows builds | Reads IPF images: 5.1.3 for x64; 5.1fs3 for the x86 fallback. | [Details](capsimg/SOURCE.txt) · [License](capsimg/LICENSE.txt) |
+| [GCC](https://gcc.gnu.org/) and [MinGW-w64](https://www.mingw-w64.org/) runtimes, packaged by [MSYS2](https://github.com/msys2/MINGW-packages) | Libraries required by the x86 CAPSIMG fallback. | [Details and licenses](runtime/SOURCE.txt) |
 
-The GCC, GCC runtime exception, and winpthread license texts apply to both
-architectures. Identical copies are stored once in `runtime`.
+Both x64 and x86 converter builds are included. CAPSIMG's Windows DLLs match the
+original FS-UAE downloads, with a versioned source archive for each build.
 
-The supplied CAPSIMG source snapshot is reference material; it has not been
-established as the exact source used to build the bundled 5.1fs3 binaries.
-See [CAPSIMG provenance](capsimg/SOURCE.txt) for details.
+Device-side emulator libraries, such as Amiga `capsimg.so` for the Miyoo, are
+separate and are not included.
 
 These component licenses do not define a license for OptiMiyoo's own code.

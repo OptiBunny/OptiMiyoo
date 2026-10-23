@@ -28,8 +28,8 @@ ROMs, BIOS files, and Onion cores are not included.
 Bundled third-party tools have their own authors and licenses:
 [NIBTools](https://github.com/rittwage/nibtools),
 [HxC Floppy Emulator](https://github.com/jfdelnero/HxCFloppyEmulator),
-[CAPSIMG (FS-UAE version)](https://github.com/FrodeSolheim/capsimg), and
-[MSYS2 runtime packages](https://github.com/msys2/MINGW-packages).
+[CAPSIMG (FS-UAE Windows build)](https://github.com/FrodeSolheim/capsimg), and
+GCC / MinGW-w64 runtimes packaged by [MSYS2](https://github.com/msys2/MINGW-packages).
 
 CAPSIMG's included license restricts commercial use.
 See [third-party licenses and source details](third_party/README.md).

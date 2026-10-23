@@ -121,7 +121,9 @@ These are the standard profiles. **S** checks the cores selected on your SD card
 
 Unsupported playlist profiles can still run ordinary games in their emulator.
 Amiga IPF playback requires a compatible ARM `capsimg.so` and Kickstart BIOS
-on the Miyoo. blueMSX needs its usual `Databases` and `Machines` BIOS folders.
+on the Miyoo; these are not included. OptiMiyoo's bundled Windows `CAPSImg.dll`
+is used only for ZX conversion on your PC. blueMSX needs its usual `Databases`
+and `Machines` BIOS folders.
 
 ## Naming and storage
 

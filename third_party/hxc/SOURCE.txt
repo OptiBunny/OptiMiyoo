@@ -1,0 +1,15 @@
+HxC Floppy Emulator 2.16.13.1
+
+Author: Jean-Francois Del Nero / HxC2001 and contributors.
+Purpose: ZX Spectrum IPF-to-DSK conversion on Windows.
+Project: https://github.com/jfdelnero/HxCFloppyEmulator
+Release: https://github.com/jfdelnero/HxCFloppyEmulator/releases/tag/HxCFloppyEmulator_V2_16_13_1
+
+The x64 and x86 hxcfe.exe, libhxcfe.dll and libusbhxcfe.dll files, plus
+config.script, are unmodified files from the official Windows release archive:
+https://github.com/jfdelnero/HxCFloppyEmulator/releases/download/HxCFloppyEmulator_V2_16_13_1/HxCFloppyEmulator_soft.zip
+Archive SHA-256: e83e361407893dcdab10cc2e169bf0504dfe3802360a902b01269b4585778091
+
+Release source: https://github.com/jfdelnero/HxCFloppyEmulator/tree/0a8f492d9b96e7c35283cf4ddf629c802f63fcf1
+COPYING and COPYING_FULL retain the upstream license and embedded-library notices.
+CAPSIMG and its runtime DLLs are documented separately in ../capsimg and ../runtime.

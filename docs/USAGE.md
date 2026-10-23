@@ -36,9 +36,14 @@ Then choose **1: Keep originals** (default) or **2: Remove originals** to start.
 **B** returns to output settings. ZX uses the same originals screen.
 
 **Remove** deletes unchanged originals only after verified output. Failed, skipped,
-or unsupported inputs remain; ZIPs with extra unconverted content can also remain.
+or unsupported inputs remain; linked or read-only originals are kept. ZIPs with
+extra unconverted content can also remain.
 Keep a separate backup: file verification does not guarantee game compatibility.
 Unsupported or unverified cores show an explanation instead of creating playlists.
+
+If replacing an output fails, OptiMiyoo attempts to restore the previous output.
+Any files it cannot safely restore or discard are kept at the recovery paths shown
+in the error. Check those files before removing them yourself.
 
 ### C64 converter: C
 
@@ -101,6 +106,16 @@ then refresh Onion's game list.
 
 `SRC` and `DST` are shared by all modes and never emptied automatically. Old
 copies already on the SD card may appear alongside new playlists.
+
+Archives are limited to 20,000 entries. Playlist ZIPs allow up to 64 GiB expanded
+in total and 16 GiB per file; C64/ZX conversion ZIPs allow 8 GiB total and 512 MiB
+per file. Split larger collections into smaller archives. Oversized or malformed
+metadata is refused and originals are kept.
+
+Processing is local. Logs and CSV reports can include game names and full local
+paths; review them before sharing and leave diagnostic files off the SD card.
+The launcher stores its own Terminal profile and shaders under
+`%LOCALAPPDATA%/Microsoft/Windows Terminal/Fragments/OptiMiyoo`.
 
 ## Systems and ROM folders
 

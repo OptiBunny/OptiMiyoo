@@ -11,3 +11,15 @@ __pycache__/
 
 # Local runtime selection can contain a personal absolute path.
 /app/ZX/runtime-path.txt
+
+# Local credentials, signing material, and crash dumps are never project assets.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.dmp
+
+# SD configuration backups can contain local settings.
+OptiMiyoo_Backup_*/

@@ -1,6 +1,7 @@
 ﻿# Parse only straightforward shell commands, never execute a launcher. Quoted
 # examples and comments are data, not evidence of a selected emulator core.
 function Get-LauncherCommands([string]$Launch) {
+    if ($Launch.Length -gt 262144) {throw 'launch.sh exceeds the supported 256 KiB text limit.'}
     $commands=New-Object 'System.Collections.Generic.List[object]'
     $tokens=New-Object 'System.Collections.Generic.List[object]'
     $word=New-Object Text.StringBuilder
@@ -139,7 +140,7 @@ function Assert-PlainOnionPath([string]$Path,[string]$Root) {
         throw 'SD path is outside the selected root.'
     }
     # Inspect every existing ancestor, including those above the selected root.
-    # Static checks protect ordinary reads; setup also pins handles while editing.
+    # Native leases pin these checked paths while reading or editing them.
     $current=$full
     while ($current) {
         if (Test-Path -LiteralPath $current) {
@@ -148,6 +149,69 @@ function Assert-PlainOnionPath([string]$Path,[string]$Root) {
         }
         $current=[IO.Path]::GetDirectoryName($current)
     }
+}
+
+function Read-OptiBoundedText([IO.Stream]$Stream,[int]$MaximumBytes,[string]$Description,[long]$ExpectedLength=-1) {
+    if ($MaximumBytes -lt 1) {throw 'Invalid text size limit.'}
+    if ($ExpectedLength -gt $MaximumBytes -or ($Stream.CanSeek -and $Stream.Length-$Stream.Position -gt $MaximumBytes)) {
+        throw ($Description+' exceeds its supported text size limit.')
+    }
+    $memory=New-Object IO.MemoryStream
+    $reader=$null; $buffer=New-Object byte[] 65536; [long]$total=0
+    try {
+        while (($read=$Stream.Read($buffer,0,$buffer.Length)) -gt 0) {
+            # Check actual bytes too: ZIP metadata can understate expanded data.
+            if ($read -gt $MaximumBytes-$total) {throw ($Description+' exceeds its supported text size limit.')}
+            $memory.Write($buffer,0,$read); $total+=$read
+        }
+        if ($ExpectedLength -ge 0 -and $total -ne $ExpectedLength) {throw ($Description+' text length does not match its declared size.')}
+        $memory.Position=0
+        $reader=New-Object IO.StreamReader($memory,$true)
+        return $reader.ReadToEnd()
+    } finally {if ($reader) {$reader.Dispose()}; $memory.Dispose()}
+}
+
+function Open-OptiInputLease([string]$Path,[string]$Root) {
+    if (Get-Command Open-SourcePolicyReadLease -ErrorAction SilentlyContinue) {return Open-SourcePolicyReadLease $Path $Root}
+    if ('OptiMiyoo.OnionPathLease' -as [type]) {return [OptiMiyoo.OnionPathLease]::Open($Path,$Root,$false,$false,$false)}
+    # Standalone SD assessment uses the same native path pinning as workers.
+    . (Join-Path $PSScriptRoot 'source_policy.ps1')
+    Assert-PlainOnionPath $Path $Root
+    Initialize-SourcePolicyNative
+    return [OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($Path)
+}
+
+function Read-OptiTextFile([string]$Path,[int]$MaximumBytes,[string]$Description,[string]$Root) {
+    $lease=$null; $stream=$null
+    try {
+        if ($Root) {$lease=Open-OptiInputLease $Path $Root; $stream=$lease.Stream}
+        else {$stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)}
+        return Read-OptiBoundedText $stream $MaximumBytes $Description $stream.Length
+    } finally {if ($lease) {$lease.Dispose()} elseif ($stream) {$stream.Dispose()}}
+}
+
+function Test-CoreBinaryPatterns([string]$Path,[string[]]$Patterns,[int]$Overlap=512,[string]$Root) {
+    # Only bounded format/callback tokens are requested below. Retain enough
+    # bytes between chunks to recognize a token crossing a read boundary, while
+    # avoiding a byte array plus UTF-16 string for the entire emulator binary.
+    $found=New-Object bool[] $Patterns.Count
+    $remaining=$Patterns.Count
+    $buffer=New-Object byte[] 65536
+    $tail=''
+    $lease=$null; $stream=$null
+    try {
+        if ($Root) {$lease=Open-OptiInputLease $Path $Root; $stream=$lease.Stream}
+        else {$stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)}
+        if ($stream.Length -gt 512MB) {throw 'Installed core exceeds the supported 512 MiB inspection limit.'}
+        while ($remaining -gt 0 -and ($count=$stream.Read($buffer,0,$buffer.Length)) -gt 0) {
+            $chunk=$tail+[Text.Encoding]::ASCII.GetString($buffer,0,$count)
+            for ($i=0; $i -lt $Patterns.Count; $i++) {
+                if (-not $found[$i] -and ($chunk -match $Patterns[$i])) {$found[$i]=$true; $remaining--}
+            }
+            $tail=$chunk.Substring([Math]::Max(0,$chunk.Length-$Overlap))
+        }
+    } finally {if ($lease) {$lease.Dispose()} elseif ($stream) {$stream.Dispose()}}
+    return ,$found
 }
 
 function Get-PlaylistSupport($Profile,[string]$SdRoot) {
@@ -172,9 +236,9 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
         if (-not (Test-Path -LiteralPath $result.ConfigPath -PathType Leaf)) {
             $result.Status='NOT INSTALLED'; $result.Reason='No system config.json found on this SD card.'; return $result
         }
-        $config=[IO.File]::ReadAllText($result.ConfigPath) | ConvertFrom-Json
+        $config=(Read-OptiTextFile $result.ConfigPath 1MB 'config.json' $SdRoot) | ConvertFrom-Json
         if ($config.launch -ne 'launch.sh') {throw 'Custom launch filename; the selected core cannot be verified automatically.'}
-        $launch=[IO.File]::ReadAllText($result.LaunchPath)
+        $launch=Read-OptiTextFile $result.LaunchPath 256KB 'launch.sh' $SdRoot
         $result.Core=Get-SelectedRetroArchCore $launch
         if ($result.Core -notin @($Profile.SupportedCores)) {
             if ($result.Core -eq $Profile.DefaultCore -and -not $Profile.DefaultSupported) {
@@ -189,14 +253,13 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
         if (-not (Test-Path -LiteralPath $corePath -PathType Leaf)) {
             $result.Reason='The selected core file is missing from the SD card.'; return $result
         }
-        $coreText=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($corePath))
         $extension=$Profile.Playlist.TrimStart('.')
         # A format-list token must be bounded by pipes or NUL bytes, not just
         # an arbitrary mention of m3u in an error string. Known core families
         # above supply the disk-control check; the binary check gates old builds.
         $pattern='(?:\x00|\|)'+[regex]::Escape($extension)+'(?:\||\x00)'
-        $advertises=$coreText -match $pattern
-        if ($Profile.Folder -eq 'ZXS') {$advertises=$coreText -match 'tzx\|tap\|[^\x00\r\n]{0,300}\|m3u(?:\||\x00)'}
+        if ($Profile.Folder -eq 'ZXS') {$pattern='tzx\|tap\|[^\x00\r\n]{0,300}\|m3u(?:\||\x00)'}
+        $advertises=(Test-CoreBinaryPatterns $corePath @($pattern) ([Math]::Max(512,$extension.Length+2)) $SdRoot)[0]
         if (-not $advertises) {$result.Reason=('Selected core build does not advertise '+$Profile.Playlist+' loading.'); return $result}
         $result.CanBuild=$true; $result.Status='SUPPORTED'
         $result.Reason='Selected core is a known disk-swap core and its installed build advertises playlist loading.'
@@ -223,19 +286,17 @@ function Get-TapeSwapSupport($Profile,[string]$SdRoot,$PlaylistSupport=$null) {
         try {
             $path=Join-Path (Join-Path $SdRoot 'RetroArch/.retroarch/cores') $result.Core
             Assert-PlainOnionPath $path $SdRoot
-            $binary=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($path))
-            $extensions=@($extensions | Where-Object {
-                $binary -match ('(?:\x00|\|)'+[regex]::Escape($_.TrimStart('.'))+'(?:\||\x00)')
-            })
+            $patterns=@('(?:\x00|\|)tap(?:\||\x00)','(?:\x00|\|)t64(?:\||\x00)',
+                '(?-i:retro_disk_set_eject_state\x00)','(?-i:retro_disk_set_image_index\x00)')
+            $evidence=Test-CoreBinaryPatterns $path $patterns -Root $SdRoot
+            $extensions=@(for ($i=0; $i -lt 2; $i++) {if ($evidence[$i]) {$extensions[$i]}})
             if ($extensions.Count -eq 0) {
                 $result.Status='UNSUPPORTED'; $result.Reason='Selected build does not advertise TAP or T64 loading.'
                 return $result
             }
-            foreach ($callback in 'retro_disk_set_eject_state','retro_disk_set_image_index') {
-                if (-not $binary.Contains($callback+[char]0)) {
-                    $result.Reason='Tape formats are listed, but the expected VICE Disk Control callbacks could not be verified.'
-                    return $result
-                }
+            if (-not $evidence[2] -or -not $evidence[3]) {
+                $result.Reason='Tape formats are listed, but the expected VICE Disk Control callbacks could not be verified.'
+                return $result
             }
         } catch {$result.Reason=$_.Exception.Message; return $result}
     }

@@ -22,50 +22,14 @@ $ErrorActionPreference='Stop'
 $ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
 $NibConv=Join-Path $ScriptDir 'tools/nibconv.exe'
 . (Join-Path $ScriptDir 'source_policy.ps1')
+. (Join-Path $ScriptDir 'archive_limits.ps1')
+. (Join-Path $ScriptDir 'native_process.ps1')
 . (Join-Path $ScriptDir 'overwrite_prompt.ps1')
 . (Join-Path $ScriptDir 'media_validation.ps1')
 . (Join-Path $ScriptDir 'core_support.ps1')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-# Native output callbacks run in C#, with no PowerShell runspace dependency.
-if (-not ('PpNibProgress.Capture' -as [type])) {
-    Add-OptiMiyooType -TypeDefinition @'
-using System;
-using System.IO;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-namespace PpNibProgress {
-    public sealed class Capture : IDisposable {
-        public readonly ConcurrentQueue<string> Lines = new ConcurrentQueue<string>();
-        public readonly Process Child = new Process();
-        public Capture(string exe, string input, string output) {
-            string directory = Path.GetDirectoryName(Path.GetFullPath(input));
-            if (!String.Equals(directory, Path.GetDirectoryName(Path.GetFullPath(output)), StringComparison.OrdinalIgnoreCase))
-                throw new IOException("Native NIB input and output must share the isolated staging directory.");
-            Child.StartInfo = new ProcessStartInfo {
-                FileName = exe, WorkingDirectory = directory,
-                Arguments = "-v \"" + Path.GetFileName(input) + "\" \"" + Path.GetFileName(output) + "\"",
-                UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true,
-                RedirectStandardInput = true
-            };
-            Child.OutputDataReceived += (s, e) => { if (e.Data != null) Lines.Enqueue(e.Data); };
-            Child.ErrorDataReceived += (s, e) => { if (e.Data != null) Lines.Enqueue(e.Data); };
-            try {
-                if (!Child.Start()) throw new Exception("Could not start nibconv.");
-                Child.StandardInput.Close();
-                Child.BeginOutputReadLine(); Child.BeginErrorReadLine();
-            } catch { Dispose(); throw; }
-        }
-        public string NextLine() { string line; return Lines.TryDequeue(out line) ? line : null; }
-        public void Dispose() {
-            try { if (!Child.HasExited) { Child.Kill(); Child.WaitForExit(); } } catch { }
-            Child.Dispose();
-        }
-    }
-}
-'@
-}
+Initialize-NativeTextCapture
 
 function Assert-G64([string]$Path) {
     # Some nibconv failures return exit code zero: validate actual output too.
@@ -94,14 +58,17 @@ function Assert-G64([string]$Path) {
 }
 
 function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Index, [int]$Count, [string]$DisplayName) {
-    $capture = New-Object PpNibProgress.Capture($NibConv, $InputPath, $OutputPath)
+    $capture = New-Object OptiMiyoo.NativeNibCapture($NibConv, $InputPath, $OutputPath)
     $phase = 'Starting'; [double]$fraction = 0; $trackDetail = 'waiting for nibconv output'
     $conversionProblem = $null
     $diskClock = [Diagnostics.Stopwatch]::StartNew()
     try {
         do {
             $finished = $capture.Child.HasExited
-            if ($finished) { $capture.Child.WaitForExit() }
+            if ($diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
+            if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
+            if ($finished -and -not $capture.WaitOutput(5000)) {throw 'nibconv diagnostic capture did not complete. Original kept.'}
+            if ($capture.CaptureFailed) {throw 'nibconv diagnostic capture failed. Original kept.'}
             while ($null -ne ($line = $capture.NextLine())) {
                 Write-Log ('nibconv: ' + $line)
                 if ($line -match 'Not valid NIB data') { $conversionProblem = $line.Trim() }
@@ -120,6 +87,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
             Show-Stage (0.15 + 0.65 * (($Index + $fraction) / $Count)) ('Converting disk {0}/{1}' -f ($Index+1),$Count) $detail
             if (-not $finished) { Start-Sleep -Milliseconds 125 }
         } while (-not $finished)
+        if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
         if ($capture.Child.ExitCode -ne 0) { throw "nibconv exit code $($capture.Child.ExitCode)." }
         if ($conversionProblem) { throw $conversionProblem }
         if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output. See the log for its messages.' }
@@ -199,62 +167,86 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
     $installed = New-Object 'System.Collections.Generic.List[object]'
     $locks = New-Object 'System.Collections.Generic.List[System.IDisposable]'
     $targets = New-Object 'System.Collections.Generic.List[object]'
+    $replaceTargets = New-Object 'System.Collections.Generic.List[object]'
     foreach ($item in $Items) { $targets.Add($item) }
     foreach ($item in $Retired) { $targets.Add($item) }
     if ($LegacyPath) { $targets.Add([pscustomobject]@{ Destination = $LegacyPath; Folder = $LegacyFolder }) }
+    $directoryLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
     try {
-        # Validate every existing path before moving anything.
-        foreach ($item in $targets) {
-            if (Test-Path -LiteralPath $item.Destination) {
-                if (-not $Overwrite) { throw 'An output appeared during processing. Original kept; rerun to choose overwrite.' }
-                $old = Get-Item -LiteralPath $item.Destination -Force
-                if ([bool]$old.PSIsContainer -ne [bool]$item.Folder) { throw "Output has the wrong type: $($item.Destination)" }
-                if ($old.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Output is a link: $($item.Destination)" }
+        try {
+            $parents=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            foreach ($item in $targets) {[void]$parents.Add([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($item.Destination)))}
+            foreach ($item in $Items) {[void]$parents.Add([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($item.Staged)))}
+            foreach ($parent in $parents) {
+                # Missing retired outputs have no directory to change. Pin the nearest
+                # existing ancestor so it cannot be redirected during the transaction.
+                $parentAnchor=$parent
+                while (-not (Test-Path -LiteralPath $parentAnchor)) {$parentAnchor=[IO.Path]::GetDirectoryName($parentAnchor)}
+                $directoryLocks.Add((Open-SourcePolicyDirectoryLease $parentAnchor))
+            }
+            # Validate every existing path before moving anything.
+            foreach ($item in $targets) {
+                if (Test-Path -LiteralPath $item.Destination) {
+                    if (-not $Overwrite) { throw 'An output appeared during processing. Original kept; rerun to choose overwrite.' }
+                    $old = Get-Item -LiteralPath $item.Destination -Force
+                    if ([bool]$old.PSIsContainer -ne [bool]$item.Folder) { throw "Output has the wrong type: $($item.Destination)" }
+                    if ($old.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Output is a link: $($item.Destination)" }
+                    $replaceTargets.Add($item)
+                }
+            }
+            # Only retire paths that were present and validated above. A newly
+            # appearing retired output belongs to someone else until checked.
+            foreach ($item in $replaceTargets) {
+                if (Test-Path -LiteralPath $item.Destination) {
+                    $backup = Join-Path ([IO.Path]::GetDirectoryName($item.Destination)) ('.m3u_' + [Guid]::NewGuid().ToString('N') + '.backup')
+                    Move-OutputPath $item.Destination $backup ([bool]$item.Folder)
+                    $backups.Add([pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder })
+                    Write-Log ('BACKUP: {0} -> {1}' -f $item.Destination, $backup)
+                }
+            }
+            foreach ($item in $Items) {
+                Move-OutputPath $item.Staged $item.Destination ([bool]$item.Folder)
+                $installed.Add($item)
+                if ($item.Folder) { Assert-FolderManifest $item.Destination $item.Manifest }
+                if (-not $item.Folder) {
+                    $lock = [IO.File]::Open($item.Destination, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                    $locks.Add($lock)
+                    $hash=Get-StreamHash $lock ([IO.Path]::GetFileName($item.Destination))
+                    if ($hash -ne $item.Hash) { throw "Installed file did not match verified output: $($item.Destination)" }
+                }
+            }
+        } catch {
+            $message = $_.Exception.Message
+            foreach ($lock in $locks) { $lock.Dispose() }
+            $locks.Clear()
+            for ($i = $installed.Count - 1; $i -ge 0; $i--) {
+                $item = $installed[$i]
+                # A failed verification may mean another program replaced the
+                # installed path. Retain anything moved back; cleanup must not
+                # delete unverified data merely because it now has a temp name.
+                $item | Add-Member -NotePropertyName PreserveStaging -NotePropertyValue $true -Force
+                try {
+                    Move-OutputPath $item.Destination $item.Staged ([bool]$item.Folder)
+                    $message += " Recovery output retained at: $($item.Staged)."
+                }
+                catch { $message += " Could not move back new output: $($item.Destination)." }
+            }
+            for ($i = $backups.Count - 1; $i -ge 0; $i--) {
+                $item = $backups[$i]
+                try { Move-OutputPath $item.Backup $item.Path ([bool]$item.Folder) }
+                catch { $message += " Previous output preserved at: $($item.Backup)." }
+            }
+            throw $message
+        }
+        foreach ($item in $backups) {
+            try { Remove-SourcePolicyOwnedPath $item.Backup ([IO.Path]::GetDirectoryName($item.Backup)) }
+            catch {
+                Write-Log ('Previous output backup could not be removed: ' + $item.Backup)
+                Write-Notice 'WARNING' ('Previous output backup remains at: ' + $item.Backup)
             }
         }
-        foreach ($item in $targets) {
-            if (Test-Path -LiteralPath $item.Destination) {
-                $backup = Join-Path ([IO.Path]::GetDirectoryName($item.Destination)) ('.m3u_' + [Guid]::NewGuid().ToString('N') + '.backup')
-                Move-OutputPath $item.Destination $backup ([bool]$item.Folder)
-                $backups.Add([pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder })
-                Write-Log ('BACKUP: {0} -> {1}' -f $item.Destination, $backup)
-            }
-        }
-        foreach ($item in $Items) {
-            Move-OutputPath $item.Staged $item.Destination ([bool]$item.Folder)
-            $installed.Add($item)
-            if ($item.Folder) { Assert-FolderManifest $item.Destination $item.Manifest }
-            if (-not $item.Folder) {
-                $lock = [IO.File]::Open($item.Destination, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-                $locks.Add($lock)
-                $hash=Get-StreamHash $lock ([IO.Path]::GetFileName($item.Destination))
-                if ($hash -ne $item.Hash) { throw "Installed file did not match verified output: $($item.Destination)" }
-            }
-        }
-    } catch {
-        $message = $_.Exception.Message
-        foreach ($lock in $locks) { $lock.Dispose() }
-        $locks.Clear()
-        for ($i = $installed.Count - 1; $i -ge 0; $i--) {
-            $item = $installed[$i]
-            try { Move-OutputPath $item.Destination $item.Staged ([bool]$item.Folder) }
-            catch { $message += " Could not move back new output: $($item.Destination)." }
-        }
-        for ($i = $backups.Count - 1; $i -ge 0; $i--) {
-            $item = $backups[$i]
-            try { Move-OutputPath $item.Backup $item.Path ([bool]$item.Folder) }
-            catch { $message += " Previous output preserved at: $($item.Backup)." }
-        }
-        throw $message
-    }
-    foreach ($item in $backups) {
-        try { Remove-Item -LiteralPath $item.Backup -Recurse -Force -ErrorAction Stop }
-        catch {
-            Write-Log ('Previous output backup could not be removed: ' + $item.Backup)
-            Write-Notice 'WARNING' ('Previous output backup remains at: ' + $item.Backup)
-        }
-    }
-    return [pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
+        return [pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
+    } finally {foreach ($directoryLock in $directoryLocks) {$directoryLock.Dispose()}}
 }
 
 
@@ -375,6 +367,7 @@ function Get-ZipChecksums([string]$Path,[int]$EntryCount) {
 }
 
 function Write-Log([string]$Message) {
+    $Message=ConvertTo-SafeExternalText $Message
     if ($script:Log) {
         try { $script:Log.WriteLine(('[{0:HH:mm:ss}] {1}' -f (Get-Date), $Message)) }
         catch {
@@ -450,6 +443,7 @@ function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Len
     Show-Stage 0 $action $Name 0
     try {
         while (($n=$InputStream.Read($buffer,0,$buffer.Length)) -gt 0) {
+            if ($n -gt $Length-$total) {throw "Stream exceeds its declared size: $Name"}
             $OutputStream.Write($buffer,0,$n)
             [void]$sha.TransformBlock($buffer,0,$n,$buffer,0)
             if ($crc) {$crc.Update($buffer,$n)}
@@ -510,17 +504,17 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive) {
     }
     $tracks=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @($disks | Where-Object {[IO.Path]::GetExtension($_) -eq '.cue'})) {
-        $entry=$Archive.GetEntry($name); $reader=$null
+        $entry=$Archive.GetEntry($name); $cueStream=$null
         try {
-            $reader=New-Object IO.StreamReader($entry.Open())
-            $lines=New-Object 'System.Collections.Generic.List[string]'
-            while (-not $reader.EndOfStream) {$lines.Add($reader.ReadLine())}
+            $cueStream=$entry.Open()
+            $text=Read-OptiBoundedText $cueStream 1MB ('CUE '+$name) $entry.Length
+            $lines=[regex]::Split($text,'\r\n|\r|\n')
             $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
             foreach ($track in @(Get-CueReferences @($lines) $name)) {
                 $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
                 [void]$tracks.Add($relative)
             }
-        } finally {if ($reader) {$reader.Dispose()}}
+        } finally {if ($cueStream) {$cueStream.Dispose()}}
     }
     $disks=@($disks | Where-Object {-not $tracks.Contains($_)})
     $stems=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -749,14 +743,29 @@ function Add-CopiedFile([string]$Source,[string]$Name,[string]$Directory,[hashta
     $SourceHashes[[IO.Path]::GetFullPath($Source)]=$Manifest[$Name].Hash
 }
 
+function Get-SbiCompanions([string]$DiskPath) {
+    # Ask the filesystem for this disc's sidecar rather than materializing every
+    # sibling for every disc. -Filter uses filesystem wildcards (brackets are
+    # literal); the exact check also rejects any legacy short-name matches.
+    # Query afresh at each planning/copy boundary so changes are still detected.
+    $parent=[IO.Path]::GetDirectoryName($DiskPath)
+    $stem=[IO.Path]::GetFileNameWithoutExtension($DiskPath)
+    foreach ($item in @(Get-ChildItem -LiteralPath $parent -File -Force -Filter ($stem+'.sbi'))) {
+        if ($item.Extension -eq '.sbi' -and $item.BaseName -eq $stem) {$item}
+    }
+}
+
 function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
+    if ($Lines.Count -gt 16384) {throw "CUE has more than 16,384 lines: $CuePath"}
     $found=New-Object 'System.Collections.Generic.List[string]'
     foreach ($line in $Lines) {
+        if ($line.Length -gt 8192) {throw "CUE line exceeds 8,192 characters: $CuePath"}
         if ($line -match '^\s*FILE\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$') {
             $name=$Matches[1]; if (-not $name) {$name=$Matches[2]}
             # Paths are copied unchanged. Backslashes and parent traversal are
             # rejected because the target is a Linux handheld.
             Assert-RelativeName $name
+            if ($found.Count -ge 1024) {throw "CUE has more than 1,024 FILE references: $CuePath"}
             $found.Add($name)
         } elseif ($line -match '^\s*FILE\b') {throw "Unrecognized CUE FILE line in $CuePath"}
     }
@@ -765,7 +774,8 @@ function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
 }
 
 function Get-CueFiles([string]$CuePath) {
-    return @(Get-CueReferences ([IO.File]::ReadAllLines($CuePath)) $CuePath)
+    $text=Read-OptiTextFile $CuePath 1MB ('CUE '+$CuePath)
+    return @(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $CuePath)
 }
 
 function Assert-GameOutputFolder([string]$Directory,[string[]]$ExpectedNames) {
@@ -786,13 +796,24 @@ function Assert-GameOutputFolder([string]$Directory,[string[]]$ExpectedNames) {
     }
 }
 
-function Assert-OwnedPlaylist([string]$Path,[string]$Stem) {
+function Read-PlaylistLines([string]$Path) {
+    $text=Read-OptiTextFile $Path 1MB 'Existing playlist'
+    $lines=[regex]::Split($text,'\r\n|\r|\n')
+    if ($lines.Count -gt 16384) {throw 'Existing playlist exceeds the supported line count; output left alone.'}
+    foreach ($line in $lines) {
+        if ($line.Length -gt 8192) {throw 'Existing playlist contains an overlong line; output left alone.'}
+    }
+    return ,$lines
+}
+
+function Assert-OwnedPlaylist([string]$Path,[string]$Stem,[string[]]$Lines=$null) {
     # Only retire a playlist generated for this exact game's hidden media.
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {return}
     $depth=@($Stem.Split('/')).Count-1
     $prefix=('../'*$depth)+'.hidden/'+$Stem
     $count=0
-    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+    if ($null -eq $Lines) {$Lines=Read-PlaylistLines $Path}
+    foreach ($line in $Lines) {
         if ([string]::IsNullOrWhiteSpace($line)) {continue}
         if ($line.StartsWith($prefix+'/',[StringComparison]::Ordinal)) {$member=$line.Substring($prefix.Length+1)}
         elseif ($line.StartsWith($prefix+'.zip#',[StringComparison]::Ordinal)) {$member=$line.Substring($prefix.Length+5)}
@@ -806,7 +827,7 @@ function Assert-OwnedPlaylist([string]$Path,[string]$Stem) {
 function Get-GameMediaNames($Job,[string]$Storage='Auto') {
     $diskNames=@(); $contentNames=@()
     if ($Job.Zip) {
-        $archive=[IO.Compression.ZipFile]::OpenRead($Job.Zip)
+        $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive)
             $hasNib=@($diskNames | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count -gt 0
@@ -819,7 +840,7 @@ function Get-GameMediaNames($Job,[string]$Storage='Auto') {
         foreach ($disk in $Job.Disks) {
             $parent=[IO.Path]::GetDirectoryName($disk.Path)
             if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
-            $contentNames+=@(Get-ChildItem -LiteralPath $parent -File -Force | Where-Object {$_.Extension -eq '.sbi' -and $_.BaseName -eq [IO.Path]::GetFileNameWithoutExtension($disk.Path)} | ForEach-Object {$_.Name})
+            $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {$_.Name})
         }
     }
     return [pscustomobject]@{DiskNames=$diskNames;ContentNames=$contentNames}
@@ -926,10 +947,11 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
 function Get-PlaylistOwnedMedia([string]$Path,[string]$Stem,[string]$Root) {
     $owned=@{}
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {return $owned}
-    Assert-OwnedPlaylist $Path $Stem
+    $lines=Read-PlaylistLines $Path
+    Assert-OwnedPlaylist $Path $Stem $lines
     $depth=@($Stem.Split('/')).Count-1
     $prefix=('../'*$depth)+'.hidden/'+$Stem
-    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+    foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) {continue}
         $suffix='';$offset=$prefix.Length+1
         if ($line.StartsWith($prefix+'.zip#',[StringComparison]::Ordinal)) {$suffix='.zip';$offset=$prefix.Length+5}
@@ -955,7 +977,7 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets) {
             }
             if ($file.PSIsContainer) {$pending.Push($file.FullName);continue}
             if ($file.Extension -notin '.m3u','.m3u8' -or $file.FullName.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)) {continue}
-            foreach ($line in [IO.File]::ReadAllLines($file.FullName)) {
+            foreach ($line in (Read-PlaylistLines $file.FullName)) {
                 $reference=$line.Trim()
                 if (-not $reference -or $reference.StartsWith('#')) {continue}
                 $reference=($reference -split '#',2)[0].Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
@@ -995,7 +1017,7 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames) {
             $oldArchive=$null
             try {
                 if (-not $target.Folder) {
-                    $oldArchive=[IO.Compression.ZipFile]::OpenRead($target.Destination)
+                    $oldArchive=Open-ArchiveWithBudget -Path $target.Destination -Profile Media
                     $null=Get-ZipDisks $oldArchive
                 }
                 foreach ($name in $owned[$target.Destination]) {
@@ -1006,9 +1028,11 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames) {
                         } else {
                             $cueEntry=$oldArchive.GetEntry($name)
                             if ($null -eq $cueEntry) {throw 'An existing playlist references a missing CUE; output left alone.'}
-                            $reader=New-Object IO.StreamReader($cueEntry.Open())
-                            try {$tracks=@(Get-CueReferences ($reader.ReadToEnd() -split '\r?\n') $name)}
-                            finally {$reader.Dispose()}
+                            $cueStream=$cueEntry.Open()
+                            try {
+                                $text=Read-OptiBoundedText $cueStream 1MB ('CUE '+$name) $cueEntry.Length
+                                $tracks=@(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $name)
+                            } finally {$cueStream.Dispose()}
                         }
                         foreach ($track in $tracks) {
                             $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
@@ -1044,7 +1068,7 @@ function Copy-LooseSet($Job,[string]$Directory,[hashtable]$SourceHashes=@{}) {
                 Add-CopiedFile (Join-Path $parent $name.Replace('/',[IO.Path]::DirectorySeparatorChar)) $name $Directory $manifest $SourceHashes
             }
         }
-        $sbiFiles=@(Get-ChildItem -LiteralPath $parent -File -Force | Where-Object {$_.Extension -eq '.sbi' -and $_.BaseName -eq [IO.Path]::GetFileNameWithoutExtension($disk.Path)})
+        $sbiFiles=@(Get-SbiCompanions $disk.Path)
         if ($sbiFiles.Count -gt 1) {throw 'Several SBI sidecars match one disc.'}
         foreach ($sbi in $sbiFiles) {Add-CopiedFile $sbi.FullName ([IO.Path]::GetFileNameWithoutExtension($disk.Name)+'.sbi') $Directory $manifest $SourceHashes}
     }
@@ -1059,7 +1083,7 @@ function Get-JobSourcePaths($Job) {
         if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {
             foreach ($name in @(Get-CueFiles $disk.Path)) {Join-Path $parent $name.Replace('/',[IO.Path]::DirectorySeparatorChar)}
         }
-        foreach ($sbi in @(Get-ChildItem -LiteralPath $parent -File -Force | Where-Object {$_.Extension -eq '.sbi' -and $_.BaseName -eq [IO.Path]::GetFileNameWithoutExtension($disk.Path)})) {$sbi.FullName}
+        foreach ($sbi in @(Get-SbiCompanions $disk.Path)) {$sbi.FullName}
     }
 }
 
@@ -1100,19 +1124,36 @@ function Convert-NibSet([string[]]$Names,[string]$Directory) {
         if ((Test-Path -LiteralPath (Join-Path $Directory $target)) -or -not $targets.Add($target)) {throw "NIB conversion conflicts with an existing G64: $name"}
     }
     $temp=Join-Path ([IO.Path]::GetTempPath()) ('m3un_'+[Guid]::NewGuid().ToString('N').Substring(0,12))
-    [void][IO.Directory]::CreateDirectory($temp)
+    $tempParentLock=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($temp))
+    $tempLock=$null
     try {
+        [void][IO.Directory]::CreateDirectory($temp)
+        $tempLock=Open-SourcePolicyDirectoryLease $temp
         for ($i=0;$i -lt $nibs.Count;$i++) {
             $name=$nibs[$i]; $path=Join-Path $Directory $name
             $inputPath=Join-Path $temp ('input'+[IO.Path]::GetExtension($name).ToLowerInvariant())
             $outputPath=Join-Path $temp 'output.g64'
-            Assert-NibSource $path
-            [IO.File]::Copy($path,$inputPath)
-            Invoke-NibConversion $inputPath $outputPath $i $nibs.Count $name
-            [IO.File]::Move($outputPath,[IO.Path]::ChangeExtension($path,'.g64'))
-            [IO.File]::Delete($path); [IO.File]::Delete($inputPath)
+            $mediaParentLock=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($path))
+            try {
+                Assert-NibSource $path
+                [IO.File]::Copy($path,$inputPath)
+                $nativeInputLease=$null
+                try {
+                    $nativeInputLease=Open-SourcePolicyReadLease $inputPath $temp
+                    Assert-NibSource $inputPath
+                    Invoke-NibConversion $inputPath $outputPath $i $nibs.Count $name
+                } finally {if ($nativeInputLease) {$nativeInputLease.Dispose()}}
+                [IO.File]::Move($outputPath,[IO.Path]::ChangeExtension($path,'.g64'))
+                Remove-SourcePolicyOwnedPath $path $Directory
+                Remove-SourcePolicyOwnedPath $inputPath $temp
+            } finally {$mediaParentLock.Dispose()}
         }
-    } finally {Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
+    } finally {
+        if ($tempLock) {$tempLock.Dispose()}
+        try {if (Test-Path -LiteralPath $temp) {Remove-SourcePolicyOwnedPath $temp ([IO.Path]::GetDirectoryName($temp))}}
+        catch {Write-Event 'WARNING' ('Conversion temporary files retained: '+$temp+' / '+$_.Exception.Message)}
+        finally {$tempParentLock.Dispose()}
+    }
     foreach ($name in $Names) {
         if ([IO.Path]::GetExtension($name) -in '.nib','.nbz') {[IO.Path]::ChangeExtension($name,'.g64')}
         else {$name}
@@ -1173,7 +1214,7 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
     if ($script:UiMenuActive) {
         if ($Compact) {$Text=$Compact}
         $script:UiMenuLines.Add($Text)
-    } else {Write-Host $Text}
+    } else {Write-Host (ConvertTo-SafeExternalText $Text)}
 }
 
 function Invoke-MenuWorker([string]$Path,[hashtable]$Arguments) {
@@ -1183,7 +1224,7 @@ function Invoke-MenuWorker([string]$Path,[hashtable]$Arguments) {
     try {
         & $Path @Arguments | Out-Host
         $code=$LASTEXITCODE
-    } catch {Write-Host ('  ERROR: '+$_.Exception.Message)}
+    } catch {Write-Host (ConvertTo-SafeExternalText ('  ERROR: '+$_.Exception.Message))}
     finally {Initialize-Display}
     return [int]$code
 }
@@ -1416,7 +1457,16 @@ try {
     $script:Clock.Restart()
     $stamp='{0}_{1}' -f (Get-Date -Format 'yyyyMMdd_HHmmss_fff'),$PID
     $logPath=Join-Path $Root ('OptiMiyoo_'+$stamp+'.log')
-    $script:Log=New-Object IO.StreamWriter($logPath,$false,[Text.Encoding]::UTF8)
+    $logParentLease=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($logPath))
+    $logHandle=$null
+    try {
+        $logHandle=[IO.File]::Open($logPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+        $script:Log=New-Object IO.StreamWriter($logHandle,[Text.Encoding]::UTF8)
+        $logHandle=$null
+    } finally {
+        if ($logHandle) {$logHandle.Dispose()}
+        $logParentLease.Dispose()
+    }
     $script:Log.AutoFlush=$true
     Write-Log ('OptiMiyoo v{0} | System: {1} | Storage: {2}' -f $script:AppVersion,$System,$Storage)
     Write-Log ('Source policy: '+$SourcePolicy)
@@ -1526,7 +1576,8 @@ try {
         $script:UiGame=$job.Stem; $script:UiSystem=$job.System; $script:UiLastStage=''
         Write-Event 'GAME' ('{0}/{1} | {2}/{3}' -f ($script:Processed+1),$script:Total,$job.System,$job.Source)
         $destinationRoot=Join-Path $Root 'DST'
-        $stageData=$null; $stageM3u=$null; $workData=$null; $commit=$null; $archive=$null; $sourceLock=$null
+        $stageData=$null; $stageM3u=$null; $workData=$null; $commit=$null; $archive=$null; $sourceLock=$null; $items=@()
+        $outputDirectoryLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
         $zipMode=([bool]$profile.Zip -and $Storage -eq 'Auto' -and [bool]$job.Zip)
         $result=[pscustomobject]@{System=$job.System; Source=$job.Source; Playlist=($job.Stem+$profile.Playlist); DiskImages=0; Result='Failed'; Original='Kept in SRC'; RemovedFiles=0; KeptFiles=0; RemovalFailures=0; Detail=''}
         if ($job.OutputPlan) {
@@ -1546,6 +1597,7 @@ try {
             Show-Stage 0.01 'Inspecting game media' ($job.System+'/'+$job.Source)
             if ($job.Zip) {
                 $sourceLock=[IO.File]::Open($job.Zip,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+                Assert-ArchiveBudget -Stream $sourceLock -Profile Media
                 $archive=New-Object IO.Compression.ZipArchive($sourceLock,[IO.Compression.ZipArchiveMode]::Read,$true)
                 $diskNames=@(Get-ZipDisks $archive)
                 $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
@@ -1555,7 +1607,7 @@ try {
                 foreach ($disk in $job.Disks) {
                     $parent=[IO.Path]::GetDirectoryName($disk.Path)
                     if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
-                    $contentNames+=@(Get-ChildItem -LiteralPath $parent -File -Force | Where-Object {$_.Extension -eq '.sbi' -and $_.BaseName -eq [IO.Path]::GetFileNameWithoutExtension($disk.Path)} | ForEach-Object {$_.Name})
+                    $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {$_.Name})
                 }
             }
             $result.DiskImages=$diskNames.Count
@@ -1594,7 +1646,13 @@ try {
             }
             $expectedNames=@($contentNames)+@($contentNames | ForEach-Object {if ([IO.Path]::GetExtension($_) -in '.nib','.nbz') {[IO.Path]::ChangeExtension($_,'.g64')}})
             Assert-PlaylistOutputOwnership $plan $expectedNames
-            foreach ($path in @($dataPath,$m3uPath)) {[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path))}
+            foreach ($path in @($dataPath,$m3uPath)) {
+                $parent=[IO.Path]::GetDirectoryName($path); $parentAnchor=$parent
+                while (-not (Test-Path -LiteralPath $parentAnchor)) {$parentAnchor=[IO.Path]::GetDirectoryName($parentAnchor)}
+                $outputDirectoryLocks.Add((Open-SourcePolicyDirectoryLease $parentAnchor))
+                [void][IO.Directory]::CreateDirectory($parent)
+                if ($parent -ne $parentAnchor) {$outputDirectoryLocks.Add((Open-SourcePolicyDirectoryLease $parent))}
+            }
             $stageData=Join-Path ([IO.Path]::GetDirectoryName($dataPath)) ('.m3u_'+[Guid]::NewGuid().ToString('N')+'.tmp')
             if ($isMulti) {$stageM3u=Join-Path ([IO.Path]::GetDirectoryName($m3uPath)) ('.m3u_'+[Guid]::NewGuid().ToString('N')+'.tmp')}
             Write-Event 'MEDIA COUNT' ('{0} playable image(s); {1}' -f $diskNames.Count,$(if ($isMulti) {'multi-media playlist'} else {'single-media game; no playlist'}))
@@ -1625,7 +1683,7 @@ try {
                     Assert-CueTargets $diskNames $workData
                     if ($zipMode) {
                         New-OutputZip $workData $stageData
-                        $checkZip=[IO.Compression.ZipFile]::OpenRead($stageData)
+                        $checkZip=Open-ArchiveWithBudget -Path $stageData -Profile Media
                         try {
                             $checkManifest=Read-ZipContents $checkZip '' $stageData
                             if ($checkManifest.Count -ne $manifest.Count) {throw 'Repacked ZIP file count mismatch.'}
@@ -1686,8 +1744,17 @@ try {
             if ($sourceLock) {$sourceLock.Dispose()}
             if ($commit) {foreach ($lock in $commit.Locks) {$lock.Dispose()}}
             foreach ($path in @($stageData,$stageM3u,$workData)) {
-                if ($path -and (Test-Path -LiteralPath $path)) {Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue}
+                if ($path -and (Test-Path -LiteralPath $path)) {
+                    $retain=$false
+                    foreach ($item in $items) {
+                        if ($item.PreserveStaging -and (Test-OutputPathOverlap $path $item.Staged)) {$retain=$true; break}
+                    }
+                    if ($retain) {Write-Event 'WARNING' ('Recovery output retained: '+$path); continue}
+                    try {Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}
+                    catch {Write-Event 'WARNING' ('Temporary output retained: '+$path+' / '+$_.Exception.Message)}
+                }
             }
+            foreach ($directoryLock in $outputDirectoryLocks) {$directoryLock.Dispose()}
             Write-Log ('{0}: {1}/{2} | {3}' -f $result.Result,$job.System,$job.Source,$result.Detail)
             $results.Add($result); $script:Processed++
         }
@@ -1707,8 +1774,13 @@ try {
     $reportSaved=$false
     if ($results.Count -gt 0) {
         $reportPath=[IO.Path]::ChangeExtension($logPath,'.csv')
-        try {$results | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8; $reportSaved=$true}
-        catch {$script:ReportProblem=$true; Write-Event 'WARNING' ('Report could not be saved: '+$_.Exception.Message)}
+        $reportParentLease=$null
+        try {
+            $reportParentLease=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($reportPath))
+            $results | ConvertTo-SafeReportRow | Export-Csv -LiteralPath $reportPath -NoClobber -NoTypeInformation -Encoding UTF8
+            $reportSaved=$true
+        } catch {$script:ReportProblem=$true; Write-Event 'WARNING' ('Report could not be saved: '+$_.Exception.Message)}
+        finally {if ($reportParentLease) {$reportParentLease.Dispose()}}
     }
     $script:Clock.Stop()
     Show-ClosingPanel -RemovalFailures $sourceSummary.Failed

@@ -5,6 +5,8 @@ $exitCode=0
 $ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir 'core_support.ps1')
 . (Join-Path $ScriptDir 'compile_support.ps1')
+. (Join-Path $ScriptDir 'output_safety.ps1')
+function Write-OnionText([string]$Text) {Write-Host (ConvertTo-SafeExternalText $Text)}
 function Initialize-OnionPathLease {
     if ('OptiMiyoo.OnionPathLease' -as [type]) {return}
     Add-OptiMiyooType -TypeDefinition @'
@@ -87,6 +89,15 @@ namespace OptiMiyoo {
 }
 '@
 }
+function Write-OnionBytesVerified([IO.FileStream]$Stream,[byte[]]$Bytes,[string]$Description) {
+    $Stream.Position=0
+    $Stream.Write($Bytes,0,$Bytes.Length); $Stream.SetLength($Bytes.Length); $Stream.Flush($true)
+    $Stream.Position=0
+    $memory=New-Object IO.MemoryStream
+    try {$Stream.CopyTo($memory); $checked=$memory.ToArray()} finally {$memory.Dispose()}
+    if ([Convert]::ToBase64String($checked) -cne [Convert]::ToBase64String($Bytes)) {throw ($Description+' verification failed.')}
+}
+
 $rootLease=$null
 try {
     if (-not $OnionRoot) {$OnionRoot=([string](Read-Host 'SD card root, for example E:\')).Trim().Trim('"')}
@@ -101,17 +112,17 @@ try {
     $profiles=@($profileData)
     $backupRoot=Join-Path $OnionRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
     $changed=0; $unsupported=0
-    Write-Host 'Checking selected cores. Setup only adds supported file-list extensions to config.json.'
+    Write-OnionText 'Checking selected cores. Setup only adds supported file-list extensions to config.json.'
     foreach ($profile in $profiles) {
         $support=Get-PlaylistSupport $profile $OnionRoot
         if ($support.Status -eq 'NOT INSTALLED') {continue}
         if ($profile.Folder -eq 'COMMODORE') {
             $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $support
-            Write-Host ('TAPES '+$tapeSupport.Status+': COMMODORE / '+$tapeSupport.Core+' - '+$tapeSupport.Reason)
+            Write-OnionText ('TAPES '+$tapeSupport.Status+': COMMODORE / '+$tapeSupport.Core+' - '+$tapeSupport.Reason)
         }
         if (-not $support.CanBuild) {
             $unsupported++
-            Write-Host ($support.Status+': '+$profile.Folder+' / '+$support.Core+' - '+$support.Reason)
+            Write-OnionText ($support.Status+': '+$profile.Folder+' / '+$support.Core+' - '+$support.Reason)
             continue
         }
         $folder=$profile.Folder; $configPath=$support.ConfigPath
@@ -125,6 +136,7 @@ try {
             if (-not $fresh.CanBuild -or $fresh.Core -ne $support.Core) {throw 'Selected core changed during setup. Run the check again.'}
             $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$false,$false)
             $stream=$configLease.Stream
+            if ($stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $original=$memory.ToArray()} finally {$memory.Dispose()}
             $utf8=New-Object Text.UTF8Encoding($false,$true)
@@ -138,7 +150,7 @@ try {
                 if ($tapeSupport.CanBuild) {$extensions+=@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.')})}
             }
             $missing=@($extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
-            if ($missing.Count -eq 0) {Write-Host ('READY: '+$folder+' / '+$support.Core); continue}
+            if ($missing.Count -eq 0) {Write-OnionText ('READY: '+$folder+' / '+$support.Core); continue}
             $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')
             if ($rx.Matches($raw).Count -ne 1) {throw 'Ambiguous extlist in config.'}
             $newRaw=$rx.Replace($raw,('${1}${2}|'+($missing -join '|')+'${3}'))
@@ -150,30 +162,29 @@ try {
             $configLease.Dispose(); $configLease=$null; $stream=$null
             $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$true,$false)
             $stream=$configLease.Stream
+            if ($stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $current=$memory.ToArray()} finally {$memory.Dispose()}
-            if ([Convert]::ToBase64String($current) -ne [Convert]::ToBase64String($original)) {throw 'Config changed during setup. Run the check again.'}
+            if ([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($original)) {throw 'Config changed during setup. Run the check again.'}
             $backup=Join-Path $backupRoot $support.EmuFolder
             Assert-PlainOnionPath $backup $OnionRoot
             [void][IO.Directory]::CreateDirectory($backup)
             $backupLease=[OptiMiyoo.OnionPathLease]::Open((Join-Path $backup 'config.json'),$OnionRoot,$false,$true,$true)
-            $backupLease.Stream.Write($original,0,$original.Length); $backupLease.Stream.Flush($true)
-            $stream.Position=0; $writeStarted=$true
-            $stream.Write($newBytes,0,$newBytes.Length); $stream.SetLength($newBytes.Length); $stream.Flush($true)
-            $stream.Position=0; $memory=New-Object IO.MemoryStream
-            try {$stream.CopyTo($memory); $checked=$memory.ToArray()} finally {$memory.Dispose()}
-            if ([Convert]::ToBase64String($checked) -ne [Convert]::ToBase64String($newBytes)) {throw 'Config verification failed.'}
+            # Verify the saved original before changing the live config. Both
+            # checks use the held handles, including any subsequent restoration.
+            Write-OnionBytesVerified $backupLease.Stream $original 'SD backup'
+            $writeStarted=$true
+            Write-OnionBytesVerified $stream $newBytes 'Updated config'
             $changed++
-            Write-Host ('UPDATED: '+$folder+' / '+$support.Core+' / '+($missing -join ', ')+' visible')
+            Write-OnionText ('UPDATED: '+$folder+' / '+$support.Core+' / '+($missing -join ', ')+' visible')
         } catch {
             $exitCode=1
             if ($writeStarted -and $stream -and $null -ne $original) {
                 try {
-                    $stream.Position=0; $stream.Write($original,0,$original.Length)
-                    $stream.SetLength($original.Length); $stream.Flush($true)
-                } catch {Write-Host ('RESTORE FAILED: restore config.json from '+$backupRoot+' / '+$_.Exception.Message)}
+                    Write-OnionBytesVerified $stream $original 'Restored config'
+                } catch {Write-OnionText ('RESTORE FAILED: restore config.json from '+$backupRoot+' / '+$_.Exception.Message)}
             }
-            Write-Host ('SKIPPED: '+$folder+' - '+$_.Exception.Message)
+            Write-OnionText ('SKIPPED: '+$folder+' - '+$_.Exception.Message)
         } finally {
             if ($backupLease) {$backupLease.Dispose()}
             if ($configLease) {$configLease.Dispose()}
@@ -181,8 +192,8 @@ try {
             if ($launchLock) {$launchLock.Dispose()}
         }
     }
-    Write-Host ("$changed system setup(s) updated; $unsupported unsupported/unverified. Selected cores preserved.")
-    if ($changed -gt 0) {Write-Host ('Original config.json files: '+$backupRoot); Write-Host 'Refresh the Onion game list.'}
-} catch {$exitCode=1; Write-Host ('ERROR: '+$_.Exception.Message)} finally {if ($rootLease) {$rootLease.Dispose()}}
+    Write-OnionText ("$changed system setup(s) updated; $unsupported unsupported/unverified. Selected cores preserved.")
+    if ($changed -gt 0) {Write-OnionText ('Original config.json files: '+$backupRoot); Write-OnionText 'Refresh the Onion game list.'}
+} catch {$exitCode=1; Write-OnionText ('ERROR: '+$_.Exception.Message)} finally {if ($rootLease) {$rootLease.Dispose()}}
 if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
 exit $exitCode

@@ -76,9 +76,22 @@ namespace OptiMiyoo {
             if (bytes.Length != 256 + count * TrackSize) throw Bad("track data length does not match the NIB header");
         }
         public static void Validate(string path) {
-            FileInfo info = new FileInfo(path);
-            if (info.Length < 1 || info.Length > NativeBuffer) throw Bad("unsupported input size");
-            byte[] bytes = File.ReadAllBytes(path);
+            byte[] bytes;
+            // Size and bytes must come from the same locked handle. A pathname
+            // length check followed by ReadAllBytes can allocate an arbitrarily
+            // grown/replaced input before its structural checks run.
+            using (FileStream input = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                long length = input.Length;
+                if (length < 1 || length > NativeBuffer) throw Bad("unsupported input size");
+                bytes = new byte[(int)length];
+                int total = 0;
+                while (total < bytes.Length) {
+                    int read = input.Read(bytes, total, bytes.Length - total);
+                    if (read == 0) throw Bad("input changed during validation");
+                    total += read;
+                }
+                if (input.ReadByte() != -1) throw Bad("input changed during validation");
+            }
             if (String.Equals(Path.GetExtension(path), ".nbz", StringComparison.OrdinalIgnoreCase)) bytes = Decode(bytes);
             else if (!String.Equals(Path.GetExtension(path), ".nib", StringComparison.OrdinalIgnoreCase)) throw Bad("unexpected input extension");
             CheckNib(bytes);

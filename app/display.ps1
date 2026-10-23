@@ -1,6 +1,7 @@
 ﻿. (Join-Path $PSScriptRoot 'compile_support.ps1')
 # OptiMiyoo's display is deliberately separate from file processing.
 . (Join-Path $PSScriptRoot 'terminal_effects.ps1')
+. (Join-Path $PSScriptRoot 'output_safety.ps1')
 # Percentages use completed preparation items, completed jobs or measured bytes.
 function Initialize-Display {
     if ($script:UiFrameTimer) {try {$script:UiFrameTimer.Dispose()} catch {}}
@@ -14,10 +15,10 @@ function Initialize-Display {
     $script:UiMioMood=$null; $script:UiMioPoseOverride=$null
     $script:MioRenderCache=@{}
     $script:MioCrtRowCache=@{}
-    $script:MioCrtRowOrder=New-Object 'System.Collections.Generic.Queue[string]'
+    $script:MioCrtRowOrder=[System.Collections.Generic.Queue[string]]::new()
     $script:OptiLogoFont=$null
-    $script:UiPendingEvents=New-Object 'System.Collections.Generic.List[string]'
-    $script:UiEventRows=New-Object 'System.Collections.Generic.List[string]'
+    $script:UiPendingEvents=[System.Collections.Generic.List[string]]::new()
+    $script:UiEventRows=[System.Collections.Generic.List[string]]::new()
     $script:UiBannerRows=0; $script:UiBannerTimeMs=0; $script:UiPinned=$false
     $script:UiGame='Awaiting a disk set'; $script:UiSystem='LOCAL'
     $script:UiStage='Ready'; $script:UiDetail='Source files remain in SRC.'
@@ -178,7 +179,7 @@ function Rainbow-Text([string]$Text,[bool]$Soft=$false,[int]$Shift=0) {
     if (-not $script:UiAnsi) {return $Text}
     $palette=$script:Pride; if ($Soft) {$palette=$script:Trans}
     $palette=@(Get-AnimatedPalette $palette)
-    $out=New-Object Text.StringBuilder
+    $out=[Text.StringBuilder]::new()
     $prefix=$script:Esc+'[38;2;'; $reset=$script:Esc+'[0m'
     for ($i=0;$i -lt $Text.Length;$i++) {
         $rgb=$palette[([int][Math]::Floor($i/4)+$Shift)%$palette.Count]
@@ -207,7 +208,7 @@ function Format-BorderText([string]$Text,[int]$X,[int]$Y,$Motion,[bool]$Soft=$fa
     $palette=$Motion.Pride; if ($Soft) {$palette=$Motion.Trans}
     $position=Get-BorderCellIndex $X $Y $Motion.Width $Motion.Height
     $direction=1; if ($Motion.Height -gt 1 -and $Y -eq $Motion.Height-1) {$direction=-1}
-    $out=New-Object Text.StringBuilder
+    $out=[Text.StringBuilder]::new()
     $prefix=$script:Esc+'[38;2;'; $reset=$script:Esc+'[0m'
     for ($i=0;$i -lt $Text.Length;$i++) {
         $at=$position+$i*$direction
@@ -274,7 +275,7 @@ function Get-TextPrefix([string]$Text,[int]$Width) {
     return $Text.Substring(0,$length)
 }
 function Fit-Text([string]$Text,[int]$Width) {
-    $Text=$Text -replace '[\r\n\t]',' '
+    $Text=$Text -replace '[\x00-\x1f\x7f-\x9f]',' '
     # Menu labels and padding are mostly ASCII. Keep grapheme-aware handling
     # for Unicode paths without enumerating every ordinary cell every frame.
     if ($Text -notmatch '[^\x00-\x7F]') {
@@ -322,6 +323,9 @@ function Format-InputField($Viewport,[int]$Width,[bool]$ShowCaret=$true) {
     # Decorate one complete grapheme, or its padded end-space. UTF-16 caret
     # offsets can fall inside a surrogate pair; never split it with escapes.
     $index=[Math]::Max(0,[Math]::Min($text.Length-1,$Viewport.CaretTextIndex))
+    if ($text -notmatch '[^\x00-\x7F]') {
+        return ($text.Substring(0,$index)+$script:Esc+'[7m'+$text[$index]+$script:Esc+'[27m'+$text.Substring($index+1))
+    }
     $elements=[Globalization.StringInfo]::GetTextElementEnumerator($text)
     while ($elements.MoveNext()) {
         $start=$elements.ElementIndex; $element=$elements.GetTextElement()
@@ -381,6 +385,8 @@ function Write-Event([string]$Label,[string]$Message) {
     Write-Notice $Label $Message
 }
 function Write-Notice([string]$Label,[string]$Message) {
+    $Label=ConvertTo-SafeExternalText $Label
+    $Message=ConvertTo-SafeExternalText $Message
     # Rendering is separate from logging so a failed log can safely report
     # its own warning without recursion or writing through an active panel.
     $rgb='107;216;245'
@@ -473,7 +479,7 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
             $level
         })
     }
-    $result=New-Object 'System.Collections.Generic.List[string]'
+    $result=[System.Collections.Generic.List[string]]::new()
     for ($y=0;$y -lt 24;$y+=2) {
         $topColors=$script:MioPixelColors; $bottomColors=$script:MioPixelColors
         if ($useCrt) {
@@ -484,7 +490,7 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
             $topColors=$script:MioCrtPalettes[$rowLevels[$y]]
             $bottomColors=$script:MioCrtPalettes[$rowLevels[$y+1]]
         }
-        $line=New-Object Text.StringBuilder
+        $line=[Text.StringBuilder]::new()
         for ($x=0;$x -lt 22;$x++) {
             $top=[string]$pixels[$y][$x]; $bottom=[string]$pixels[$y+1][$x]
             if ($top -eq '.' -and $bottom -eq '.') {[void]$line.Append(' '); continue}
@@ -551,7 +557,7 @@ function Get-TerminalFrame([string[]]$Lines) {
     # its first line. A compact banner keeps short windows usable.
     $available=$script:UiHeight-$Lines.Count-1
     $banner=@(Get-DisplayBanner ($available -ge 7 -and $script:UiHeight -ge 9 -and $script:UiWidth -ge 72))
-    $rows=New-Object 'System.Collections.Generic.List[string]'
+    $rows=[System.Collections.Generic.List[string]]::new()
     foreach ($row in $banner) {$rows.Add($row)}
     $noticeCount=[Math]::Max(0,[Math]::Min(3,$script:UiHeight-$banner.Count-$Lines.Count-1))
     if ($script:UiDemo -or $script:UiMenuActive) {$noticeCount=0}
@@ -577,7 +583,7 @@ function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0,[bool]$ShowCar
     $layout=Get-TerminalFrame $Lines
     # Anchor the whole frame to the viewport. No trailing newline: even a
     # frame ending at the bottom must never scroll its own banner away.
-    $frame=New-Object Text.StringBuilder
+    $frame=[Text.StringBuilder]::new()
     [void]$frame.Append($script:Esc+'[?25l'+$script:Esc+'[r'+$script:Esc+'[H')
     for ($i=0;$i -lt $layout.Lines.Count;$i++) {
         if ($i -gt 0) {[void]$frame.Append("`r`n")}
@@ -598,9 +604,9 @@ function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0,[bool]$ShowCar
 }
 
 function Get-MenuRows([string[]]$Lines,[int]$Width) {
-    $rows=New-Object 'System.Collections.Generic.List[string]'
+    $rows=[System.Collections.Generic.List[string]]::new()
     foreach ($text in $Lines) {
-        $line=($text -replace '[\r\n\t]',' ').TrimStart()
+        $line=($text -replace '[\x00-\x1f\x7f-\x9f]',' ').TrimStart()
         while ((Get-TextWidth $line) -gt $Width) {
             $prefix=Get-TextPrefix $line $Width
             $cut=$prefix.LastIndexOf(' ')
@@ -624,7 +630,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $bodyRows=[Math]::Max(12,$Rows.Count); $borderHeight=$bodyRows+3
     $border=Get-BorderMotion $w $borderHeight
     $mio=@(Get-TimedMioFrame $Mood -Refresh:$RefreshMio)
-    $lines=New-Object 'System.Collections.Generic.List[string]'
+    $lines=[System.Collections.Generic.List[string]]::new()
     $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$Title+' ') ($w-2)
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
     $channel='SRC -> DST / LOCAL DISK LINK'
@@ -650,7 +656,7 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
                           [int]$Caret=-1,[int]$RequiredHeight=19) {
     if ($script:UiColumns -lt 20 -or $script:UiHeight -lt 6) {return}
     $width=[Math]::Min(92,$script:UiColumns-4)
-    $lines=New-Object 'System.Collections.Generic.List[string]'
+    $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Fit-Text ('OptiMiyoo / '+$Title) $width))
     $lines.Add('  '+(Fit-Text ('Resize to at least 76 x '+$RequiredHeight+'.') $width))
     $lines.Add('  '+(Fit-Text $Detail $width))
@@ -668,6 +674,7 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
 
 function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                            [string[]]$Lines=@(),[string]$Mood='idle') {
+    $Prompt=ConvertTo-SafeExternalText $Prompt
     [void](Update-DisplaySize)
     $rows=@(Get-MenuRows $Lines ([Math]::Max(44,$script:UiWidth-28)))
     $canDraw=$script:UiPanel
@@ -679,7 +686,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
     } catch {$canDraw=$false}
     if (-not $canDraw) {
         Clear-DisplayPanel
-        foreach ($line in $Lines) {Write-Host ('  '+$line.TrimStart())}
+        foreach ($line in $Lines) {Write-Host ('  '+(ConvertTo-SafeExternalText $line).TrimStart())}
         if ([Console]::IsInputRedirected) {
             Write-Host ($Prompt+': ') -NoNewline
             $line=[Console]::ReadLine()
@@ -819,7 +826,7 @@ function Draw-DisplayPanel([switch]$Force,[switch]$RefreshMio) {
         ('Elapsed '+$clock),
         $eta
     )
-    $lines=New-Object 'System.Collections.Generic.List[string]'
+    $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Format-BorderText (('+-- OptiMiyoo // LOCAL DISK LINK ').PadRight($w-1,'-')+'+') 0 0 $border))
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text 'MEDIA CHANNEL // 140.85' $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // ONLINE' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
     for ($i=0;$i -lt 12;$i++) {
@@ -920,7 +927,7 @@ function Get-OptiLogoRows {
     $rake=@(2,2,1,1,0)
     $prefix=$script:Esc+'[38;2;'; $reset=$script:Esc+'[0m'
     for ($row=0;$row -lt 5;$row++) {
-        $line=New-Object Text.StringBuilder
+        $line=[Text.StringBuilder]::new()
         [void]$line.Append(' '*$rake[$row])
         for ($column=0;$column -lt $title.Length;$column++) {
             $rgb=$colors[$column]

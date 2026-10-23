@@ -38,9 +38,8 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root) {
         }
         $fragment=Join-Path $env:LOCALAPPDATA 'Microsoft/Windows Terminal/Fragments/OptiMiyoo/profile.json'
         $json=@{profiles=@($profile)} | ConvertTo-Json -Depth 5
-        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $fragment))
-        if (-not [IO.File]::Exists($fragment) -or [IO.File]::ReadAllText($fragment) -cne $json) {
-            [IO.File]::WriteAllText($fragment,$json,(New-Object Text.UTF8Encoding($false)))
+        $encoding=New-Object Text.UTF8Encoding($false)
+        if (Write-OptiTerminalOwnedBytes $fragment $encoding.GetBytes($json)) {
             [void](Update-OptiTerminalSettings)
             Start-Sleep -Milliseconds 500
         }

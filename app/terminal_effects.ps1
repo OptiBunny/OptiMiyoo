@@ -1,6 +1,21 @@
 ﻿#requires -Version 5.1
 # Windows Terminal appearance is kept in OptiMiyoo's own fragment. Never change
 # another profile, global renderer preferences, or settings.json contents here.
+. (Join-Path $PSScriptRoot 'source_policy.ps1')
+
+function Open-OptiTerminalFolder([string]$Path) {
+    $full=[IO.Path]::GetFullPath($Path)
+    $existing=$full
+    while (-not [IO.Directory]::Exists($existing)) {
+        $existing=[IO.Path]::GetDirectoryName($existing)
+        if (-not $existing) {throw 'Terminal fragment has no existing parent directory.'}
+    }
+    $ancestor=Open-SourcePolicyDirectoryLease $existing
+    try {
+        [void][IO.Directory]::CreateDirectory($full)
+        return (Open-SourcePolicyDirectoryLease $full)
+    } finally {$ancestor.Dispose()}
+}
 
 function Test-OptiTerminalShaderSupport([string]$TerminalPath) {
     if (-not $TerminalPath -or -not [IO.File]::Exists($TerminalPath)) {return $false}
@@ -30,27 +45,47 @@ function Test-OptiTerminalShaderSupport([string]$TerminalPath) {
 }
 
 function Write-OptiTerminalOwnedBytes([string]$Path,[byte[]]$Bytes) {
-    if ([IO.File]::Exists($Path)) {
-        $current=[IO.File]::ReadAllBytes($Path)
-        if ($current.Length -eq $Bytes.Length -and
-            [Convert]::ToBase64String($current) -ceq [Convert]::ToBase64String($Bytes)) {return $false}
-    }
-    $temporary=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+    $directory=Open-OptiTerminalFolder ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path)))
     try {
-        [IO.File]::WriteAllBytes($temporary,$Bytes)
-        if ([IO.File]::Exists($Path)) {[IO.File]::Replace($temporary,$Path,[NullString]::Value)}
-        else {[IO.File]::Move($temporary,$Path)}
-    } finally {
-        if ([IO.File]::Exists($temporary)) {[IO.File]::Delete($temporary)}
-    }
-    return $true
+        if ([IO.File]::Exists($Path)) {
+            if ([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::ReparsePoint) {throw 'Linked Terminal fragment is not writable.'}
+            # Compare only the expected byte count through a held file handle.
+            # A corrupt or oversized existing fragment must not be read wholesale.
+            Initialize-SourcePolicyNative
+            $lease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($Path)
+            try {
+                if ($lease.Stream.Length -eq $Bytes.Length) {
+                    $current=New-Object byte[] $Bytes.Length
+                    $read=0
+                    while ($read -lt $current.Length) {
+                        $count=$lease.Stream.Read($current,$read,$current.Length-$read)
+                        if ($count -eq 0) {break}
+                        $read+=$count
+                    }
+                    if ($read -eq $Bytes.Length -and
+                        [Convert]::ToBase64String($current) -ceq [Convert]::ToBase64String($Bytes)) {return $false}
+                }
+            } finally {$lease.Dispose()}
+        }
+        $temporary=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+        $created=$false
+        try {
+            $stream=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $created=$true
+            try {$stream.Write($Bytes,0,$Bytes.Length); $stream.Flush($true)} finally {$stream.Dispose()}
+            if ([IO.File]::Exists($Path)) {[IO.File]::Replace($temporary,$Path,[NullString]::Value)}
+            else {[IO.File]::Move($temporary,$Path)}
+        } finally {
+            if ($created -and [IO.File]::Exists($temporary)) {[IO.File]::Delete($temporary)}
+        }
+        return $true
+    } finally {$directory.Dispose()}
 }
 
 function Install-OptiTerminalShader([string]$SourcePath) {
     if (-not $SourcePath -or -not [IO.File]::Exists($SourcePath) -or -not $env:LOCALAPPDATA) {return ''}
     try {
         $folder=Join-Path $env:LOCALAPPDATA 'Microsoft/Windows Terminal/Fragments/OptiMiyoo'
-        [void][IO.Directory]::CreateDirectory($folder)
         $dynamicPath=Join-Path $folder 'crt.hlsl'
         $staticPath=Join-Path $folder 'crt-static.hlsl'
         $encoding=New-Object Text.UTF8Encoding($false)
@@ -88,6 +123,17 @@ function Update-OptiTerminalSettings {
     return $updated
 }
 
+function Read-OptiTerminalFragment([string]$Path) {
+    Initialize-SourcePolicyNative
+    $lease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($Path)
+    $reader=$null
+    try {
+        if ($lease.Stream.Length -gt 64KB) {throw 'OptiMiyoo Terminal fragment exceeds the supported 64 KiB limit.'}
+        $reader=New-Object IO.StreamReader($lease.Stream,(New-Object Text.UTF8Encoding($false)),$true,4096,$true)
+        return $reader.ReadToEnd()
+    } finally {if ($reader) {$reader.Dispose()}; $lease.Dispose()}
+}
+
 function Set-OptiTerminalCrtMode([ValidateSet('CRT','Smooth','Paused')][string]$Mode) {
     $profileId='{062ba315-bc8f-42eb-a971-d0eb828209dd}'
     if ($env:WT_PROFILE_ID -ne $profileId -or $env:OPTIMIYOO_CRT_HOST -cne '1' -or -not $env:LOCALAPPDATA) {return $false}
@@ -95,7 +141,7 @@ function Set-OptiTerminalCrtMode([ValidateSet('CRT','Smooth','Paused')][string]$
         $folder=Join-Path $env:LOCALAPPDATA 'Microsoft/Windows Terminal/Fragments/OptiMiyoo'
         $fragment=Join-Path $folder 'profile.json'
         if (-not [IO.File]::Exists($fragment)) {return $false}
-        $document=[IO.File]::ReadAllText($fragment) | ConvertFrom-Json
+        $document=Read-OptiTerminalFragment $fragment | ConvertFrom-Json
         $profiles=@($document.profiles | Where-Object {$_.guid -eq $profileId})
         if ($profiles.Count -ne 1) {return $false}
         $profile=$profiles[0]

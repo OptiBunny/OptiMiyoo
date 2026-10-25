@@ -290,8 +290,8 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
         $notice.Label='[ZIP playback unverified]'
         $notice.Hint='Unpack ZIP output before playing.'
     } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
-        $notice.Label='[ZIP playback unsupported]'
-        $notice.Hint='Unpack ZIP output before playing.'
+        $notice.Label='[unpack before playing]'
+        $notice.Hint='ZIP loading is not supported by this core.'
     } elseif ($Profile.DefaultZipSupport -eq 'Unlisted') {
         $notice.Label='[unpack before playing]'
         $notice.Hint='ZIP loading is not listed in Onion docs for this core.'

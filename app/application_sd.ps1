@@ -202,15 +202,18 @@ function Read-ApplicationSdConsolePath {
     $title='Onion SD setup';$prompt='SD card root (for example E:\)';$rows=@('Choose the SD card root folder.','Setup adds supported file-list extensions.','Selected emulator cores stay unchanged.','Escape cancels.');$text='';$dirty=$true;$clock=[Diagnostics.Stopwatch]::StartNew()
     $sparseIdle=([bool](Get-Variable IdleAnimations -ValueOnly -ErrorAction SilentlyContinue) -and $script:UiVT -and -not $script:UiLive)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
+    Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
     if(-not $script:UiVT){[Console]::WriteLine($title);foreach($line in $rows){[Console]::WriteLine($line)};[Console]::Write($prompt+': ')}
     Update-InputCaret '' 0 -Reset
     try {while($true) {
         if(Update-DisplaySize -Throttled){$dirty=$true}
+        $bunnyVisible=($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7))
         if($sparseIdle) {
-            $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0)
+            $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
             if($pose -cne $script:UiIdlePoseOverride){$script:UiIdlePoseOverride=$pose;$dirty=$true}
         }
+        if(Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible){$dirty=$true}
         if($script:UiVT -and ($dirty -or ((Get-InputCaretVisible) -ne $script:UiCaretDrawn) -or ($script:UiLive -and $clock.ElapsedMilliseconds -ge 33))){Draw-MenuPanel $title $rows $prompt $text $text.Length 'wait';$clock.Restart();$dirty=$false}
         if([Console]::KeyAvailable) {
             $key=[Console]::ReadKey($true)
@@ -223,7 +226,7 @@ function Read-ApplicationSdConsolePath {
             Update-InputCaret $text $text.Length;$dirty=$true
             if(-not $script:UiVT){[Console]::Write("`r"+$prompt+': '+$text+' ')}
         }else{if($script:UiLive){Wait-DisplayFrame 8}else{Wait-DisplayFrame 30}}
-    }} finally {$script:UiIdlePoseOverride=$null;if($idleWatch){$idleWatch.Stop()}}
+    }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }
 
 function Invoke-ApplicationSdFolderPrompt {

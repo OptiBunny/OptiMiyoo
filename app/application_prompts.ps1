@@ -97,6 +97,7 @@ function Read-ApplicationConsoleChoice($Model) {
     $text='';$caret=0;$dirty=$true;$watch=[Diagnostics.Stopwatch]::StartNew()
     $sparseIdle=([bool](Get-Variable IdleAnimations -ValueOnly -ErrorAction SilentlyContinue) -and $script:UiVT -and -not $script:UiLive)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
+    Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
     Update-InputCaret $text $caret -Reset
     $rows=@(Get-MenuRows $Model.Lines ([Math]::Max(44,$script:UiWidth-28)))
@@ -107,10 +108,12 @@ function Read-ApplicationConsoleChoice($Model) {
     }
     try {while($true) {
         if(Update-DisplaySize -Throttled){$rows=@(Get-MenuRows $Model.Lines ([Math]::Max(44,$script:UiWidth-28)));$dirty=$true}
+        $bunnyVisible=($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7))
         if($sparseIdle) {
-            $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0)
+            $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
             if($pose -cne $script:UiIdlePoseOverride){$script:UiIdlePoseOverride=$pose;$dirty=$true}
         }
+        if(Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible){$dirty=$true}
         $fits=(-not $script:UiVT -or ($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7)))
         if($script:UiVT -and ($dirty -or ((Get-InputCaretVisible) -ne $script:UiCaretDrawn) -or ($script:UiLive -and $watch.ElapsedMilliseconds -ge 33))) {
             Draw-MenuPanel $Model.Title $rows $Model.Prompt $text $caret 'wait'
@@ -130,7 +133,7 @@ function Read-ApplicationConsoleChoice($Model) {
             $caret=$text.Length;Update-InputCaret $text $caret;$dirty=$true
             if(-not $script:UiVT){[Console]::Write("`r"+$Model.Prompt+': '+$text+' ')}
         } else {if($script:UiLive){Wait-DisplayFrame 8}else{Wait-DisplayFrame 30}}
-    }} finally {$script:UiIdlePoseOverride=$null;if($idleWatch){$idleWatch.Stop()}}
+    }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }
 
 function Invoke-ApplicationPolicyPrompt {

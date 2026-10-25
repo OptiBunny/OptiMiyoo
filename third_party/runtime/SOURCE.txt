@@ -1,22 +1,21 @@
-GCC and MinGW-w64 runtime libraries - MSYS2 Windows packages
+GCC and MinGW-w64 runtimes - MSYS2 Windows packages
 
-Purpose: local dependencies of the bundled x86 CAPSIMG fallback.
-GCC supplies libstdc++ and libgcc; MinGW-w64 supplies winpthreads.
-The DLLs are unmodified files from official MSYS2 packages. Package URLs and
-verified SHA-256 checksums are recorded in packages.json.
+The x86 CAPSIMG fallback uses GCC's libstdc++ and libgcc, plus MinGW-w64's
+winpthreads. These DLLs are unmodified files from official MSYS2 packages.
+Package downloads and verified SHA-256 checksums are listed in packages.json.
 
-GCC project: https://gcc.gnu.org/
-MinGW-w64 project: https://www.mingw-w64.org/
+Projects
+GCC: https://gcc.gnu.org/
+MinGW-w64: https://www.mingw-w64.org/
 MSYS2 build recipes: https://github.com/msys2/MINGW-packages
 
-GCC runtime package version: 16.2.0-6 (x86).
-Source/build package:
+Source/build packages
+GCC 16.2.0-6 (x86):
 https://mirror.msys2.org/mingw/sources/mingw-w64-gcc-16.2.0-6.src.tar.zst
 
-Winpthreads package version: 14.0.0.r495.g63ebe6cdb-2 (x86).
-Source/build package:
+Winpthreads 14.0.0.r495.g63ebe6cdb-2 (x86):
 https://mirror.msys2.org/mingw/sources/mingw-w64-winpthreads-14.0.0.r495.g63ebe6cdb-2.src.tar.zst
 
-Licenses retained from those packages:
-- COPYING.GCC and COPYING.RUNTIME: GCC license and runtime library exception.
-- COPYING.WINPTHREAD: winpthreads notices and license.
+Licenses
+COPYING.GCC and COPYING.RUNTIME: GCC license and runtime library exception.
+COPYING.WINPTHREAD: winpthreads notices and license.

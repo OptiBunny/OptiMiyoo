@@ -1,43 +1,55 @@
 # Using OptiMiyoo
 
-Extract the complete ZIP to a writable folder and run `OptiMiyoo.bat`.
-Requires Windows 10 version 1809 or newer / Windows 11 x64, Windows PowerShell
-5.1 and the built-in .NET Framework. Converter tools are included;
-ROMs, BIOS files, and Onion cores are not.
+Run `OptiMiyoo.bat` from the extracted folder.
 
-[Menus](#menu-guide) · [Game files](#prepare-a-batch) · [Systems](#systems-and-rom-folders)
-· [SD setup](#optional-sd-setup-and-swapping) · [Display](#display-effects) · [Command line](#command-line)
+[Menus](#menu-guide) · [Game files](#prepare-a-batch) · [Systems](#systems-and-rom-folders) ·
+[SD setup](#optional-sd-setup-and-swapping) · [Command line](#command-line)
+
+## Prepare a batch
+
+Put one system's games in `SRC` as loose files, folders, or one ZIP per game.
+Keep all discs or tape sides of a game together. Names such as `Game (Disc 1).chd`,
+`Game (Disc 2).chd`, or `Game (Side A).tap` determine their order; untagged files
+become separate entries. Combine separate side ZIPs or extract and name the sides
+first. Keep alternate formats of the same disc in separate batches.
+
+Keep CUE tracks, SBI files, and other companion files with their media. CUE
+references must be relative, use forward slashes, and match filename case.
+
+Run the matching menu option, then copy `DST` contents—including `.hidden`—to
+its [Onion ROM folder](#systems-and-rom-folders) and refresh the game list.
+Multi-disc games get a visible playlist with media under `.hidden`; single-media
+games stay visible. `SRC` and `DST` are shared by all modes and are never emptied
+automatically.
 
 ## Menu guide
 
 Type a number or letter, then **Enter**. Blank Enter uses the displayed default.
-In submenus, **B** goes back and **Q** exits; demo playback and overwrite prompts
-have their own controls below.
+In submenus, **B** goes back and **Q** exits. Demo and overwrite controls differ
+as described below.
 
 | Main menu | Action |
 | --- | --- |
-| **1–10** | Prepare playlists for a [numbered system](#systems-and-rom-folders). Enter selects **1: Amiga**. |
-| **C** | Convert C64 NIB/NBZ → G64. Use main-menu **2** for C64 disk or TAP/T64 playlists. |
-| **Z** | Convert ZX Spectrum IPF → DSK, independently of playlist support. |
+| **1–10** | Create playlists for a [numbered system](#systems-and-rom-folders). Enter selects **1: Amiga**. |
+| **C** | Convert C64 NIB/NBZ → G64. Use **2** for C64 disk or TAP/T64 playlists. |
+| **Z** | Convert ZX Spectrum IPF → DSK. |
 | **S** | Check an SD card's selected cores and enable supported playlist extensions. |
-| **D** | Preview the workflow without changing game or SD files. Animations are optional. |
-| **F** | Switch between CRT and Smooth when animated effects are enabled. |
+| **D** | Preview the workflow without changing game or SD files. |
+| **F** | Switch the bunny and logo between CRT and Smooth. |
 | **Q** | Exit. |
 
 ### Playlist storage and originals
 
-Choose a numbered system, then storage:
+After choosing a numbered system, select storage:
 
-- **1: Auto** (default) keeps supported Amiga/C64/VIC-20 ZIPs, using playlist
-  references to files inside them. Other ZIPs are extracted; loose files stay loose.
-  NIB/NBZ content converts to G64 where needed.
-- **2: Folders** extracts ZIPs. Use this when games write to their disk images.
+- **1: Auto** (default) keeps supported Amiga/C64/VIC-20 ZIPs and links to their
+  contents. Other ZIPs are extracted; loose files stay loose. NIB/NBZ images
+  convert to G64 where needed.
+- **2: Folders** extracts ZIPs. Use this for games that write to their disk images.
 
-Then choose **1: Keep originals** (default) or **2: Remove originals** to start.
-**B** returns to output settings. ZX uses the same originals screen.
-
-**Remove** deletes successfully processed originals from `SRC`. Failed, skipped,
-or unsupported inputs are kept. Keep originals until you have tested the games.
+Then select **1: Keep originals** (default) or **2: Remove originals** to start.
+Remove applies only to successfully processed originals in `SRC`; failed,
+skipped, and unsupported inputs stay. **B** returns to storage settings.
 Unsupported or unverified cores show an explanation instead of creating playlists.
 
 ### C64 converter: C
@@ -49,60 +61,47 @@ Unsupported or unverified cores show an explanation instead of creating playlist
 | **3** | Folders | Keep |
 | **4** | Folders | Remove |
 
-Each choice starts the batch directly. Existing G64 images are kept as they are;
-multi-disk ZIPs receive a playlist and media under `.hidden`.
+Each choice starts the batch. G64 images are copied without conversion; multi-disk
+ZIPs receive a playlist and media under `.hidden`.
 
 ### ZX converter: Z
 
-Choose **1: Loose DSK files** or **2: One ZIP per DSK** (default), then originals
-handling. ZIP suits configurations that list ZIP but lack DSK. Some IPF
-copy-protection details cannot be preserved in DSK.
+Choose **1: Loose DSK files** or **2: One ZIP per DSK** (default), then Keep or
+Remove originals. ZIP suits configurations that list ZIP but lack DSK support.
+Some IPF copy-protection details cannot be preserved in DSK.
 
-### Demo: D
+### Existing outputs and finishing a batch
 
-| Option | Preview |
-| --- | --- |
-| **1** (default) | Full walkthrough |
-| **2** | C64 conversion |
-| **3** | ZX conversion |
-| **4** | Playlists and disk order |
-| **5** | Results, overwrite choices, skips and errors |
-| **6** | Mio's animation gallery |
-| **7** | Core support and Onion SD setup |
-
-During playback, press keys directly: **Space** pause/resume, **N / Right / Enter**
-next, **P / Left** previous, **R** restart, **F** CRT/Smooth.
-**B / Q / Esc** returns to demo selection; there, **B** returns to the main menu
-and **Q** exits.
-
-### After a batch and existing outputs
-
-After a batch, **Enter / M** returns to the main menu, **B** reopens its settings,
-and **Q** exits. For existing outputs, playlists, C64, and ZX use the same choices:
-
-| Key | Action |
+| Key | If an output already exists |
 | --- | --- |
 | **Y** | Overwrite this output |
 | **N / Enter** | Skip this output |
 | **A** | Overwrite all conflicts in this batch |
 | **S** | Skip all conflicts in this batch |
 
-**> / <** pages through the output paths. In this prompt, **B / Q** also skips the
-current output. Skipping keeps both the existing output and its original in `SRC`.
+**> / <** pages through output paths. Here, **B / Q** also skips the current
+output. Skipping keeps both the existing output and its original in `SRC`.
 
-## Prepare a batch
+After a batch, **Enter / M** returns to the main menu, **B** reopens its settings,
+and **Q** exits.
 
-Use one system per batch. Put games in `SRC` as loose files, game folders, or
-one ZIP per game. Run the matching menu route and review the results.
-Copy `DST` contents, including `.hidden`, to the system's ROM folder below,
-then refresh Onion's game list.
+### Demo and display
 
-`SRC` and `DST` are shared by all modes and never emptied automatically. Old
-copies already on the SD card may appear alongside new playlists.
+In **D**, choose **1** for the full walkthrough, **2** C64, **3** ZX,
+**4** playlists, **5** results and overwrite choices, **6** Mio's animation
+gallery, or **7** core support and SD setup.
+
+During playback, keys work without Enter: **Space** pauses/resumes; **N / Right / Enter**
+go forward; **P / Left** go back; **R** restarts; **F** switches CRT/Smooth.
+**B / Q / Esc** returns to demo selection.
+
+The normal launcher enables occasional bunny animations and scanline sweeps
+by default; no extra options are needed.
+**F** switches the bunny and logo to Smooth.
 
 ## Systems and ROM folders
 
-These are the standard profiles. **S** checks the cores selected on your SD card.
+**S** checks the cores selected on your SD card. The standard profiles are:
 
 | Menu | System | Onion folder | Default core | Playlist support |
 | --- | --- | --- | --- | --- |
@@ -118,74 +117,43 @@ These are the standard profiles. **S** checks the cores selected on your SD card
 | **10** | ZX Spectrum | `Roms/ZXS` | Stock Onion Fuse | Unsupported playlist loading |
 
 Unsupported playlist profiles can still run ordinary games in their emulator.
-Amiga IPF playback requires a compatible `capsimg.so` and Kickstart BIOS on the
-Miyoo; these are not included. blueMSX needs its usual `Databases` and `Machines`
-BIOS folders.
-
-## Naming and storage
-
-Keep all discs or tape sides together. Use names such as `Game (Disc 1).chd`,
-`Game (Disc 2).chd`, or `Game (Side A).tap`. Disc/side labels determine order;
-untagged files become separate entries. Combine separate side ZIPs or extract
-and name the sides first. Keep alternate formats of a disc in separate batches.
-
-Two or more playable images produce a visible playlist with media under `.hidden`.
-Single-media games remain visible. Keep CUE tracks, SBI files and other companions
-with their media; they do not count as extra discs. CUE references must be relative,
-use forward slashes, and match filename case.
+Amiga IPF playback needs a compatible `capsimg.so` and Kickstart BIOS on the Miyoo.
+blueMSX needs its usual `Databases` and `Machines` BIOS folders. These are not included.
 
 ## Optional SD setup and swapping
 
-Choose **S** and enter the SD root, such as `E:\`, to enable playlist support for
-the detected cores. Games and saves are kept. Unrecognized configurations remain
-**UNVERIFIED** and unchanged. Enter reuses a previous SD root only when shown.
+Choose **S** and enter the SD root, such as `E:\`. Setup enables playlist
+extensions for the detected cores while keeping games and saves. Unrecognized
+configurations remain **UNVERIFIED** and unchanged.
 
-Backups are stored in uniquely named `OptiMiyoo_Backup_<ID>` folders on the SD card.
-To undo a change, copy the backed-up `config.json` to its original emulator folder.
+To undo a setup change, copy `config.json` from the corresponding
+`OptiMiyoo_Backup_<ID>` folder on the SD card to its original emulator folder.
 PlayStation uses `Emu/PSX` for configuration and `Roms/PS` for games.
 
-To swap discs, open the playlist in Onion, then use RetroArch **Quick Menu → Disk
-Control**: eject, select the next image, and insert. C64 tape sides use this sequence
-too, but may need keyboard/load commands; tape support is checked separately.
-DOSBox Pure also has its own disk-selection workflow.
-
-## Display effects
-
-The bunny makes a brief idle gesture every 12 seconds. Choose **D → 6** to preview
-its expressions and movements.
-
-For continuous decorative animations, run the application script without `-NoAnimation`:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
-  -DisplayEffect Smooth
-```
-
-In this mode, **F** toggles CRT/Smooth styling on the bunny. Use `-NoAnimation` to
-stop decorative animation, or add `-IdleAnimations` for the usual occasional gestures.
+To swap discs, open the playlist in Onion, then use **RetroArch → Quick Menu →
+Disk Control**: eject, select the next image, and insert. C64 tape sides use the
+same sequence but may also need keyboard/load commands. DOSBox Pure has its own
+disk-selection workflow.
 
 ## Command line
 
-From the application folder in Windows PowerShell:
+Run from the application folder in PowerShell:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
-  -System AMIGA -Storage Folders
+  -System AMIGA -Storage Folders -NoAnimation
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
-  -ZXConvert -ZXFormat ZipDSK
+  -C64Convert -C64Mode Keep -NoAnimation
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
+  -ZXConvert -ZXFormat ZipDSK -NoAnimation
 ```
 
 | Option | Purpose |
 | --- | --- |
 | `-Root C:\Games\Batch` | Use that folder's `SRC` and `DST`; dragging a folder onto `OptiMiyoo.bat` does the same. |
-| `-OnionRoot E:\` | Check an installed core. |
-| `-SourcePolicy Keep` / `Remove` | Keep by default, or remove originals after verification. |
-| `-Existing Skip` | Skip existing outputs. |
+| `-OnionRoot E:\` | Check the installed core on that SD card. |
+| `-SourcePolicy Keep` / `Remove` | Keep originals by default, or remove them after verification. |
+| `-Existing Ask` / `Overwrite` / `Skip` | Choose how to handle existing outputs. |
+| `-NoAnimation` | Stop decorative animation when running the script directly. |
+| `-NoColor` | Use monochrome output. |
 | `-DisplayEffect Smooth` | Disable CRT styling. |
-| `-NoAnimation` / `-NoColor` | Freeze animation / disable colors. |
-| `-IdleAnimations` | With `-NoAnimation`, allow a brief bunny gesture every 12 seconds in idle menus. |
-| `-Preview -PreviewSection Bunny` | Show the bunny's expressions and idle gestures without processing files. |
-| `-NoPause` | Finish without waiting for a keypress. |
-
-Bundled components have separate licenses. CAPSIMG's included license restricts
-commercial use; see [licenses and source details](../third_party/README.md).

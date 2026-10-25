@@ -1,12 +1,13 @@
 ﻿# Sparse menu gestures: a finite pose sequence, then twelve seconds between
-# gesture starts. This clock never advances the logo, border or CRT effects.
+# gesture starts. It reports actual starts to synchronized CRT; display.ps1
+# controls the artwork and rendering cadence.
 $script:MioIdleSchedulerState=$null
 
 function Initialize-MioIdleScheduler {
     $script:MioIdleSchedulerState=[pscustomobject]@{
         Catalog=@(); Bag=[int[]]@(); BagIndex=0; LastId=$null
         Active=$null; StartMs=0.0; EndMs=0.0; NextStartMs=12000.0
-        LastElapsedMs=0.0; HadText=$false
+        LastElapsedMs=0.0; HadText=$false; GestureSerial=0L; InputSerial=0L
     }
 }
 
@@ -15,6 +16,7 @@ function Reset-MioIdleInput {
     # The caller restarts its inactivity stopwatch on every key. Keep the bag
     # so navigating menus does not repeatedly show only the first few gestures.
     $state=$script:MioIdleSchedulerState
+    $state.InputSerial++
     $state.Active=$null; $state.StartMs=0.0; $state.EndMs=0.0; $state.NextStartMs=12000.0
     $state.LastElapsedMs=0.0; $state.HadText=$false
 }
@@ -83,6 +85,7 @@ function Get-MioIdlePose([double]$ElapsedMs,[bool]$HasText=$false) {
         $state.Bag=$bag; $state.BagIndex=0
     }
     $state.Active=$state.Catalog[$state.Bag[$state.BagIndex]]
+    $state.GestureSerial++
     $state.BagIndex++
     $state.LastId=[string]$state.Active.Id
     # Schedule from now: a delayed poll never queues missed gestures or replays

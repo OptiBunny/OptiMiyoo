@@ -17,11 +17,31 @@ function Initialize-Display {
     $script:UiMioMood=$null; $script:UiMioPoseOverride=$null
     $script:UiIdlePoseOverride=$null
     $script:UiIdleMenuCache=$null
+    $script:MioSparseCrtMode='Synchronized'
+    $script:MioSparseCrtContinuousFps=12.0
+    $script:MioSparseCrtContinuousCycleMs=6000.0
+    $script:MioSparseCrtLogoFrameCount=10
+    $script:MioSparseCrtBunnyFrameCount=24
+    $script:MioSparseCrtBunnyDelayMs=6000.0
+    $script:MioSparseCrtGeometry=$null
+    $script:MioSparseCrtGeometryKey=''
+    $script:MioContinuousCrtLevels=@{}
+    $script:OptiLogoMotionCache=@{}
+    $script:OptiLogoMotionOrder=[System.Collections.Generic.Queue[string]]::new()
+    $script:OptiLogoRowCache=@{}
+    $script:OptiLogoRowOrder=[System.Collections.Generic.Queue[string]]::new()
+    $script:UiLastLogoRows=@()
+    $script:MioSparseCrtIntervalMs=12000.0
+    $script:MioSparseCrtBurstMs=1000.0
+    $script:MioSparseCrtFrameCount=12
+    Reset-MioSparseCrt
     Initialize-MioIdleScheduler
     $script:MioRenderCache=@{}
     $script:MioCrtRowCache=@{}
     $script:MioCrtRowOrder=[System.Collections.Generic.Queue[string]]::new()
-    $script:OptiLogoFont=$null
+    $script:MioSparseCrtFrames=@{}
+    $script:MioSparseCrtFrameOrder=[System.Collections.Generic.Queue[string]]::new()
+    $script:OptiLogoFont=$null; $script:OptiLogoCache=@{}
     $script:UiPendingEvents=[System.Collections.Generic.List[string]]::new()
     $script:UiEventRows=[System.Collections.Generic.List[string]]::new()
     $script:UiBannerRows=0; $script:UiBannerTimeMs=0; $script:UiPinned=$false
@@ -159,6 +179,7 @@ function Update-DisplaySize([switch]$Throttled) {
         $script:UiRows=0; $script:UiBannerRows=0; $script:UiPinned=$false
     }
     $script:UiColumns=$columns; $script:UiHeight=$height
+    $script:MioSparseCrtGeometry=$null; $script:MioSparseCrtGeometryKey=''
     $script:UiWidth=[Math]::Min(92,[Math]::Max(50,$columns-4))
     $script:UiPanel=($script:UiWidth -ge 72 -and $height -ge 19)
     $script:UiLive=($script:UiPanel -and -not $NoAnimation)
@@ -418,6 +439,158 @@ function Write-Notice([string]$Label,[string]$Message) {
         Write-Host ('  '+(Color-Text ('[{0,-7}]' -f $Label) $rgb)+' '+$Message)
     }
 }
+function Reset-MioSparseCrt([switch]$KeepIntro) {
+    $script:UiSparseCrtPhase=-1
+    $script:UiSparseCrtRegion=''
+    $script:UiSparseCrtPositionMs=0.0
+    $script:UiSparseCrtLastTimeMs=-1.0
+    $script:MioSynchronizedCrtState=$null
+    if (-not $KeepIntro) {
+        $script:UiSparseCrtIntroPending=$true
+        $script:MioSparseCrtGeometry=$null; $script:MioSparseCrtGeometryKey=''
+    }
+}
+function Update-MioSparseCrt([double]$ElapsedMs,[bool]$HasText=$false,[bool]$VisibleBunny=$true) {
+    $eligible=($IdleAnimations -and -not $NoColor -and $script:UiAnsi -and
+        $script:UiVT -and $script:UiPanel -and $VisibleBunny -and -not $script:UiLive -and
+        -not $script:UiDemo -and $script:DisplayEffect -eq 'CRT')
+    if (-not $eligible -or $ElapsedMs -lt 0 -or [double]::IsNaN($ElapsedMs) -or [double]::IsInfinity($ElapsedMs)) {
+        $changed=($script:UiSparseCrtPhase -ge 0)
+        Reset-MioSparseCrt -KeepIntro
+        return $changed
+    }
+    $delta=0.0
+    if ($script:UiSparseCrtLastTimeMs -ge 0 -and $ElapsedMs -ge $script:UiSparseCrtLastTimeMs) {
+        $delta=$ElapsedMs-$script:UiSparseCrtLastTimeMs
+    }
+    $reversed=($script:UiSparseCrtLastTimeMs -ge 0 -and $ElapsedMs -lt $script:UiSparseCrtLastTimeMs)
+    $script:UiSparseCrtLastTimeMs=$ElapsedMs
+    if ($script:MioSparseCrtMode -eq 'Synchronized') {
+        return (Update-MioSynchronizedCrt $ElapsedMs ($HasText -or $script:UiDemoPaused -or $reversed))
+    }
+    # Freeze the current band while typing. Updating the clock baseline avoids
+    # jumping or replaying missed frames when input or a pause ends.
+    if ($HasText -or $script:UiDemoPaused) {return $false}
+    # Both modes sample only the present position after a stall, without
+    # queuing missed frames. Burst remains available for low-duty-cycle use.
+    if ($script:MioSparseCrtMode -eq 'Continuous') {
+        $script:UiSparseCrtPositionMs=($script:UiSparseCrtPositionMs+$delta)%$script:MioSparseCrtContinuousCycleMs
+        $phase=[int][Math]::Floor($script:UiSparseCrtPositionMs*$script:MioSparseCrtContinuousFps/1000.0)
+    } else {
+        $script:UiSparseCrtPositionMs=($script:UiSparseCrtPositionMs+$delta)%$script:MioSparseCrtIntervalMs
+        $phase=-1
+        if ($script:UiSparseCrtPositionMs -lt $script:MioSparseCrtBurstMs) {
+            $step=[int][Math]::Floor($script:UiSparseCrtPositionMs*$script:MioSparseCrtFrameCount/$script:MioSparseCrtBurstMs)
+            $phase=[int][Math]::Floor($step*48.0/$script:MioSparseCrtFrameCount)
+        }
+    }
+    if ($phase -eq $script:UiSparseCrtPhase) {return $false}
+    $script:UiSparseCrtPhase=$phase
+    return $true
+}
+function Update-MioSynchronizedCrt([double]$ElapsedMs,[bool]$Cancel) {
+    $idle=$script:MioIdleSchedulerState
+    if (-not $script:MioSynchronizedCrtState) {
+        $script:MioSynchronizedCrtState=@{GestureSerial=$idle.GestureSerial;InputSerial=$idle.InputSerial;Region='';StartMs=0.0;BunnyDueMs=-1.0}
+    }
+    $state=$script:MioSynchronizedCrtState
+    $oldPhase=$script:UiSparseCrtPhase; $oldRegion=$script:UiSparseCrtRegion
+    if ($Cancel -or $state.InputSerial -ne $idle.InputSerial) {
+        $state.InputSerial=$idle.InputSerial; $state.GestureSerial=$idle.GestureSerial
+        $state.Region=''; $state.BunnyDueMs=-1.0
+        $script:UiSparseCrtIntroPending=$false
+        $script:UiSparseCrtPhase=-1; $script:UiSparseCrtRegion=''
+        return ($oldPhase -ge 0)
+    }
+    if ($state.GestureSerial -ne $idle.GestureSerial) {
+        # The gesture scheduler is authoritative, including starts delayed by
+        # sleep or work. Internal idle frames never start another sweep.
+        $state.GestureSerial=$idle.GestureSerial
+        $state.Region='Logo'; $state.StartMs=$ElapsedMs
+        $state.BunnyDueMs=$ElapsedMs+$script:MioSparseCrtBunnyDelayMs
+        $script:UiSparseCrtIntroPending=$false
+    } elseif ($script:UiSparseCrtIntroPending) {
+        $script:UiSparseCrtIntroPending=$false
+        $state.Region='Bunny'; $state.StartMs=$ElapsedMs
+    }
+    if ($state.Region) {
+        $frames=$script:MioSparseCrtBunnyFrameCount
+        if ($state.Region -eq 'Logo') {$frames=$script:MioSparseCrtLogoFrameCount}
+        $duration=$frames*1000.0/$script:MioSparseCrtContinuousFps
+        if ($ElapsedMs-$state.StartMs -ge $duration) {$state.Region=''}
+    }
+    if (-not $state.Region -and $state.BunnyDueMs -ge 0 -and $ElapsedMs -ge $state.BunnyDueMs) {
+        # An expired bunny pass is skipped, never replayed after a long stall.
+        if ($ElapsedMs -lt $state.BunnyDueMs+$script:MioSparseCrtBunnyFrameCount*1000.0/$script:MioSparseCrtContinuousFps) {
+            $state.Region='Bunny'; $state.StartMs=$state.BunnyDueMs
+        }
+        $state.BunnyDueMs=-1.0
+    }
+    if ($state.Region -eq 'Logo' -and $script:MioSparseCrtGeometry -and $script:MioSparseCrtGeometry.LogoRow -eq 0) {$state.Region=''}
+    $phase=-1
+    if ($state.Region) {$phase=[int][Math]::Floor([Math]::Max(0.0,$ElapsedMs-$state.StartMs)*$script:MioSparseCrtContinuousFps/1000.0)}
+    $script:UiSparseCrtPhase=$phase; $script:UiSparseCrtRegion=$state.Region
+    return ($phase -ne $oldPhase -or $state.Region -cne $oldRegion)
+}
+function Get-MioSparseCrtLevels([int]$Phase) {
+    if ($script:MioSparseCrtMode -in 'Continuous','Synchronized' -and $script:MioSparseCrtGeometry) {
+        return ,(Get-MioContinuousCrtLevels $Phase).Bunny
+    }
+    if (-not $script:MioSparseCrtLevels) {
+        $script:MioSparseCrtLevels=New-Object 'int[][]' 48
+        for ($step=0;$step -lt 48;$step++) {
+            $levels=New-Object 'int[]' 24
+            $center=$step/2.0
+            for ($row=0;$row -lt 24;$row++) {
+                $base=100; if (($row%2) -eq 1) {$base=84}
+                $distance=[Math]::Abs($row-$center)
+                $gain=1.0
+                if ($distance -lt 1.5) {$gain-=0.12*(1-$distance/1.5)}
+                $levels[$row]=[int][Math]::Round($base*$gain)
+            }
+            $script:MioSparseCrtLevels[$step]=$levels
+        }
+    }
+    return ,$script:MioSparseCrtLevels[$Phase]
+}
+function Get-MioContinuousCrtLevels([int]$Phase) {
+    $geometry=$script:MioSparseCrtGeometry
+    $frames=[int][Math]::Ceiling($script:MioSparseCrtContinuousCycleMs*$script:MioSparseCrtContinuousFps/1000.0)
+    $regionMode='Continuous'; $sweepOffset=0.0; $sweepPixels=$geometry.SpanPixels
+    if ($script:MioSparseCrtMode -eq 'Synchronized') {
+        $regionMode=$script:UiSparseCrtRegion
+        $frames=$script:MioSparseCrtBunnyFrameCount; $sweepOffset=2*($geometry.BunnyRow-1)
+        if ($regionMode -eq 'Logo') {$frames=$script:MioSparseCrtLogoFrameCount; $sweepOffset=2*($geometry.LogoRow-1)}
+    }
+    $key=$geometry.Key+'|'+$regionMode+'|'+$frames
+    if (-not $script:MioContinuousCrtLevels.ContainsKey($key)) {
+        if ($script:MioContinuousCrtLevels.Count -ge 4) {$script:MioContinuousCrtLevels.Clear()}
+        $templates=New-Object 'object[]' $frames
+        for ($step=0;$step -lt $frames;$step++) {
+            $center=$step*$geometry.SpanPixels/[double]$frames
+            # One physical half-cell row per frame in either artwork region.
+            # The taller bunny therefore takes longer, at the same speed.
+            if ($script:MioSparseCrtMode -eq 'Synchronized') {$center=$sweepOffset+$step}
+            if ($regionMode -eq 'Logo' -and $geometry.LogoRow -eq 0) {$center=-1000000.0}
+            $regions=@{}
+            foreach ($region in 'Logo','Bunny') {
+                $count=24; $offset=2*($geometry.BunnyRow-1)
+                if ($region -eq 'Logo') {$count=10; $offset=2*($geometry.LogoRow-1)}
+                $levels=New-Object 'int[]' $count
+                for ($row=0;$row -lt $count;$row++) {
+                    $base=100; if (($row%2) -eq 1) {$base=84}
+                    $distance=[Math]::Abs($offset+$row-$center); $gain=1.0
+                    if ($distance -lt 1.5) {$gain-=0.12*(1-$distance/1.5)}
+                    $levels[$row]=[int][Math]::Round($base*$gain)
+                }
+                $regions[$region]=$levels
+            }
+            $templates[$step]=$regions
+        }
+        $script:MioContinuousCrtLevels[$key]=$templates
+    }
+    return $script:MioContinuousCrtLevels[$key][$Phase]
+}
 function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
     # Refined original 22 x 24 bunny, drawn as two pixel rows per terminal cell.
     if (-not $script:MioPixelFrames) {
@@ -462,9 +635,17 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
     $pixels=$script:MioPixelFrames[$pose]
     # Timed color modulation creates the requested CRT look without erasing
     # frames, moving pixels or changing any menu/status/input text.
-    $useCrt=($script:DisplayEffect -eq 'CRT' -and $script:UiLive -and $script:UiAnsi -and -not $script:UiFullScreenCrt)
-    $cacheKey=$pose+'|'+$script:UiAnsi
-    if (-not $useCrt -and $script:MioRenderCache.ContainsKey($cacheKey)) {return $script:MioRenderCache[$cacheKey]}
+    $useCrt=($script:DisplayEffect -eq 'CRT' -and $script:UiAnsi -and -not $script:UiFullScreenCrt)
+    $animatedCrt=($useCrt -and $script:UiLive)
+    $sparseCrt=($useCrt -and -not $script:UiLive -and $script:UiSparseCrtPhase -ge 0 -and
+        ($script:MioSparseCrtMode -notin 'Continuous','Synchronized' -or $script:MioSparseCrtGeometry))
+    $cacheKey=$pose+'|'+$script:UiAnsi+'|'+$useCrt
+    $phaseKey=$null
+    if ($sparseCrt) {
+        $phaseKey=$pose+'|'+$script:MioSparseCrtMode+'|'+$script:UiSparseCrtPhase
+        if ($script:MioSparseCrtMode -in 'Continuous','Synchronized') {$phaseKey+='|'+$script:MioSparseCrtGeometry.Key+'|'+$script:MioSparseCrtContinuousFps+'|'+$script:MioSparseCrtContinuousCycleMs+'|'+$script:UiSparseCrtRegion+'|'+$script:MioSparseCrtLogoFrameCount+'|'+$script:MioSparseCrtBunnyFrameCount}
+        if ($script:MioSparseCrtFrames.ContainsKey($phaseKey)) {return $script:MioSparseCrtFrames[$phaseKey]}
+    } elseif (-not $animatedCrt -and $script:MioRenderCache.ContainsKey($cacheKey)) {return $script:MioRenderCache[$cacheKey]}
     $rowLevels=$null
     if ($useCrt) {
         if (-not $script:MioCrtPalettes) {
@@ -478,17 +659,24 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
                 $script:MioCrtPalettes[$level]=$palette
             }
         }
-        if (-not $script:UiDemoPaused) {$script:UiCrtTimeMs=$script:UiEffectClock.Elapsed.TotalMilliseconds}
-        $seconds=$script:UiCrtTimeMs/1000.0
-        $flutter=0.95+0.035*[Math]::Sin($seconds*2*[Math]::PI*1.35)+0.015*[Math]::Sin($seconds*2*[Math]::PI*3.1)
-        $band=($seconds%3.8)/3.8*30-3
-        $rowLevels=@(for ($row=0;$row -lt 24;$row++) {
-            $distance=$row-$band
-            $gain=$flutter*(1-0.22*[Math]::Exp(-$distance*$distance/5.0))
-            if (($row%2) -eq 1) {$gain*=0.94}
-            $level=[int][Math]::Max(65,[Math]::Min(100,[Math]::Round(100*$gain)))
-            $level
-        })
+        if ($animatedCrt) {
+            if (-not $script:UiDemoPaused) {$script:UiCrtTimeMs=$script:UiEffectClock.Elapsed.TotalMilliseconds}
+            $seconds=$script:UiCrtTimeMs/1000.0
+            $flutter=0.95+0.035*[Math]::Sin($seconds*2*[Math]::PI*1.35)+0.015*[Math]::Sin($seconds*2*[Math]::PI*3.1)
+            $band=($seconds%3.8)/3.8*30-3
+            $rowLevels=@(for ($row=0;$row -lt 24;$row++) {
+                $distance=$row-$band
+                $gain=$flutter*(1-0.22*[Math]::Exp(-$distance*$distance/5.0))
+                if (($row%2) -eq 1) {$gain*=0.94}
+                [int][Math]::Max(65,[Math]::Min(100,[Math]::Round(100*$gain)))
+            })
+        } elseif ($sparseCrt) {
+            $rowLevels=Get-MioSparseCrtLevels $script:UiSparseCrtPhase
+        } else {
+            # A visible scanline texture costs only the first render of a pose.
+            # Sparse gestures reuse it without starting a CRT redraw clock.
+            $rowLevels=@(for ($row=0;$row -lt 24;$row++) {if (($row%2) -eq 0) {100} else {84}})
+        }
     }
     $result=[System.Collections.Generic.List[string]]::new()
     for ($y=0;$y -lt 24;$y+=2) {
@@ -526,9 +714,15 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
         }
     }
     $rendered=$result.ToArray()
-    # Smooth/plain poses have a finite library of cached variants. CRT modulation
-    # remains time-driven and is deliberately not cached here.
-    if (-not $useCrt) {$script:MioRenderCache[$cacheKey]=$rendered}
+    if ($sparseCrt) {
+        # Cache a finite set of pose/phase combinations. Repeated sweep cycles
+        # reuse complete rows; unusual gestures cannot grow this indefinitely.
+        if ($script:MioSparseCrtFrames.Count -ge 256) {
+            $script:MioSparseCrtFrames.Remove($script:MioSparseCrtFrameOrder.Dequeue())
+        }
+        $script:MioSparseCrtFrames[$phaseKey]=$rendered
+        $script:MioSparseCrtFrameOrder.Enqueue($phaseKey)
+    } elseif (-not $animatedCrt) {$script:MioRenderCache[$cacheKey]=$rendered}
     return $rendered
 }
 function Get-TimedMioFrame([string]$Mood,[string]$PoseOverride,[switch]$Refresh) {
@@ -588,14 +782,20 @@ function Get-TerminalFrame([string[]]$Lines) {
     foreach ($row in $Lines) {$rows.Add($row)}
     return [pscustomobject]@{Lines=$rows.ToArray(); BannerRows=$banner.Count}
 }
-function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0,[bool]$ShowCaret=$true) {
-    $script:UiIdleMenuCache=$null
+function Flush-DisplayEvents {
     if ($script:UiPendingEvents) {
+        if ($script:UiPendingEvents.Count) {$script:UiIdleMenuCache=$null}
         foreach ($row in $script:UiPendingEvents) {$script:UiEventRows.Add($row)}
         $script:UiPendingEvents.Clear()
         while ($script:UiEventRows.Count -gt 100) {$script:UiEventRows.RemoveAt(0)}
     }
+}
+function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0,[bool]$ShowCaret=$true) {
+    $script:UiIdleMenuCache=$null
+    Flush-DisplayEvents
     $layout=Get-TerminalFrame $Lines
+    $script:UiLastLogoRows=@()
+    if ($layout.BannerRows -eq 7) {$script:UiLastLogoRows=@($layout.Lines[0..4] | ForEach-Object {$_.Substring(2)})}
     $script:UiLastFrameRows=$layout.Lines.Count
     # Anchor the whole frame to the viewport. No trailing newline: even a
     # frame ending at the bottom must never scroll its own banner away.
@@ -644,11 +844,23 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     }
     $w=$script:UiWidth; $left=$w-28
     $bodyRows=[Math]::Max(12,$Rows.Count); $borderHeight=$bodyRows+3
+    if ($script:MioSparseCrtMode -in 'Continuous','Synchronized') {
+        Flush-DisplayEvents
+        $geometryKey=('{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f $w,$script:UiColumns,$script:UiHeight,$bodyRows,$script:UiMenuActive,$script:UiDemo,$script:UiEventRows.Count)
+        if ($geometryKey -cne $script:MioSparseCrtGeometryKey) {
+            $placeholder=New-Object 'string[]' ($bodyRows+5)
+            $layout=Get-TerminalFrame $placeholder
+            $bunnyRow=$layout.Lines.Count-$placeholder.Count+3
+            $logoRow=0; if ($layout.BannerRows -eq 7) {$logoRow=1}
+            $script:MioSparseCrtGeometry=@{Key=($logoRow.ToString()+'|'+$bunnyRow);LogoRow=$logoRow;BunnyRow=$bunnyRow;SpanPixels=(2*($bunnyRow-1)+24)}
+            $script:MioSparseCrtGeometryKey=$geometryKey
+        }
+    }
     $mio=@(Get-TimedMioFrame $Mood -Refresh:$RefreshMio)
     # A sparse gesture changes only Mio. Preserve the rest of the terminal,
     # including its steady input caret, and avoid rebuilding every border.
     $patchable=($script:UiVT -and -not $script:UiLive -and -not $script:UiDemo -and
-        $script:UiIdlePoseOverride -and $mio.Count -eq 12 -and
+        ($script:UiIdlePoseOverride -or $script:UiSparseCrtPhase -ge 0 -or $script:UiIdleMenuCache.SparseCrt) -and $mio.Count -eq 12 -and
         (-not $script:UiPendingEvents -or $script:UiPendingEvents.Count -eq 0))
     $rowsKey=$Rows -join [char]0
     $cached=$script:UiIdleMenuCache
@@ -662,6 +874,13 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $cached.Effect -ceq $script:DisplayEffect -and $cached.MenuActive -eq $script:UiMenuActive -and
         $cached.EventCount -eq $script:UiEventRows.Count) {
         $patch=[Text.StringBuilder]::new()
+        $logo=@()
+        if ($script:MioSparseCrtMode -in 'Continuous','Synchronized' -and $cached.LogoRow -gt 0) {
+            $logo=@(Get-OptiLogoRows)
+            for ($i=0;$i -lt $logo.Count;$i++) {
+                if ($logo[$i] -cne $cached.Logo[$i]) {[void]$patch.Append($script:Esc+'['+($cached.LogoRow+$i)+';3H'+$logo[$i])}
+            }
+        }
         for ($i=0;$i -lt $mio.Count;$i++) {
             if ($mio[$i] -cne $cached.Mio[$i]) {
                 [void]$patch.Append($script:Esc+'['+($cached.BunnyRow+$i)+';'+($w-20)+'H'+$mio[$i])
@@ -672,6 +891,8 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
             [Console]::Write($patch.ToString())
         }
         $cached.Mio=$mio
+        if ($logo.Count) {$cached.Logo=$logo}
+        if ($script:UiSparseCrtPhase -ge 0) {$cached.SparseCrt=$true}
         return
     }
     $border=Get-BorderMotion $w $borderHeight
@@ -702,7 +923,9 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
             PanelRows=$script:UiRows;FrameRows=$script:UiLastFrameRows;Title=$Title;RowsKey=$rowsKey;Prompt=$Prompt
             InputText=$InputText;Caret=$Caret;Mood=$Mood;Ansi=$script:UiAnsi;Version=$script:AppVersion
             Effect=$script:DisplayEffect;MenuActive=$script:UiMenuActive;EventCount=$script:UiEventRows.Count
-            Mio=$mio;InputColumn=(11+$inputView.Caret);BunnyRow=($script:UiLastFrameRows-$lines.Count+3)
+            Mio=$mio;SparseCrt=($script:UiSparseCrtPhase -ge 0);Logo=$script:UiLastLogoRows
+            LogoRow=$(if ($script:UiBannerRows -eq 7) {1} else {0})
+            InputColumn=(11+$inputView.Caret);BunnyRow=($script:UiLastFrameRows-$lines.Count+3)
         }
     }
 }
@@ -758,6 +981,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
     $idleWatch=[Diagnostics.Stopwatch]::StartNew()
     $sparseIdle=([bool](Get-Variable IdleAnimations -ValueOnly -ErrorAction SilentlyContinue) -and $Mood -eq 'idle' -and -not $script:UiDemo -and -not $script:UiLive)
     $script:UiIdlePoseOverride=$null
+    Reset-MioSparseCrt
     if ($sparseIdle) {Reset-MioIdleInput}
     try {
         while ($true) {
@@ -765,13 +989,15 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                 $rows=@(Get-MenuRows $Lines ([Math]::Max(44,$script:UiWidth-28)))
                 $dirty=$true
             }
+            $bunnyVisible=($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7))
             if ($sparseIdle) {
-                $idlePose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0)
+                $idlePose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
                 if ($idlePose -cne $script:UiIdlePoseOverride) {
                     $script:UiIdlePoseOverride=$idlePose
                     $dirty=$true
                 }
             }
+            if (Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible) {$dirty=$true}
             $caretChanged=((Get-InputCaretVisible) -ne $script:UiCaretDrawn)
             if ($dirty -or $caretChanged -or ($script:UiLive -and $watch.ElapsedMilliseconds -ge 33)) {
                 $watch.Restart()
@@ -802,7 +1028,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                 Wait-DisplayFrame $wait
             }
         }
-    } finally {$script:UiIdlePoseOverride=$null; $idleWatch.Stop(); Clear-DisplayPanel}
+    } finally {$script:UiIdlePoseOverride=$null; Reset-MioSparseCrt; $idleWatch.Stop(); Clear-DisplayPanel}
 }
 
 function Show-ConversionStart([string]$System) {
@@ -998,6 +1224,23 @@ function Get-DisplayBanner([bool]$Full=$true) {
         '  '+(Color-Text (Fit-Text ('OPTIMIYOO v'+$script:AppVersion+' // DISK LINK') ([Math]::Max(1,[Math]::Min($script:UiWidth,$script:UiColumns-4)))) $palette[0])
     }
 }
+function Format-CrtLogoGlyph([string]$Glyph,[string]$Rgb,[int]$TopLevel=100,[int]$BottomLevel=84) {
+    $upper=$Rgb
+    if ($TopLevel -ne 100) {$upper=(@($Rgb.Split(';') | ForEach-Object {[int][Math]::Round([int]$_*$TopLevel/100.0)})) -join ';'}
+    $lower=(@($Rgb.Split(';') | ForEach-Object {[int][Math]::Round([int]$_*$BottomLevel/100.0)})) -join ';'
+    $top=$script:Esc+'[38;2;'+$upper+'m'
+    $bottom=$script:Esc+'[38;2;'+$lower+'m'
+    $both=$script:Esc+'[38;2;'+$upper+';48;2;'+$lower+'m'
+    $reset=$script:Esc+'[0m'; $result=[Text.StringBuilder]::new()
+    foreach ($pixel in $Glyph.ToCharArray()) {
+        # Keep the same occupied pixel halves, including the bevels and gaps.
+        if ($pixel -eq [char]0x2588) {[void]$result.Append($both+[char]0x2580+$reset)}
+        elseif ($pixel -eq [char]0x2580) {[void]$result.Append($top+$pixel+$reset)}
+        elseif ($pixel -eq [char]0x2584) {[void]$result.Append($bottom+$pixel+$reset)}
+        else {[void]$result.Append($pixel)}
+    }
+    return $result.ToString()
+}
 function Get-OptiLogoRows {
     # Solid terminal blocks, beveled caps and a small forward rake. The five
     # rows retain the original banner height and fit an 80-column console.
@@ -1011,9 +1254,23 @@ function Get-OptiLogoRows {
     }}
     $title='OPTIMIYOO'
     $colors=@(Get-BannerPalette)
+    $crt=($script:UiAnsi -and $script:DisplayEffect -eq 'CRT')
+    $cacheKey=$script:UiAnsi.ToString()+'|'+$crt+'|'+($colors -join '|')
+    $motion=($crt -and -not $script:UiLive -and $script:MioSparseCrtMode -in 'Continuous','Synchronized' -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry.LogoRow -gt 0)
+    $levels=$null
+    if ($motion) {
+        $cacheKey+='|'+$script:MioSparseCrtMode+'|'+$script:MioSparseCrtGeometry.Key+'|'+$script:MioSparseCrtContinuousFps+'|'+$script:MioSparseCrtContinuousCycleMs+'|'+$script:UiSparseCrtRegion+'|'+$script:MioSparseCrtLogoFrameCount+'|'+$script:MioSparseCrtBunnyFrameCount+'|'+$script:UiSparseCrtPhase
+        if ($script:OptiLogoMotionCache.ContainsKey($cacheKey)) {return $script:OptiLogoMotionCache[$cacheKey]}
+        $levels=(Get-MioContinuousCrtLevels $script:UiSparseCrtPhase).Logo
+    } elseif (-not $script:UiLive -and $script:OptiLogoCache.ContainsKey($cacheKey)) {return $script:OptiLogoCache[$cacheKey]}
+    $rows=[System.Collections.Generic.List[string]]::new()
     $rake=@(2,2,1,1,0)
     $prefix=$script:Esc+'[38;2;'; $reset=$script:Esc+'[0m'
     for ($row=0;$row -lt 5;$row++) {
+        $topLevel=100; $bottomLevel=84
+        if ($levels) {$topLevel=$levels[$row*2]; $bottomLevel=$levels[$row*2+1]}
+        $rowKey=$row.ToString()+'|'+$script:UiAnsi+'|'+$crt+'|'+($colors -join '|')+'|'+$topLevel+'|'+$bottomLevel
+        if (-not $script:UiLive -and $script:OptiLogoRowCache.ContainsKey($rowKey)) {$rows.Add($script:OptiLogoRowCache[$rowKey]);continue}
         $line=[Text.StringBuilder]::new()
         [void]$line.Append(' '*$rake[$row])
         for ($column=0;$column -lt $title.Length;$column++) {
@@ -1030,11 +1287,22 @@ function Get-OptiLogoRows {
             if ($column -gt 0) {[void]$line.Append(' ')}
             if ($column -eq 4) {[void]$line.Append(' ')}
             $glyph=$script:OptiLogoFont[[string]$title[$column]][$row]
-            if ($script:UiAnsi) {[void]$line.Append($prefix+$rgb+'m'+$glyph+$reset)}
+            if ($crt) {[void]$line.Append((Format-CrtLogoGlyph $glyph $rgb $topLevel $bottomLevel))}
+            elseif ($script:UiAnsi) {[void]$line.Append($prefix+$rgb+'m'+$glyph+$reset)}
             else {[void]$line.Append($glyph)}
         }
-        $line.ToString()
+        $renderedRow=$line.ToString(); $rows.Add($renderedRow)
+        if (-not $script:UiLive) {
+            if ($script:OptiLogoRowCache.Count -ge 256) {$script:OptiLogoRowCache.Remove($script:OptiLogoRowOrder.Dequeue())}
+            $script:OptiLogoRowCache[$rowKey]=$renderedRow; $script:OptiLogoRowOrder.Enqueue($rowKey)
+        }
     }
+    $rendered=$rows.ToArray()
+    if ($motion) {
+        if ($script:OptiLogoMotionCache.Count -ge 256) {$script:OptiLogoMotionCache.Remove($script:OptiLogoMotionOrder.Dequeue())}
+        $script:OptiLogoMotionCache[$cacheKey]=$rendered; $script:OptiLogoMotionOrder.Enqueue($cacheKey)
+    } elseif (-not $script:UiLive) {$script:OptiLogoCache[$cacheKey]=$rendered}
+    return $rendered
 }
 function Show-Header {
     Initialize-Display

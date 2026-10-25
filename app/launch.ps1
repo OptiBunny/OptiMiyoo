@@ -7,7 +7,7 @@ $env:PSModuleAnalysisCachePath='NUL'
 function New-OptiTerminalCommand([string]$EntryPoint,[string]$Root) {
     # Keep paths out of Windows Terminal's semicolon-delimited command syntax.
     $application=Split-Path -Parent (Split-Path -Parent $EntryPoint)
-    $command="`$env:OPTIMIYOO_CRT_HOST=`$null; `$env:PSModuleAnalysisCachePath='NUL'; Set-Location -LiteralPath '"+$application.Replace("'","''")+"'; & '"+$EntryPoint.Replace("'","''")+"' -DisplayEffect Smooth -NoAnimation -IdleAnimations"
+    $command="`$env:OPTIMIYOO_CRT_HOST=`$null; `$env:PSModuleAnalysisCachePath='NUL'; Set-Location -LiteralPath '"+$application.Replace("'","''")+"'; & '"+$EntryPoint.Replace("'","''")+"' -DisplayEffect CRT -NoAnimation -IdleAnimations"
     if ($Root) {$command+=" -Root '"+$Root.Replace("'","''")+"'"}
     $command+='; exit $LASTEXITCODE'
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
@@ -37,7 +37,7 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root) {
 $entryPoint=Join-Path $PSScriptRoot 'make_playlists.ps1'
 $interactive=($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
 if ($interactive -and -not $CurrentTerminal -and (Start-OptiTerminalWindow $entryPoint $Root)) {exit 0}
-$parameters=@{DisplayEffect='Smooth';NoAnimation=$true;IdleAnimations=$true}
+$parameters=@{DisplayEffect='CRT';NoAnimation=$true;IdleAnimations=$true}
 if ($Root) {$parameters.Root=$Root}
 & $entryPoint @parameters
 exit $LASTEXITCODE

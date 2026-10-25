@@ -1,32 +1,31 @@
-Bundled NIBTools component
+NIBTools 20241120
 
 Author: Peter Rittwage and contributors; based on MNIB by Markus Brenner.
-Official repository: https://github.com/rittwage/nibtools
-Release source: 20241120, commit 7bd20898c325a0e0036167f5a8b2fa66319154d3
-Source archive: NIBTools-source-20241120.zip
-Source download: https://api.github.com/repos/rittwage/nibtools/zipball/20241120
+Project: https://github.com/rittwage/nibtools
+Release commit: 7bd20898c325a0e0036167f5a8b2fa66319154d3
+Included source: NIBTools-source-20241120.zip
+Download: https://api.github.com/repos/rittwage/nibtools/zipball/20241120
 
-OptiMiyoo builds nibconv.exe from this unmodified source for AMD64 Windows.
-The upstream executable strips relocation information and cannot start in
-Windows AppContainer. This build retains relocations and supports the same
-conversion formats. It does not need the physical-drive OpenCBM components.
+Bundled binary
+OptiMiyoo builds AMD64 nibconv.exe from the unmodified release source, retaining
+relocations required by Windows AppContainer. It converts existing image files;
+physical-drive tools and OpenCBM components are not used.
+File: app/tools/nibconv.exe
 SHA-256: 91ffa3f66ec00b2648613bbcfea32d162b72dd260c2f188dc7562045989b68ff
 
-Build tool: official Zig 0.17.0 (Clang/MinGW-w64 C toolchain).
+Reproduce the executable
+Compiler: official Zig 0.17.0 (Clang/MinGW-w64).
 Download: https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip
-Compiler archive SHA-256:
-b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428
+Compiler archive SHA-256: b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428
 
-To reproduce, extract the source and compiler archives, enter the source root,
-set SOURCE_DATE_EPOCH=1732060800 (2024-11-20 UTC), and run the following command
-with zig.exe on PATH. The fixed date makes the built-in version text reproducible.
+Extract the source and compiler. In cmd.exe, enter the source root, set
+SOURCE_DATE_EPOCH=1732060800, and run this command with zig.exe on PATH:
 
 zig cc -target x86_64-windows-gnu -std=c99 -O1 -s -Wno-format -Wno-pointer-sign -Wno-error=date-time -DWIN32 -D_XOPEN_SOURCE=500 -I include/WINDOWS -o nibconv.exe nibconv.c gcr.c prot.c fileio.c crc.c md5.c lz.c
 
-COPYING.ZIG and COPYING.MINGW preserve the bundled toolchain runtime notices.
-LICENSE.txt is the GPL-3.0 text added by the upstream repository after this release:
+Licenses
+COPYING.ZIG and COPYING.MINGW contain the bundled toolchain runtime notices.
+LICENSE.txt is the GPL-3.0 text added upstream after this release:
 https://github.com/rittwage/nibtools/blob/a549c18c5267c2b1e595aa65396399e12a0201b5/LICENSE
 Original copyright and third-party notices remain in the source archive.
-
-README-upstream.txt describes all NIBTools programs. OptiMiyoo uses only nibconv
-to convert existing image files; hardware disk reading and writing are not used.
+README-upstream.txt describes the full NIBTools suite.

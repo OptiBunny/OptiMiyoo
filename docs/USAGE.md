@@ -10,6 +10,8 @@ Run **`OptiMiyoo.bat`**. Game files go in `SRC`; finished files appear in `DST`.
 Type a number or letter, then **Enter**. Enter on its own accepts the displayed
 default. In the option menus, **B** goes back and **Q** exits.
 
+On the main menu, **1–10** create playlists; **C** and **Z** convert images only.
+
 | Choose | What it does |
 | --- | --- |
 | **1–10** | [Create playlists](#create-playlists) for your selected system. |
@@ -48,6 +50,16 @@ images. Loose files stay loose, and media formats are unchanged in either mode.
 
 Games with two or more images get a playlist in `DST`, with their media under
 `.hidden`. Single-media games stay visible without a playlist.
+
+### Using converted images
+
+If you also want playlists for converted images, create a new batch folder with
+`SRC` and `DST`. Copy each game's converted disk set into its `SRC`, keeping the
+discs together and numbered. For ZX, use loose DSK output or extract the
+individual output ZIPs first.
+
+Drag that batch folder onto `OptiMiyoo.bat` and choose the numbered system for
+playlists. The selected core must support them.
 
 ### Systems and ROM folders
 
@@ -99,15 +111,6 @@ Put IPF files or ZIPs containing IPF files in `SRC`, then choose **Z**.
 Next, choose **1: Keep originals** (default) or **2: Remove originals** to start.
 Some IPF copy-protection details cannot be preserved in DSK.
 
-### Playlists after conversion
-
-Create a new batch folder containing `SRC` and `DST`. Copy each game's converted
-disk set into its `SRC`, keeping the discs together and numbered. For ZX, choose
-loose DSK output or extract the individual output ZIPs first.
-
-Drag that batch folder onto `OptiMiyoo.bat` and choose the numbered system for
-playlists. The selected core must support them.
-
 ## Existing outputs and finishing a batch
 
 If an output already exists, choose:
@@ -119,8 +122,8 @@ If an output already exists, choose:
 | **A** | Overwrite all conflicts in this batch |
 | **S** | Skip all conflicts in this batch |
 
-The choice applies to the current game's listed outputs together. **> / <** pages
-through their paths. Here, **B / Q** also skips the current game. Skipping keeps
+The choice applies to the listed outputs together. **> / <** pages through their
+paths. Here, **B / Q** also chooses Skip. Skipping keeps
 the existing output and its original in `SRC`.
 
 Originals are kept unless you selected **Remove**. Removal applies only after

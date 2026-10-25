@@ -2,6 +2,7 @@
 param(
     [Parameter(Position=0)][string]$Root,
     [ValidateSet('Keep', 'Remove', 'Folders')][string]$Mode,
+    [ValidateSet('Zip','Loose','Folders')][string]$Storage,
     [ValidateSet('Keep','Remove')][string]$SourcePolicy,
     [ValidateSet('Ask', 'Overwrite', 'Skip')][string]$Existing = 'Ask',
     [switch]$NoPause,
@@ -32,7 +33,30 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 . (Join-Path $ScriptDir 'zip_integrity.ps1')
 . (Join-Path $ScriptDir 'native_process.ps1')
 . (Join-Path $ScriptDir 'archive_sandbox.ps1')
+. (Join-Path $ScriptDir 'conversion_layout.ps1')
 Initialize-NativeTextCapture
+
+function Get-C64ConversionGroups([string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
+    Get-ConversionSourceGroups $SourceRoot $DestinationRoot $Storage 'C64'
+}
+
+function Invoke-C64ExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
+    $groups=@(Get-C64ConversionGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage)
+    Show-ConversionStart 'Commodore 64 / NIB -> G64'
+    Invoke-ConversionGroupBatch $groups 'C64' $Root $SourcePolicy $Existing {
+        param($item,$source,$target,$temp,$index,$count)
+        if ($item.Converter -eq 'Nib') {
+            Assert-NibSource $source
+            $shortInput=Join-Path $temp ('input'+[IO.Path]::GetExtension($source));$shortOutput=Join-Path $temp 'output.g64'
+            [IO.File]::Copy($source,$shortInput)
+            $lease=$null
+            try {$lease=Open-SourcePolicyReadLease $shortInput $temp;Invoke-NibConversion $shortInput $shortOutput $index $count $item.Name}
+            finally {if ($lease) {$lease.Dispose()}}
+            [IO.File]::Move($shortOutput,$target);Remove-SourcePolicyOwnedPath -Path $shortInput -Root $temp
+        } else {[IO.File]::Copy($source,$target)}
+        if ($item.Media) {Assert-G64 $target}
+    }
+}
 
 function Format-Duration([double]$Seconds) {
     if ($Seconds -lt 0 -or [double]::IsInfinity($Seconds)) { return 'calculating...' }
@@ -681,26 +705,11 @@ try {
     Write-Event 'MODE' ('OptiMiyoo / Commodore 64 / converter workflow v'+$script:ConverterVersion)
     Write-Event 'SOURCE' $sourceRoot
     Write-Event 'OUTPUT' $destinationRoot
-    if ([string]::IsNullOrWhiteSpace($Mode)) {
-        do {
-            $choice=Read-DisplayInput 'Choose 1 or 2 [Enter = 2]' 'Commodore 64 / output format' @(
-                'Input: loose NIB/NBZ/G64 files or ZIPs.',
-                '1. Loose files',
-                '2. ZIP files (default)',
-                'B. Back (return to caller)     Q. Exit')
-            if ($choice -in 'B','Q') {exit 0}
-            if ($choice -in '','2') {$selectedMode='Keep'}
-            elseif ($choice -eq '1') {$selectedMode='Folders'}
-            else {Write-C64Text '  Choose 1, 2, B or Q.';continue}
-            if (-not $SourcePolicy) {
-                $policyChoice=Read-SourcePolicy 'Commodore 64'
-                if ($policyChoice -eq 'Exit') {exit 0}
-                if ($policyChoice -eq 'Back') {continue}
-                $SourcePolicy=$policyChoice
-            }
-            $Mode=$selectedMode
-        } while ([string]::IsNullOrWhiteSpace($Mode))
+    if ($Storage) {
+        if (-not $SourcePolicy) {$SourcePolicy='Keep';if ($Mode -eq 'Remove') {$SourcePolicy='Remove'}}
+        exit (Invoke-C64ExplicitOutputs $Root $Storage $SourcePolicy $Existing)
     }
+    if ([string]::IsNullOrWhiteSpace($Mode)) {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, loose files or folders.'}
     if (-not $SourcePolicy) {$SourcePolicy='Keep'; if ($Mode -eq 'Remove') {$SourcePolicy='Remove'}}
     $removeOriginals=($SourcePolicy -eq 'Remove')
     if (Test-ApplicationWorker) {Write-C64Text '  Working on staged copies. Originals are handled after verification.' -ForegroundColor Cyan}

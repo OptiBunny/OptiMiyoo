@@ -5,25 +5,26 @@
 
 function Get-ApplicationPromptTitle {
     param([Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Auto','Folders')][string]$Storage='Auto',
+          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK')
     $systems=@{AMIGA='Amiga';COMMODORE='Commodore 64';PS='PlayStation';SEGACD='Sega CD';
         CPC='Amstrad CPC';MSX='MSX';VIC20='VIC-20';PCECD='PC Engine CD';DOS='MS-DOS';ZXS='ZX Spectrum'}
+    if($Storage -eq 'LegacyFolders' -and $Operation -ne 'C64'){throw 'Legacy folder storage is only valid for C64.'}
+    $storageName=@{Zip='ZIP output';Loose='Loose files';Folders='Folder per game';LegacyFolders='Folder output';Auto='Auto storage'}[$Storage]
     switch($Operation) {
         'Playlist' {
             if(-not $systems.ContainsKey($System)){throw 'Unknown playlist system in trusted prompt.'}
-            $storageName='Auto storage';if($Storage -eq 'Folders'){$storageName='Loose folders'}
             return ($systems[$System]+' / '+$storageName)
         }
         'C64' {
             if($System -and $System -cne 'COMMODORE'){throw 'Invalid C64 prompt system.'}
-            $formatName='ZIP output';if($Storage -eq 'Folders'){$formatName='Loose G64 output'}
-            return ('Commodore 64 / '+$formatName)
+            if($Storage -eq 'Auto'){$storageName='ZIP output'}
+            return ('Commodore 64 / '+$storageName)
         }
         'ZX' {
             if($System -and $System -cne 'ZXS'){throw 'Invalid ZX prompt system.'}
-            $formatName='ZIP output';if($Format -eq 'LooseDSK'){$formatName='Loose DSK output'}
-            return ('ZX Spectrum / '+$formatName)
+            if($Storage -eq 'Auto'){$storageName='ZIP output';if($Format -eq 'LooseDSK'){$storageName='Loose DSK output'}}
+            return ('ZX Spectrum / '+$storageName)
         }
         'SD' {
             if($System){throw 'SD setup does not accept a system override.'}
@@ -44,7 +45,7 @@ function ConvertTo-ApplicationPromptPath([string]$Path) {
 function Get-ApplicationPromptModel {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
-          [ValidateSet('Auto','Folders')][string]$Storage='Auto',
+          [ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage $Format
@@ -131,7 +132,7 @@ function Invoke-ApplicationPolicyPrompt {
     param([Parameter(Mandatory=$true)]$Session,
           [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
-          [ValidateSet('Auto','Folders')][string]$Storage='Auto',
+          [ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
           [switch]$NoAnimation,[switch]$NoColor,

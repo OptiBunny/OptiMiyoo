@@ -1,5 +1,6 @@
 ﻿# This is the small trusted coordinator. The interface and processing scripts
 # execute in a zero-capability AppContainer using disposable SRC/DST snapshots.
+. (Join-Path $PSScriptRoot 'application_entry.ps1')
 . (Join-Path $PSScriptRoot 'application_session.ps1')
 . (Join-Path $PSScriptRoot 'application_staging.ps1')
 . (Join-Path $PSScriptRoot 'application_broker.ps1')
@@ -28,11 +29,12 @@ function Get-ApplicationSelection {
     param($Payload)
     $operation=[string]$Payload.Operation;$system=[string]$Payload.System
     $storage=[string]$Payload.Storage;$format=[string]$Payload.Format
-    if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Auto','Folders' -or $format -notin 'LooseDSK','ZipDSK') {throw 'Unknown application selection.'}
+    if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Auto','Zip','Loose','Folders','LegacyFolders' -or $format -notin 'LooseDSK','ZipDSK') {throw 'Unknown application selection.'}
     if ($operation -eq 'Playlist' -and $system -notin 'AMIGA','COMMODORE','PS','SEGACD','CPC','MSX','VIC20','PCECD','DOS','ZXS') {throw 'Unknown playlist system.'}
     if ($operation -eq 'C64') {$system='COMMODORE'}
     if ($operation -eq 'ZX') {$system='ZXS'}
-    return @{Operation=$operation;System=$system;Storage=$storage;Format=$format}
+    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $storage -Format $format
+    return @{Operation=$operation;System=$system;Storage=$output.Storage;Format=$output.Format}
 }
 
 function Invoke-ApplicationHostRequest {
@@ -188,7 +190,7 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
         $rows=@($Result.Results | Select-Object System,Source,Playlist,DiskImages,Result,Original,RemovedFiles,KeptFiles,RemovalFailures,Detail | ConvertTo-SafeReportRow | ConvertTo-Csv -NoTypeInformation)
         foreach ($line in $rows) {$csvWriter.WriteLine($line)}
         $logWriter.WriteLine(('OptiMiyoo verified results: {0} published; {1} failed; {2} originals removed.' -f $Result.Written,$Result.Failed,$Result.Removed))
-        foreach ($row in $Result.Results) {$logWriter.WriteLine((ConvertTo-SafeExternalText ($row.SourceKey+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)))}
+        foreach ($row in $Result.Results) {$logWriter.WriteLine((ConvertTo-SafeExternalText ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)))}
         $csvWriter.Flush();$csvStream.Flush($true);$logWriter.Flush();$logStream.Flush($true)
         Write-Host ('Report: '+$csv)
         Write-Host ('Log: '+$log)
@@ -214,7 +216,8 @@ function Invoke-ApplicationHost {
     Initialize-ApplicationSession
     $startPage='Main'
     if ($Arguments.StartPage) {$startPage=[string]$Arguments.StartPage}
-    if (($Entry -eq 'C64' -and -not $Arguments.Mode) -or ($Entry -eq 'ZX' -and (-not $Arguments.Format -or $Arguments.Format -eq 'Ask'))) {
+    $explicitStorage=($Arguments.ContainsKey('Storage') -and $Arguments.Storage -in 'Zip','Loose','Folders')
+    if (-not $explicitStorage -and (($Entry -eq 'C64' -and -not $Arguments.Mode) -or ($Entry -eq 'ZX' -and (-not $Arguments.Format -or $Arguments.Format -eq 'Ask')))) {
         $startPage=$Entry;$Entry='Playlist';$menu=$true
     }
     $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
@@ -240,14 +243,14 @@ function Invoke-ApplicationHost {
             if ($sd) {$worker.OnionRoot=$sd.StagedRoot}
             $batch=$null
             if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
-                $storage='Auto';if ($Arguments.Storage -eq 'Folders' -or $Arguments.Mode -eq 'Folders') {$storage='Folders'}
-                $format='LooseDSK';if ($Arguments.Format -eq 'ZipDSK') {$format='ZipDSK'}
-                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$storage;Format=$format})
+                $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -Format $Arguments.Format -Mode $Arguments.Mode
+                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;Format=$output.Format})
                 $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove' -or ($Entry -eq 'C64' -and $Arguments.Mode -eq 'Remove' -and -not $Arguments.ContainsKey('SourcePolicy'))) {$policy='Remove'}
                 $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
-                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.Storage=$storage;$worker.NoPause=$true}
-                elseif ($Entry -eq 'C64') {$worker.Mode=$(if ($storage -eq 'Folders') {'Folders'}else{'Keep'});$worker.NoPause=$true}
-                else {$worker.Format=$format;[void]$worker.Remove('NoPause');[void]$worker.Remove('Preview')}
+                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.Storage=$selection.Storage;$worker.NoPause=$true}
+                elseif ($Entry -eq 'C64') {$worker.Mode=$(if ($selection.Storage -eq 'LegacyFolders') {'Folders'}else{'Keep'});$worker.NoPause=$true}
+                else {$worker.Format=$selection.Format;[void]$worker.Remove('NoPause');[void]$worker.Remove('Preview')}
+                if ($Entry -in 'C64','ZX' -and $selection.Storage -in 'Zip','Loose','Folders') {$worker.Storage=$selection.Storage}
             }
             if ($Entry -eq 'SD') {
                 if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
@@ -282,7 +285,7 @@ function Invoke-ApplicationHost {
         if ($state) {$displayEffect=$state.DisplayEffect}
         if ($state -and $state.Result) {
             Write-Host ('Published: {0}; failed: {1}; originals removed: {2}.' -f $state.Result.Written,$state.Result.Failed,$state.Result.Removed)
-            foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.SourceKey+': '+$result.Result+' / '+$result.Detail))}
+            foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.Source+': '+$result.Result+' / '+$result.Detail))}
             Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
             if ($state.Result.Operation -eq 'C64') {
                 Write-Host ('  Originals removed from SRC: {0:N0}   Kept in SRC: {1:N0}   Removal failures: {2:N0}' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)

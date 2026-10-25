@@ -49,7 +49,7 @@ function New-ApplicationStagedCode {
         'app/display.ps1','app/compile_support.ps1','app/core_support.ps1','app/overwrite_prompt.ps1',
         'app/mio_idle_library.ps1','app/mio_idle_scheduler.ps1',
         'app/output_safety.ps1','app/source_policy.ps1','app/archive_limits.ps1','app/zip_integrity.ps1','app/media_validation.ps1',
-        'app/native_process.ps1','app/native_sandbox.ps1','app/archive_sandbox.ps1',
+        'app/native_process.ps1','app/native_sandbox.ps1','app/archive_sandbox.ps1','app/conversion_layout.ps1',
         'app/application_session.ps1','app/application_entry.ps1','app/application_jobs.ps1','app/application_archive.ps1',
         'app/systems.json')
     $texts=@{};$encoding=New-Object Text.UTF8Encoding($true)

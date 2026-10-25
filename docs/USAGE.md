@@ -23,6 +23,23 @@ game, or individual files. Finished files go into `DST`.
 For a separate batch folder, create `SRC` and `DST` inside it, then drag the
 folder onto `OptiMiyoo.bat`.
 
+## Choose how to save
+
+After choosing a numbered system, **C**, or **Z**, pick an output type:
+
+| Choice | Files in `DST` |
+| --- | --- |
+| **1: ZIPs** (default) | One ZIP per game. |
+| **2: Loose files** | Individual files, without adding a folder for each game. |
+| **3: Folders** | One folder per game, including single-disc games. |
+
+Then [choose what happens to originals](#originals-and-existing-files) to start.
+
+ZIP playlist playback works with the default Amiga, C64, and VIC-20 cores.
+For other systems, ZIP output packages the game and its playlist together;
+unpack it before playing. Some default cores don't support playlists at all,
+as noted in the [system list](#systems-and-rom-folders).
+
 ## Create playlists
 
 For discs kept as individual files, use numbered names like these:
@@ -38,37 +55,26 @@ For tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 Keep CUE files, their tracks, and any matching SBI files together.
 Keep different versions of the same disc in separate batches.
 
-Choose your [system number](#systems-and-rom-folders), then how to save the files:
-
-- **1: Auto** (default) keeps supported ZIPs intact for Amiga, C64, and VIC-20,
-  and extracts them for other systems.
-- **2: Folders** extracts ZIPs. Use this for games that write to disk images.
-
-Then [choose what happens to originals](#originals-and-existing-files) to start.
+Choose your [system number](#systems-and-rom-folders), then
+[how to save the files](#choose-how-to-save).
 
 For games with multiple discs or tape sides, the playlist stays visible and the
-game files go into `.hidden`. Games with one disc or tape side stay visible
-without a playlist.
+game files go into `.hidden`, except when packaged together in a ZIP for
+unpacking. Games with one disc or tape side don't need a playlist.
 
 ## Convert disk images
 
-Choose **C** or **Z**, then how to save the converted files:
-
-- **1: Loose files**
-- **2: ZIP files** (default)
-
-Then [choose what happens to originals](#originals-and-existing-files) to start.
+Choose **C** or **Z**, then [how to save the files](#choose-how-to-save).
 These options convert files only. To make playlists afterwards, [prepare a new
 batch](#prepare-a-batch) using the converted files and choose a numbered system.
 
 ### C64 converter: C
 
 Converts NIB/NBZ to G64 and copies existing G64 images unchanged.
-Files from the same game ZIP stay together.
 
 ### ZX converter: Z
 
-Converts each IPF to DSK separately.
+Converts IPF to DSK.
 Some IPF copy-protection details cannot be preserved in DSK.
 
 ## Originals and existing files
@@ -111,7 +117,8 @@ system's ROM folder on your SD card, then refresh the game list.
 | **9** | MS-DOS | `Roms/DOS` |
 | **10** | ZX Spectrum | `Roms/ZXS` |
 
-Onion's standard emulators do not support playlists for **5, 8, or 10**.
+Onion's default cores do not support playlists for **5, 8, or 10**.
+You can still prepare these files for use with a compatible core.
 **S** checks the emulators selected on your SD card; C64 tape-side support is shown
 in its playlist menu.
 

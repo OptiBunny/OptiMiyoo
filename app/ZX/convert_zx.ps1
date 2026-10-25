@@ -1,5 +1,6 @@
 ﻿#requires -Version 5.1
 param([string]$Root,[ValidateSet('Ask','LooseDSK','ZipDSK')][string]$Format='Ask',
+      [ValidateSet('Zip','Loose','Folders')][string]$Storage,
       [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
       [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
       [switch]$NoAnimation,[switch]$NoColor,
@@ -46,7 +47,7 @@ $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'native_process.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'archive_sandbox.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'overwrite_prompt.ps1')
-$script:ChooseSourcePolicy=($Format -eq 'Ask' -and -not $PSBoundParameters.ContainsKey('SourcePolicy'))
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'conversion_layout.ps1')
 $script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
 Initialize-Display
 $script:UiSystem='ZXS / IPF -> DSK'
@@ -56,6 +57,30 @@ function Write-Log([string]$Message) {Write-LogFile $Message}
 function Format-Duration([double]$Seconds) {
     $t=[TimeSpan]::FromSeconds([Math]::Max(0,$Seconds))
     return ('{0:00}:{1:00}:{2:00}' -f [Math]::Floor($t.TotalHours),$t.Minutes,$t.Seconds)
+}
+
+function Get-ZXConversionGroups([string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
+    Get-ConversionSourceGroups $SourceRoot $DestinationRoot $Storage 'ZX'
+}
+
+function Invoke-ZXExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
+    $groups=@(Get-ZXConversionGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage)
+    $script:ExplicitEngineReady=$false
+    Show-ConversionStart 'ZX Spectrum / IPF -> DSK'
+    Invoke-ConversionGroupBatch $groups 'ZX' $Root $SourcePolicy $Existing {
+        param($item,$source,$target,$temp,$index,$count)
+        if (-not $script:ExplicitEngineReady) {
+            if (-not (Ensure-HxC)) {throw 'Bundled HxC engine could not start.'}
+            $item | Add-Member NoteProperty DisplayName $item.Name -Force
+            if (-not (Ensure-CapsIPFReady $item)) {throw 'CAPS/IPF preflight failed; original kept.'}
+            $script:ExplicitEngineReady=$true
+        }
+        $shortInput=Join-Path $temp 'disk.ipf';$shortOutput=Join-Path $temp 'disk.dsk'
+        [IO.File]::Copy($source,$shortInput)
+        $result=Invoke-HxCConversion $shortInput $shortOutput
+        if (-not $result.Success) {throw ('DSK conversion failed: '+(Get-UsefulFailureSummary $result.Detail))}
+        [IO.File]::Move($shortOutput,$target);Remove-SourcePolicyOwnedPath -Path $shortInput -Root $temp
+    }
 }
 
 
@@ -653,22 +678,6 @@ function Get-ConversionItems {
     return $results.ToArray()
 }
 
-function Ask-OutputMode {
-    while ($true) {
-        $answer=Read-DisplayInput 'Choose output [Enter = 2]' 'ZX Spectrum' @(
-            'Convert IPF to DSK. Keep or Remove originals is chosen next.',
-            '1. Loose DSK files', '2. One ZIP per DSK', 'B. Back (return to caller)     Q. Exit')
-        switch ($answer) {
-            '1' {return 'LooseDSK'}
-            '2' {return 'ZipDSK'}
-            '' {return 'ZipDSK'}
-            'B' {return 'Back'}
-            'Q' {return 'Back'}
-            default {Write-Host '  Choose 1, 2, B or Q.'}
-        }
-    }
-}
-
 function Get-FinalRelativeOutput([string]$RelativeDsk) {
     if ($script:OutputMode -eq 'ZipDSK') {
         return [IO.Path]::ChangeExtension($RelativeDsk, '.zip')
@@ -1081,17 +1090,9 @@ function Show-Summary {
 
 function Main {
     Write-Banner
-    while ($true) {
-        if ($Format -eq 'Ask') {$script:OutputMode=Ask-OutputMode} else {$script:OutputMode=$Format}
-        if ($script:OutputMode -eq 'Back') {return 0}
-        if ($script:ChooseSourcePolicy) {
-            $policyChoice=Read-SourcePolicy 'ZX Spectrum'
-            if ($policyChoice -eq 'Back') {continue}
-            if ($policyChoice -eq 'Exit') {return 0}
-            $script:SourcePolicy=$policyChoice
-        }
-        break
-    }
+    if ($Storage) {Start-Log;return (Invoke-ZXExplicitOutputs $Root $Storage $SourcePolicy $Existing)}
+    if ($Format -eq 'Ask') {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, loose files or folders.'}
+    $script:OutputMode=$Format
     $script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
     $script:Clock.Restart()
     Start-Log

@@ -18,8 +18,7 @@ Create multi-disc playlists or convert disk images for **Onion OS on Miyoo Mini 
    **C** for C64 conversion, or **Z** for ZX Spectrum conversion.
    Choose ZIPs, a folder per game, or loose files. Originals are kept by default.
 4. Copy the contents of `DST`, including `.hidden` when present, to the matching
-   [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders) on your SD card.
-   Unpack ZIPs where the [default core needs it](docs/USAGE.md#choose-how-to-save),
+   [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders) on your SD card,
    then refresh the game list.
 
 Choose **D** for a demo showcasing the menus, animations, and main features without

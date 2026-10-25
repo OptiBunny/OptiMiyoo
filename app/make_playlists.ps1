@@ -634,7 +634,7 @@ function Get-GameMediaNames($Job,[string]$Storage='Auto') {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
-            if ($Storage -in 'Loose','Folders' -or (-not $Job.Profile.Zip -and ($Storage -eq 'Auto' -or $diskNames.Count -gt 1))) {Assert-ZipExtractionNames $archive}
+            if ($Storage -in 'Loose','Folders' -or (-not $Job.Profile.ZipMemberPlaylist -and ($Storage -eq 'Auto' -or $diskNames.Count -gt 1))) {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
         } finally {$archive.Dispose()}
     } else {
@@ -698,10 +698,10 @@ function Set-PlaylistOutputConflicts([object[]]$Jobs) {
 function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,$Media) {
     if ($Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Unknown output storage choice.'}
     $profile=$Job.Profile
-    $zipMode=($Storage -eq 'Zip' -or ([bool]$profile.Zip -and $Storage -eq 'Auto' -and [bool]$Job.Zip))
+    $zipMode=($Storage -eq 'Zip' -or ([bool]$profile.ZipMemberPlaylist -and $Storage -eq 'Auto' -and [bool]$Job.Zip))
     $looseFiles=$Storage -eq 'Loose'
     $isMulti=$Media.DiskNames.Count -gt 1
-    $internalPlaylist=($zipMode -and -not $profile.Zip -and $isMulti)
+    $internalPlaylist=($zipMode -and -not $profile.ZipMemberPlaylist -and $isMulti)
     $hasPlaylist=($isMulti -and -not $internalPlaylist)
     $internalName=$null;$internalText=$null
     if($internalPlaylist){
@@ -775,7 +775,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     }
     $plan=[pscustomobject]@{DiskNames=$Media.DiskNames;ContentNames=$Media.ContentNames;IsMulti=$isMulti;ZipMode=$zipMode;
         Storage=$Storage;LooseFiles=$looseFiles;PreserveZip=($zipMode -and [bool]$Job.Zip -and -not $internalPlaylist);DataWrites=$dataWrites;
-        HasPlaylist=$hasPlaylist;PackageZip=($zipMode -and -not $profile.Zip);InternalPlaylistName=$internalName;InternalPlaylistText=$internalText;
+        HasPlaylist=$hasPlaylist;PackageZip=($zipMode -and -not $profile.ZipMemberPlaylist);InternalPlaylistName=$internalName;InternalPlaylistText=$internalText;
         PlaylistLines=$lines;PlaylistText=$playlistText;FlatPlaylistLines=$flatLines;FlatDataWrites=@($flatWrites.ToArray());
         SingleFile=$singleFile;DataFolder=$dataFolder;RelativeData=$relativeData;DataPath=$dataPath;M3uPath=$m3uPath;
         Stem=$Job.Stem;Root=$DestinationRoot;Writes=$writes;Retired=@();VisibleCandidates=$visible.ToArray()}
@@ -1139,9 +1139,10 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             else {Write-MenuLine '  Support: standard Onion cores. S checks a connected SD card.' 'Support: standard Onion cores'}
             for ($i=0;$i -lt $Profiles.Count;$i++) {
                 $support=Get-PlaylistSupport $Profiles[$i] $menuOnionRoot
-                $label=''; if (-not $support.CanBuild) {$label=' [PLAYLIST '+$support.Status+']'}
+                $label=Get-PlaylistFeatureLabel $Profiles[$i] $support
+                if ($label) {$label=' '+$label}
                 $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; PCECD='PC Engine CD'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
-                $shortLabel=''; if (-not $support.CanBuild) {$shortLabel=' ['+$support.Status.ToLowerInvariant()+']'}
+                $shortLabel=$label
                 $compact=('{0,2}. {1,-9} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$shortNames[$Profiles[$i].Folder],$shortLabel)
                 Write-MenuLine ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
             }
@@ -1192,9 +1193,15 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($page -eq 'C64') {Write-MenuLine '  Convert NIB/NBZ to G64.'}
             else {Write-MenuLine '  Convert IPF to DSK.'}
             Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
-            Write-MenuLine '  1. ZIPs (default) / one per game'
+            $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
+            $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
+            $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
+            $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -Conversion
+            $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
+            Write-MenuLine ('  1. ZIPs (default) / one per game'+$zipLabel) ('1. ZIPs (default)'+$zipLabel)
             Write-MenuLine '  2. Folders / one per game'
             Write-MenuLine ('  3. Loose '+$outputName+' files')
+            if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice 'Choose output [Enter = 1]'
             if ($answer -eq 'B') {$page='Main'; continue}
@@ -1213,27 +1220,26 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $pageName=$profile.Name+' / playlist storage'
             Show-MenuTitle $pageName
             $support=Get-PlaylistSupport $profile $menuOnionRoot
-            Write-MenuLine ('  '+$profile.Folder+' / '+$support.Core+' / '+$support.Status)
+            $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
+            Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
+            $playlistLabel=Get-PlaylistFeatureLabel $profile $support
+            if ($playlistLabel) {Write-MenuLine ('  '+$playlistLabel)}
             if ($profile.Folder -eq 'COMMODORE') {
                 $tapeSupport=Get-TapeSwapSupport $profile $menuOnionRoot $support
                 $tapeFormats='TAP, T64'
                 if ($tapeSupport.CanBuild) {$tapeFormats=(@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.').ToUpperInvariant()}) -join ', ')}
-                Write-MenuLine ('  Tape swapping: '+$tapeSupport.Status+' / '+$tapeFormats)
+                $tapeLabel=''; if (-not $tapeSupport.CanBuild) {$tapeLabel=' ['+$tapeSupport.Status.ToLowerInvariant()+']'}
+                Write-MenuLine ('  Tape swapping: '+$tapeFormats+$tapeLabel)
                 if (-not $tapeSupport.CanBuild) {Write-MenuLine ('  '+$tapeSupport.Reason)}
-            }
-            if (-not $support.CanBuild) {
-                if ($menuOnionRoot) {Write-MenuLine '  Playlist playback is not supported by the selected core.'}
-                else {Write-MenuLine '  Playlist playback is not supported by the default core.'}
             }
             Write-MenuLine '  Single media stays visible; playlists need 2+ images.'
             Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
-            Write-MenuLine '  1. ZIPs (default) / one per game'
+            $zipNotice=Get-ZipOutputNotice $profile $support
+            $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
+            Write-MenuLine ('  1. ZIPs (default) / one per game'+$zipLabel) ('1. ZIPs (default)'+$zipLabel)
             Write-MenuLine '  2. Folders / one per game'
             Write-MenuLine '  3. Loose files'
-            if (-not $profile.Zip) {
-                Write-MenuLine '  ZIP playback is not supported by the default core.'
-                Write-MenuLine '  Unpack ZIP output before playing.'
-            }
+            if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice 'Choose output [Enter = 1]'
             if ($answer -eq 'B') {$page='Main'; continue}
@@ -1361,8 +1367,9 @@ try {
     foreach ($profile in $selected) {
         Show-PreparationProgress 'Checking selected core' $profile.Folder 0 -1 'profiles' -Force
         $support=Get-PlaylistSupport $profile $OnionRoot
+        $zipNotice=Get-ZipOutputNotice $profile $support
         Write-Event 'CORE' ($support.Basis+' / '+$support.Core+' / '+$support.Status)
-        if (-not $support.CanBuild) {Write-Event 'PLAYBACK NOTE' ('Playlists do not work on the selected/default core. '+$support.Reason)}
+        if (-not $support.CanBuild) {Write-Event 'PLAYBACK NOTE' ((Get-PlaylistFeatureLabel $profile $support)+' '+$support.Reason)}
         $tapeSupport=$null
         if ($profile.Folder -eq 'COMMODORE') {
             $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $support
@@ -1382,6 +1389,7 @@ try {
         foreach ($job in $systemJobs) {
             $job | Add-Member -NotePropertyName Profile -NotePropertyValue $profile
             $job | Add-Member -NotePropertyName TapeSupport -NotePropertyValue $tapeSupport
+            $job | Add-Member -NotePropertyName ZipOutputNotice -NotePropertyValue $zipNotice
             $unsupportedReason=$null
             $job | Add-Member -NotePropertyName Unsupported -NotePropertyValue $unsupportedReason
             $jobs.Add($job)
@@ -1604,9 +1612,16 @@ try {
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}
             $script:Ok++; $script:UiMood='happy'; $script:UiPercent=100
             if ($plan.PackageZip) {
-                $result.Playlist='';$result.Detail='ZIP package verified. Extract the ZIP before playing on this system.'
-                $script:UiSay='ZIP package ready. Extract before playing on this system.';$script:UiStage='ZIP ready'
-                Write-Event 'READY' ($job.System+'/'+$relativeData+' - ZIP package; extract before playing')
+                $result.Playlist='';$result.Detail='ZIP game verified.'
+                $script:UiSay='ZIP game verified and installed in DST.';$script:UiStage='ZIP ready'
+                if ($plan.InternalPlaylistName) {
+                    $result.Detail='ZIP playlist package verified [unpack before playing].'
+                    $script:UiSay='ZIP playlist ready [unpack before playing].'
+                } elseif ($job.ZipOutputNotice.Label -and $job.ZipOutputNotice.Label -ne '[unpack for playlists]') {
+                    $result.Detail='ZIP game verified '+$job.ZipOutputNotice.Label+'. Unpack before playing.'
+                    $script:UiSay='ZIP game ready [unpack before playing].'
+                }
+                Write-Event 'READY' ($job.System+'/'+$relativeData+' - '+$result.Detail)
             } elseif ($plan.HasPlaylist) {
                 $result.Detail='Playlist and hidden media verified.'
                 $script:UiSay='Playlist and disk images installed. Verification complete.'; $script:UiStage='Playlist ready'
@@ -1678,7 +1693,7 @@ try {
     if ($jobs.Count -eq 0) {Write-Host '  No matching input images/ZIPs found in the selected SRC folders.' -ForegroundColor Yellow}
     if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-Host ('  Report: '+$reportPath)}
     if (-not (Test-ApplicationWorker)) {Write-Host ('  Log: '+$logPath)} else {Write-Host '  Waiting for independent verification and publication.'}
-    if (@($jobs | Where-Object {$_.OutputPlan -and $_.OutputPlan.PackageZip}).Count -gt 0) {Write-Host '  Extract ZIP packages before playing them on this system.' -ForegroundColor Yellow}
+    if (@($jobs | Where-Object {$_.OutputPlan -and $_.OutputPlan.InternalPlaylistName}).Count -gt 0) {Write-Host '  ZIP playlist packages [unpack before playing].' -ForegroundColor Yellow}
     Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'
     if ($script:Failed -gt 0 -or $script:ReportProblem -or $sourceSummary.Failed -gt 0) {$exitCode=1}

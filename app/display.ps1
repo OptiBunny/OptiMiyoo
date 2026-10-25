@@ -782,7 +782,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $text=''; if ($i -lt $Rows.Count) {$text=$Rows[$i]}
         $right=' '*22; if ($i -lt $mio.Count) {$right=$mio[$i]}
         $rgb='218;224;244'
-        if ($text -match '\[(?:unsupported|unverified|not installed)\]') {$rgb='255;221;144'}
+        if ($text -match '\[[^\]]*(?:unsupported|unverified|not installed|unpack)[^\]]*\]') {$rgb='255;221;144'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
     }
@@ -1186,7 +1186,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
     $scenes=@(
         @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
         @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding disk sets, companion files and existing outputs.'},
-        @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC, PCECD and ZXS: playlist unsupported.','ZX IPF-to-DSK conversion remains available.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
+        @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','PCECD [disc swapping unsupported]','ZX IPF-to-DSK conversion remains available.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
         @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Read launcher and core support. Keep selected cores.'},
         @{Group='Setup';Mood='check';Stage='Playlist visibility setup';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up config; add needed playlist extensions only.'},
         @{Group='C64';Mood='idle';Stage='Commodore 64 settings';System='MENU';Menu=@('DEMO / conversion only','Convert NIB/NBZ to G64.','1. ZIPs (default) / one per game','2. Folders / one per game','3. Loose G64 files','Next: Keep / Remove originals.','B. Back to main menu');Detail='C converts NIB/NBZ to G64; it creates no playlists.'},
@@ -1195,7 +1195,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         @{Group='C64';Mood='check';Stage='Preserving an existing G64';System='COMMODORE 64';Game='Demo disk set / Side B.g64';Detail='Existing G64 bytes are copied and verified.';Progress=$true},
         @{Group='C64';Mood='check';Stage='Verifying the converted images';System='COMMODORE 64';Game='Demo disk set';Detail='G64 structure, image hashes and ZIP contents.';Progress=$true;CompleteSet=$true},
         @{Group='C64';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo game.zip','Folders: DST/Demo game/','Loose: DST/Demo game (Side A).g64','Converted G64 images stay visible.','No playlists are created.');Detail='Finished G64 output is ready in DST.'},
-        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','Convert IPF to DSK.','1. ZIPs (default) / one per game','2. Folders / one per game','3. Loose DSK files','Next: Keep / Remove originals.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
+        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','Convert IPF to DSK.','1. ZIPs (default) [unpack before playing]','2. Folders / one per game','3. Loose DSK files','Next: Keep / Remove originals.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
         @{Group='ZX';Mood='scan';Stage='Reading an IPF image';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='HxC and CAPSIMG decode the preservation image.'},
         @{Group='ZX';Mood='work';Stage='Converting IPF to DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='Engine activity is shown without a guessed percentage.'},
         @{Group='ZX';Mood='check';Stage='Verifying DSK and ZIP output';System='ZX SPECTRUM';Game='Demo Spectrum.zip';Detail='Check DSK structure, archive contents and source policy.';Progress=$true;CompleteSet=$true},

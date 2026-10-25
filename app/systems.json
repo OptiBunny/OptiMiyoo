@@ -11,7 +11,8 @@
       ".fdi",
       ".raw"
     ],
-    "Zip": true,
+    "ZipMemberPlaylist": true,
+    "DefaultZipSupport": "Documented",
     "Playlist": ".m3u",
     "Note": "IPF playback needs a compatible CAPSIMG library and Kickstart BIOS.",
     "DefaultCore": "puae2021_libretro.so",
@@ -38,7 +39,8 @@
       ".tap",
       ".t64"
     ],
-    "Zip": true,
+    "ZipMemberPlaylist": true,
+    "DefaultZipSupport": "Documented",
     "Playlist": ".m3u",
     "Note": "Disk and tape images keep their original formats and bytes. Use C separately for NIB/NBZ-to-G64 conversion. Tape-side swapping is checked separately from disk playlists.",
     "DefaultCore": "vice_x64_libretro.so",
@@ -58,9 +60,10 @@
       ".chd",
       ".cue"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Unlisted",
     "Playlist": ".m3u",
-    "Note": "CHDs stay loose. CUE files keep their referenced tracks and matching SBI files.",
+    "Note": "CUE files keep their referenced tracks and matching SBI files.",
     "DefaultCore": "pcsx_rearmed_libretro.so",
     "DefaultSupported": true,
     "SupportedCores": [
@@ -78,9 +81,10 @@
       ".cue",
       ".iso"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Unlisted",
     "Playlist": ".m3u",
-    "Note": "The current Onion PicoDrive build supports relative-path M3U playlists and disk swapping. CUE/ISO/CHD media are kept loose in .hidden.",
+    "Note": "The current Onion PicoDrive build supports relative-path M3U playlists and disk swapping.",
     "DefaultCore": "picodrive_libretro.so",
     "DefaultSupported": true,
     "SupportedCores": [
@@ -97,7 +101,8 @@
     "Extensions": [
       ".dsk"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Unlisted",
     "Playlist": ".m3u",
     "Note": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
     "DefaultCore": "crocods_libretro.so",
@@ -115,7 +120,8 @@
     "Extensions": [
       ".dsk"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Documented",
     "Playlist": ".m3u",
     "Note": "The default blueMSX core supports disk playlists; its Databases and Machines BIOS folders are required.",
     "DefaultCore": "bluemsx_libretro.so",
@@ -139,7 +145,8 @@
       ".nib",
       ".nbz"
     ],
-    "Zip": true,
+    "ZipMemberPlaylist": true,
+    "DefaultZipSupport": "Documented",
     "Playlist": ".m3u",
     "Note": "For actual disk images. Cartridge and PRG files are not grouped as disks.",
     "DefaultCore": "vice_xvic_libretro.so",
@@ -158,7 +165,8 @@
       ".chd",
       ".cue"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Unsupported",
     "Playlist": ".m3u",
     "Note": "Playlist unsupported with Beetle PCE Fast: M3U loading exists, but in-game Disk Control is unavailable.",
     "DefaultCore": "mednafen_pce_fast_libretro.so",
@@ -177,7 +185,8 @@
       ".img",
       ".ima"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Documented",
     "Playlist": ".m3u8",
     "Note": "Disk-image sets only. Installation and game startup may still be required inside DOSBox.",
     "DefaultCore": "dosbox_pure_libretro.so",
@@ -198,7 +207,8 @@
       ".trd",
       ".scl"
     ],
-    "Zip": false,
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Unlisted",
     "Playlist": ".m3u",
     "Note": "Playlist unsupported with the inspected default Onion Fuse build: M3U loading is unavailable. ZX IPF-to-DSK conversion remains available in menu Z.",
     "DefaultCore": "fuse_libretro.so",

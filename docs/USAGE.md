@@ -35,11 +35,6 @@ After choosing a numbered system, **C**, or **Z**, pick an output type:
 
 Then [choose what happens to originals](#originals-and-existing-files) to start.
 
-ZIP playlist playback works with the default Amiga, C64, and VIC-20 cores.
-For other systems, ZIP output packages the game and its playlist together;
-unpack it before playing. Some default cores don't support playlists at all,
-as noted in the [system list](#systems-and-rom-folders).
-
 ## Create playlists
 
 For discs kept as individual files, use numbered names like these:
@@ -116,11 +111,6 @@ system's ROM folder on your SD card, then refresh the game list.
 | **8** | PC Engine CD | `Roms/PCECD` |
 | **9** | MS-DOS | `Roms/DOS` |
 | **10** | ZX Spectrum | `Roms/ZXS` |
-
-Onion's default cores do not support playlists for **5, 8, or 10**.
-You can still prepare these files for use with a compatible core.
-**S** checks the emulators selected on your SD card; C64 tape-side support is shown
-in its playlist menu.
 
 ### SD setup
 

@@ -17,8 +17,8 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 
 ## Prepare a batch
 
-Copy one system's games into `SRC`. They can be individual files, a folder per
-game, or one ZIP per game. OptiMiyoo reads subfolders too and saves the finished
+Copy one system's games into `SRC`. They can be one ZIP per game, a folder per
+game, or individual files. OptiMiyoo reads subfolders too and saves the finished
 files in `DST`.
 
 For a separate batch folder, create `SRC` and `DST` inside it, then drag the

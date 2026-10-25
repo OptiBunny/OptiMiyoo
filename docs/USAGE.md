@@ -1,151 +1,176 @@
-# Using OptiMiyoo
+# OptiMiyoo menu guide
 
-Run `OptiMiyoo.bat` from the extracted folder.
+Run **`OptiMiyoo.bat`**. Game files go in `SRC`; finished files appear in `DST`.
 
-[Menus](#menu-guide) · [Game files](#prepare-a-batch) · [Systems](#systems-and-rom-folders) ·
-[SD setup](#optional-sd-setup-and-swapping) · [Command line](#command-line)
-
-## Prepare a batch
-
-Put one system's games in `SRC` as loose files, folders, or one ZIP per game.
-Keep all discs or tape sides of a game together. Names such as `Game (Disc 1).chd`,
-`Game (Disc 2).chd`, or `Game (Side A).tap` determine their order; untagged files
-become separate entries. Combine separate side ZIPs or extract and name the sides
-first. Keep alternate formats of the same disc in separate batches.
-
-Keep CUE tracks, SBI files, and other companion files with their media. CUE
-references must be relative, use forward slashes, and match filename case.
-
-Run the matching menu option, then copy `DST` contents—including `.hidden` when
-present—to its [Onion ROM folder](#systems-and-rom-folders) and refresh the game list.
-Playlist modes give multi-disc games a visible playlist with media under `.hidden`;
-single-media games stay visible. The **C** and **Z** converters produce visible
-converted media. `SRC` and `DST` are shared by all modes and are never emptied
-automatically.
+[Menus](#menu-guide) · [Game files](#prepare-a-batch) · [Playlists](#create-playlists) ·
+[Conversion](#convert-disk-images) · [SD card](#optional-sd-setup-and-swapping) · [Demo](#demo-and-display)
 
 ## Menu guide
 
-Type a number or letter, then **Enter**. Blank Enter uses the displayed default.
-In submenus, **B** goes back and **Q** exits. Demo and overwrite controls differ
-as described below.
+Type a number or letter, then **Enter**. Enter on its own accepts the displayed
+default. In the option menus, **B** goes back and **Q** exits.
 
-| Main menu | Action |
+| Choose | What it does |
 | --- | --- |
-| **1–10** | Create playlists for a [numbered system](#systems-and-rom-folders). Enter selects **1: Amiga**. |
-| **C** | Convert C64 NIB/NBZ game ZIPs to visible G64 ZIPs or folders. |
-| **Z** | Convert ZX Spectrum IPF → DSK. |
-| **S** | Check an SD card's selected cores and enable supported playlist extensions. |
-| **D** | Open a demo showcasing the menus, animations, and processing workflow without changing game or SD files. |
+| **1–10** | [Create playlists](#create-playlists) for your selected system. |
+| **C** | [Convert C64 NIB/NBZ to G64](#c64-converter-c). |
+| **Z** | [Convert ZX Spectrum IPF to DSK](#zx-converter-z). |
+| **S** | [Set up playlist visibility](#optional-sd-setup-and-swapping) on an Onion SD card. |
+| **D** | [Demo](#demo-and-display) showcasing menus, animations, and processing workflows. |
 | **F** | Switch the bunny and logo between CRT and Smooth. |
 | **Q** | Exit. |
 
-### Playlist storage and originals
+## Prepare a batch
 
-After choosing a numbered system, select storage:
+Copy one system's games into `SRC` as loose files or one ZIP per game. Folders can
+organize your collection. Keep CUE files with their referenced tracks and matching SBI files.
 
-- **1: Auto** (default) keeps supported Amiga/C64/VIC-20 ZIPs and links to their
-  contents. Other ZIPs are extracted; loose files stay loose. Media formats stay unchanged.
-- **2: Folders** extracts ZIPs. Use this for games that write to their disk images.
+Give loose discs matching game names and numbered disc labels, even inside folders:
 
-Then select **1: Keep originals** (default) or **2: Remove originals** to start.
-Remove applies only to successfully processed originals in `SRC`; failed,
-skipped, and unsupported inputs stay. **B** returns to storage settings.
-Unsupported or unverified cores show an explanation instead of creating playlists.
+```text
+Game (Disc 1).chd
+Game (Disc 2).chd
+```
+
+Tape sides can use names such as `Game (Side A).tap` and `Game (Side B).tap`.
+Extract separate side ZIPs first, then use matching filenames or put the images
+in one game ZIP. Keep alternate releases and formats of the same disc in separate batches.
+
+## Create playlists
+
+1. Choose your system's number from the [system list](#systems-and-rom-folders).
+2. Choose **1: Auto** or **2: Folders** for storage.
+3. Choose **1: Keep originals** (default) or **2: Remove originals** to start.
+
+**Auto** keeps supported Amiga, C64, and VIC-20 ZIPs intact; other ZIPs are
+extracted. **Folders** extracts ZIPs and suits games that write to their disk
+images. Loose files stay loose, and media formats are unchanged in either mode.
+
+Games with two or more images get a playlist in `DST`, with their media under
+`.hidden`. Single-media games stay visible without a playlist.
+
+### Systems and ROM folders
+
+Use the matching folder when copying finished files to your Onion SD card.
+**Enter** at the main menu selects **1: Amiga**.
+
+| Menu | System | Onion folder |
+| --- | --- | --- |
+| **1** | Amiga | `Roms/AMIGA` |
+| **2** | Commodore 64 | `Roms/COMMODORE` |
+| **3** | PlayStation | `Roms/PS` |
+| **4** | Sega CD / Mega-CD | `Roms/SEGACD` |
+| **5** | Amstrad CPC | `Roms/CPC` |
+| **6** | MSX / MSX2 | `Roms/MSX` |
+| **7** | VIC-20 | `Roms/VIC20` |
+| **8** | PC Engine CD | `Roms/PCECD` |
+| **9** | MS-DOS | `Roms/DOS` |
+| **10** | ZX Spectrum | `Roms/ZXS` |
+
+The app shows playlist availability for each system. With standard Onion cores,
+**5, 8, and 10** are unsupported. Use **S** to check the cores selected on your SD card.
+C64 also supports TAP/T64 tape-side playlists where the selected core supports them.
+
+## Convert disk images
+
+Both converters save converted media in `DST`. They do not create playlists.
 
 ### C64 converter: C
 
-Choose **C** separately if you need G64. Put one game's NIB/NBZ or G64 disk
-images in each ZIP; this option processes ZIPs only. Menu **2** creates playlists
-from the original disk and tape formats, including NIB/NBZ, without conversion.
+Put one game's NIB/NBZ images in each ZIP in `SRC`, then choose **C**. Existing G64
+images in those ZIPs are kept unchanged.
 
-| Option | Output | Originals in `SRC` |
+| Choose | Output | Originals |
 | --- | --- | --- |
-| **1** (default) | ZIP | Keep |
-| **2** | ZIP | Remove |
-| **3** | Folders | Keep |
-| **4** | Folders | Remove |
+| **1** (default) | ZIP per game | Keep |
+| **2** | ZIP per game | Remove after verification |
+| **3** | Folder per game | Keep |
+| **4** | Folder per game | Remove after verification |
 
-Each choice starts the batch. NIB/NBZ images convert to G64; existing G64 images
-keep their bytes. All converted games stay visible in `DST`, including multi-disk
-games. This step creates no playlists or `.hidden` folders.
+Selecting a mode starts the batch. A multi-disk game stays together in its ZIP or folder.
 
 ### ZX converter: Z
 
-Choose **Z** separately if you need IPF → DSK conversion; it creates no playlists.
-Menu **10** preserves original ZX formats such as IPF and DSK when the selected
-core supports playlists. Stock Onion Fuse does not support playlist loading.
+Put IPF files or ZIPs containing IPF files in `SRC`, then choose **Z**.
 
-Choose **1: Loose DSK files** or **2: One ZIP per DSK** (default), then Keep or
-Remove originals. ZIP suits configurations that list ZIP but lack DSK support.
+- **1: Loose DSK files** saves each converted image as a `.dsk` file.
+- **2: One ZIP per DSK** (default) puts each converted image in its own ZIP.
+
+Next, choose **1: Keep originals** (default) or **2: Remove originals** to start.
 Some IPF copy-protection details cannot be preserved in DSK.
 
 ### Playlists after conversion
 
-If you choose **C** or **Z** first, create a separate batch folder with `SRC` and
-`DST`. Copy only the wanted converted files, ZIPs or folders into its `SRC`,
-leaving the original input batch intact. Drag the new batch folder onto
-`OptiMiyoo.bat`, then choose the numbered system. Its selected core must support playlists.
+Create a new batch folder containing `SRC` and `DST`. Copy each game's converted
+disk set into its `SRC`, keeping the discs together and numbered. For ZX, choose
+loose DSK output or extract the individual output ZIPs first.
 
-### Existing outputs and finishing a batch
+Drag that batch folder onto `OptiMiyoo.bat` and choose the numbered system for
+playlists. The selected core must support them.
 
-| Key | If an output already exists |
+## Existing outputs and finishing a batch
+
+If an output already exists, choose:
+
+| Key | Action |
 | --- | --- |
 | **Y** | Overwrite this output |
 | **N / Enter** | Skip this output |
 | **A** | Overwrite all conflicts in this batch |
 | **S** | Skip all conflicts in this batch |
 
-**> / <** pages through output paths. Here, **B / Q** also skips the current
-output. Skipping keeps both the existing output and its original in `SRC`.
+The choice applies to the current game's listed outputs together. **> / <** pages
+through their paths. Here, **B / Q** also skips the current game. Skipping keeps
+the existing output and its original in `SRC`.
 
-After a batch, **Enter / M** returns to the main menu, **B** reopens its settings,
-and **Q** exits.
+Originals are kept unless you selected **Remove**. Removal applies only after
+successful output verification; skipped and failed inputs remain in `SRC`.
 
-### Demo and display
-
-In **D**, choose **1** for the full walkthrough, **2** C64, **3** ZX,
-**4** playlists, **5** results and overwrite choices, **6** Mio's animation
-gallery, or **7** core support and SD setup.
-
-During playback, keys work without Enter: **Space** pauses/resumes; **N / Right / Enter**
-go forward; **P / Left** go back; **R** restarts; **F** switches CRT/Smooth.
-**B / Q / Esc** returns to demo selection.
-
-## Systems and ROM folders
-
-**S** checks the cores selected on your SD card. The standard profiles are:
-
-| Menu | System | Onion folder | Default core | Playlist support |
-| --- | --- | --- | --- | --- |
-| **1** | Amiga | `Roms/AMIGA` | PUAE 2021 | `.m3u` |
-| **2** | Commodore 64 | `Roms/COMMODORE` | VICE x64 | `.m3u`, including TAP/T64 sides |
-| **3** | PlayStation | `Roms/PS` | PCSX ReARMed | `.m3u` |
-| **4** | Sega CD / Mega-CD | `Roms/SEGACD` | PicoDrive | `.m3u` |
-| **5** | Amstrad CPC | `Roms/CPC` | CrocoDS | Unsupported disk swapping |
-| **6** | MSX / MSX2 | `Roms/MSX` | blueMSX | `.m3u` |
-| **7** | VIC-20 | `Roms/VIC20` | VICE xvic | `.m3u` for disks |
-| **8** | PC Engine CD | `Roms/PCECD` | Beetle PCE Fast | Unsupported disk swapping |
-| **9** | MS-DOS | `Roms/DOS` | DOSBox Pure | `.m3u8` |
-| **10** | ZX Spectrum | `Roms/ZXS` | Stock Onion Fuse | Unsupported playlist loading |
+After processing, review the results. Press **Enter** to return to the main menu
+or **Q** to exit. Copy the wanted `DST` contents, including `.hidden` when present,
+to the matching [Onion ROM folder](#systems-and-rom-folders), then refresh the game list.
 
 ## Optional SD setup and swapping
 
-Choose **S** and enter the SD root, such as `E:\`. Setup enables playlist
-extensions for the detected cores while keeping games and saves. Unrecognized
-configurations remain **UNVERIFIED** and unchanged.
+Choose **S**, enter your SD card's root folder, such as `E:\`, and press **Enter**.
+**Esc** cancels. Setup adds supported playlist extensions to the game lists while
+preserving the selected cores, games, and saves. Unverified configurations stay unchanged.
+Setup returns to the main menu, which then reflects that SD card's playlist support.
 
-To undo a setup change, copy `config.json` from the corresponding
-`OptiMiyoo_Backup_<ID>` folder on the SD card to its original emulator folder.
-PlayStation uses `Emu/PSX` for configuration and `Roms/PS` for games.
+To undo a setup change, restore `config.json` from its corresponding
+`OptiMiyoo_Backup_<ID>` folder on the SD card to the original emulator folder.
 
-To swap discs, open the playlist in Onion, then use **RetroArch → Quick Menu →
-Disk Control**: eject, select the next image, and insert. C64 tape sides use the
-same sequence but may also need keyboard/load commands. DOSBox Pure has its own
-disk-selection workflow.
+To change discs, launch the playlist in Onion and use **RetroArch → Quick Menu →
+Disk Control**: eject, select the next image, and insert. C64 tape sides may also
+need keyboard/load commands; DOSBox Pure uses its own disk-selection controls.
+
+## Demo and display
+
+Choose **D** for a demo showcasing the menus, animations, and processing workflows.
+It uses sample data without changing game or SD files.
+
+| Choose | Showcase |
+| --- | --- |
+| **1** (default) | Full walkthrough |
+| **2** | C64 conversion |
+| **3** | ZX conversion |
+| **4** | Playlist creation |
+| **5** | Results and overwrite choices |
+| **6** | Mio's animation gallery |
+| **7** | Core support and SD setup |
+
+During playback, keys work immediately without Enter:
+
+- **Space** pauses or resumes; **R** restarts the selected section.
+- **N / Right / Enter** goes forward; **P / Left** goes back.
+- **F** switches CRT/Smooth; **B / Q / Esc** returns to demo selection.
 
 ## Command line
 
-Run from the application folder in PowerShell:
+<details>
+<summary>PowerShell examples and options</summary>
+
+Run these from the application folder:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
@@ -158,10 +183,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1
 
 | Option | Purpose |
 | --- | --- |
-| `-Root C:\Games\Batch` | Use that folder's `SRC` and `DST`; dragging a folder onto `OptiMiyoo.bat` does the same. |
-| `-OnionRoot E:\` | Check the installed core on that SD card. |
+| `-Root C:\Games\Batch` | Use that folder's `SRC` and `DST`; dragging it onto `OptiMiyoo.bat` does the same. |
+| `-OnionRoot E:\` | Check the selected core on that SD card. |
 | `-SourcePolicy Keep` / `Remove` | Keep originals by default, or remove them after verification. |
-| `-Existing Ask` / `Overwrite` / `Skip` | Choose how to handle existing outputs. |
+| `-Existing Ask` / `Overwrite` / `Skip` | Handle existing outputs. |
 | `-NoAnimation` | Disable decorative animations. |
 | `-NoColor` | Use monochrome output. |
 | `-DisplayEffect Smooth` | Disable CRT styling. |
+
+</details>

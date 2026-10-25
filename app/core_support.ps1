@@ -289,7 +289,8 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
         ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore)) {
         $notice.Label='[ZIP playback unverified]'
         $notice.Hint='Unpack ZIP output before playing.'
-    } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
+    } elseif ($Profile.DefaultZipSupport -eq 'Unsupported' -or
+        ($Profile.Folder -eq 'ZXS' -and $Profile.DefaultZipSupport -eq 'Unlisted')) {
         $notice.Label='[unpack before playing]'
         $notice.Hint='ZIP loading is not supported by this core.'
     } elseif ($Profile.DefaultZipSupport -eq 'Unlisted') {

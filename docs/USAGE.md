@@ -29,7 +29,7 @@ After choosing a numbered system, **C**, or **Z**, pick an output type:
 
 | Choice | Files in `DST` |
 | --- | --- |
-| **1: ZIPs** (default) | One ZIP per game. |
+| **1: ZIPs** | One ZIP per game. |
 | **2: Folders** | One folder per game, including single-disc games. |
 | **3: Loose files** | Individual files, without adding a folder for each game. |
 

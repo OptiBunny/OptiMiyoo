@@ -1196,17 +1196,20 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
             $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
+            $defaultOutput='1'; if ($page -eq 'ZX') {$defaultOutput='2'}
             $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -Conversion
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            Write-MenuLine ('  1. ZIPs (default) / one per game'+$zipLabel) ('1. ZIPs (default)'+$zipLabel)
-            Write-MenuLine '  2. Folders / one per game'
+            $zipDefault=' (default)'; $folderDefault=''
+            if ($defaultOutput -eq '2') {$zipDefault=''; $folderDefault=' (default)'}
+            Write-MenuLine ('  1. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('1. ZIPs'+$zipDefault+$zipLabel)
+            Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
             Write-MenuLine ('  3. Loose '+$outputName+' files')
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $answer=Read-MenuChoice 'Choose output [Enter = 1]'
+            $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
-            if ($answer -eq '') {$answer='1'}
+            if ($answer -eq '') {$answer=$defaultOutput}
             if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
             $workerArgs=$common.Clone()
             $workerArgs.Storage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
@@ -1234,17 +1237,20 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             }
             Write-MenuLine '  Single media stays visible; playlists need 2+ images.'
             Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
+            $defaultOutput='1'; if ($profile.Folder -in 'MSX','PCECD') {$defaultOutput='2'}
             $zipNotice=Get-ZipOutputNotice $profile $support
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            Write-MenuLine ('  1. ZIPs (default) / one per game'+$zipLabel) ('1. ZIPs (default)'+$zipLabel)
-            Write-MenuLine '  2. Folders / one per game'
+            $zipDefault=' (default)'; $folderDefault=''
+            if ($defaultOutput -eq '2') {$zipDefault=''; $folderDefault=' (default)'}
+            Write-MenuLine ('  1. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('1. ZIPs'+$zipDefault+$zipLabel)
+            Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
             Write-MenuLine '  3. Loose files'
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $answer=Read-MenuChoice 'Choose output [Enter = 1]'
+            $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
-            if ($answer -eq '') {$answer='1'}
+            if ($answer -eq '') {$answer=$defaultOutput}
             if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
             $storageChoice=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
             $worker=Join-Path $ScriptDir 'make_playlists.ps1'

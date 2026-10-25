@@ -128,10 +128,6 @@ go forward; **P / Left** go back; **R** restarts; **F** switches CRT/Smooth.
 | **9** | MS-DOS | `Roms/DOS` | DOSBox Pure | `.m3u8` |
 | **10** | ZX Spectrum | `Roms/ZXS` | Stock Onion Fuse | Unsupported playlist loading |
 
-Unsupported playlist profiles can still run ordinary games in their emulator.
-Amiga IPF playback needs a compatible `capsimg.so` and Kickstart BIOS on the Miyoo.
-blueMSX needs its usual `Databases` and `Machines` BIOS folders. These are not included.
-
 ## Optional SD setup and swapping
 
 Choose **S** and enter the SD root, such as `E:\`. Setup enables playlist

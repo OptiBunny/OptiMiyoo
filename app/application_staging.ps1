@@ -15,7 +15,7 @@ function Get-ApplicationLiteralHelper {
 }
 
 function ConvertTo-ApplicationWorkLease {
-    param([string]$Source,[string]$WorkRoot,[switch]$Onion)
+    param([string]$Source,[string]$WorkRoot)
     $escaped=$WorkRoot.Replace('\','\\').Replace('"','\"')
     $scope=@'
                 string scope = "__WORK__";
@@ -48,8 +48,8 @@ function New-ApplicationStagedCode {
         'app/make_playlists.ps1','app/C64/convert_c64.ps1','app/ZX/convert_zx.ps1','app/prepare_onion.ps1',
         'app/display.ps1','app/compile_support.ps1','app/core_support.ps1','app/overwrite_prompt.ps1',
         'app/mio_idle_library.ps1','app/mio_idle_scheduler.ps1',
-        'app/output_safety.ps1','app/source_policy.ps1','app/archive_limits.ps1','app/media_validation.ps1',
-        'app/native_process.ps1','app/native_sandbox.ps1','app/archive_sandbox.ps1','app/terminal_effects.ps1',
+        'app/output_safety.ps1','app/source_policy.ps1','app/archive_limits.ps1','app/zip_integrity.ps1','app/media_validation.ps1',
+        'app/native_process.ps1','app/native_sandbox.ps1','app/archive_sandbox.ps1',
         'app/application_session.ps1','app/application_entry.ps1','app/application_jobs.ps1','app/application_archive.ps1',
         'app/systems.json')
     $texts=@{};$encoding=New-Object Text.UTF8Encoding($true)
@@ -75,14 +75,9 @@ function New-ApplicationStagedCode {
     }
     $sourceLease=Get-ApplicationLiteralHelper $texts['app/source_policy.ps1'] 'Initialize-SourcePolicyNative'
     $sources.Add((ConvertTo-ApplicationWorkLease $sourceLease $work))
-    $zip=Get-ApplicationLiteralHelper $texts['app/make_playlists.ps1'] 'Initialize-ZipIntegrity'
-    foreach ($relative in 'app/C64/convert_c64.ps1','app/ZX/convert_zx.ps1') {
-        $other=Get-ApplicationLiteralHelper $texts[$relative] 'Initialize-ZipIntegrity'
-        if (($other -replace '\r\n',"`n").Trim() -cne ($zip -replace '\r\n',"`n").Trim()) {throw 'The ZIP helpers differ and need explicit reconciliation before sandbox startup.'}
-    }
-    $sources.Add($zip)
+    $sources.Add((Get-ApplicationLiteralHelper $texts['app/zip_integrity.ps1'] 'Initialize-ZipIntegrity'))
     $onion=Get-ApplicationLiteralHelper $texts['app/prepare_onion.ps1'] 'Initialize-OnionPathLease'
-    $sources.Add((ConvertTo-ApplicationWorkLease $onion $work -Onion))
+    $sources.Add((ConvertTo-ApplicationWorkLease $onion $work))
     $sources.Add((Get-ApplicationRpcClientSource))
     # The generated assembly is loaded before any app script; attempted new compilation is an error.
     [IO.File]::WriteAllText((Join-Path $code 'app/compile_support.ps1'),"function Add-OptiMiyooType {param([string]`$TypeDefinition) throw 'The isolated application cannot compile additional code.'}`r`n",$encoding)

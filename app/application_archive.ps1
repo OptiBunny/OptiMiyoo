@@ -134,14 +134,14 @@ function Invoke-ApplicationArchiveRequest {
             $script=@'
 param($CodeRoot,$InputPath,$InputLease,$Profile,$Operation,$EntryIndex,$Destination,$MaximumBytes,$ProgressQueue,[byte[]]$TrustedWorkerBytes)
 $ErrorActionPreference='Stop'
-foreach($helper in 'compile_support.ps1','source_policy.ps1','archive_limits.ps1','native_process.ps1','archive_sandbox.ps1'){. (Join-Path $CodeRoot $helper)}
+foreach($helper in 'compile_support.ps1','source_policy.ps1','archive_limits.ps1','zip_integrity.ps1','native_process.ps1','archive_sandbox.ps1'){. (Join-Path $CodeRoot $helper)}
 $script:ArchiveSandboxExecutableBytes=[byte[]]$TrustedWorkerBytes.Clone()
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $CodeRoot 'make_playlists.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Installed archive helpers failed syntax validation.'}
-foreach($name in 'Initialize-ZipIntegrity','Get-ZipChecksums','Assert-PlainOutputParents') {
+foreach($name in 'Assert-PlainOutputParents') {
     $definitions=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq $name})
     if($definitions.Count -ne 1){throw 'Installed archive helper is missing or ambiguous.'}
     . ([scriptblock]::Create($definitions[0].Extent.Text))

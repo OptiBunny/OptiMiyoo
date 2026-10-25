@@ -94,12 +94,11 @@ function Read-ApplicationConsoleChoice($Model) {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
-    $text='';$caret=0;$dirty=$true;$watch=[Diagnostics.Stopwatch]::StartNew()
-    $sparseIdle=(-not $NoAnimation -and $script:UiVT -and -not $script:UiLive)
+    $text='';$caret=0;$dirty=$true
+    $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
-    Update-InputCaret $text $caret -Reset
     $rows=@(Get-MenuRows $Model.Lines ([Math]::Max(44,$script:UiWidth-28)))
     if(-not $script:UiVT) {
         [Console]::WriteLine($Model.Title)
@@ -115,9 +114,9 @@ function Read-ApplicationConsoleChoice($Model) {
         }
         if(Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible){$dirty=$true}
         $fits=(-not $script:UiVT -or ($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7)))
-        if($script:UiVT -and ($dirty -or ((Get-InputCaretVisible) -ne $script:UiCaretDrawn) -or ($script:UiLive -and $watch.ElapsedMilliseconds -ge 33))) {
+        if($script:UiVT -and $dirty) {
             Draw-MenuPanel $Model.Title $rows $Model.Prompt $text $caret 'wait'
-            $watch.Restart();$dirty=$false
+            $dirty=$false
         }
         if([Console]::KeyAvailable) {
             $key=[Console]::ReadKey($true)
@@ -130,9 +129,9 @@ function Read-ApplicationConsoleChoice($Model) {
             if($key.Key -eq [ConsoleKey]::Enter){if(-not $script:UiVT){[Console]::WriteLine()};return $text.Trim().ToUpperInvariant()}
             if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,$text.Length-1)}
             elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
-            $caret=$text.Length;Update-InputCaret $text $caret;$dirty=$true
+            $caret=$text.Length;$dirty=$true
             if(-not $script:UiVT){[Console]::Write("`r"+$Model.Prompt+': '+$text+' ')}
-        } else {if($script:UiLive){Wait-DisplayFrame 8}else{Wait-DisplayFrame 30}}
+        } else {Wait-DisplayFrame 30}
     }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }
 

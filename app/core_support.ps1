@@ -307,9 +307,3 @@ function Get-TapeSwapSupport($Profile,[string]$SdRoot,$PlaylistSupport=$null) {
     $result.Reason='VICE Disk Control ejects and attaches tape sides; TAP/T64 images are kept unchanged.'
     return $result
 }
-
-function Get-SupportLabel($Support) {
-    $core=$Support.Core -replace '_libretro\.so$',''
-    if ($Support.Status -eq 'DEFAULT') {return ('default: '+$core)}
-    return ($Support.Status.ToLowerInvariant()+': '+$core)
-}

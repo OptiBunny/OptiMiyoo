@@ -326,19 +326,3 @@ function Invoke-ApplicationRpc {
     if($reply-ceq'null'){return $null}
     return (ConvertFrom-Json -InputObject $reply)
 }
-
-function Invoke-ApplicationSession {
-    param([Parameter(Mandatory=$true)][object]$Session,[Parameter(Mandatory=$true)][scriptblock]$Dispatcher)
-    while(-not $Session.HasExited) {
-        if($Session.Failure){throw $Session.Failure}
-        $request=$Session.ReadRequest(100)
-        if($null-eq$request){continue}
-        $success=$true;$result=$null
-        try {$result=& $Dispatcher $request}
-        catch {$success=$false;$result=@{error=$_.Exception.Message}}
-        $json=if($null-eq$result){'null'}else{ConvertTo-Json -InputObject $result -Depth 24 -Compress}
-        $Session.Respond($request.Id,$success,$json)
-    }
-    if($Session.Failure){throw $Session.Failure}
-    return $Session.ExitCode
-}

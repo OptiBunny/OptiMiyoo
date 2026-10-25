@@ -227,7 +227,7 @@ function Get-ApplicationBrokerModule([ValidateSet('Playlist','C64','ZX')][string
     $relative=@{Playlist='make_playlists.ps1';C64='C64/convert_c64.ps1';ZX='ZX/convert_zx.ps1'}[$Operation]
     $module=New-Module -Name ('OptiMiyooBroker'+$Operation) -ArgumentList @($script:ApplicationBrokerCodeRoot,$relative) -ScriptBlock {
         param($codeRoot,$relative)
-        foreach($helper in 'compile_support.ps1','source_policy.ps1','core_support.ps1','archive_limits.ps1','native_process.ps1','archive_sandbox.ps1','media_validation.ps1'){. (Join-Path $codeRoot $helper)}
+        foreach($helper in 'compile_support.ps1','source_policy.ps1','core_support.ps1','archive_limits.ps1','zip_integrity.ps1','native_process.ps1','archive_sandbox.ps1','media_validation.ps1'){. (Join-Path $codeRoot $helper)}
         Add-Type -AssemblyName System.IO.Compression
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $tokens=$null;$errors=$null
@@ -537,7 +537,7 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot)
         & $Batch.Module {param($job,$profile,$dst)
             $script:DiskExtensions=@($profile.Extensions)
             $names=@($job.Plan.ContentNames)+@($job.Files.Keys)
-            Assert-NoMediaNesting $job.SourceJob $dst $job.Plan.ZipMode $profile.Playlist
+            Assert-NoMediaNesting $job.SourceJob $dst $job.Plan.ZipMode
             Assert-PlaylistOutputOwnership $job.Plan $names
         } $Job $Batch.Profile $DestinationRoot
     } elseif($Batch.Operation -eq 'C64'){

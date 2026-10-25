@@ -7,7 +7,6 @@
 . (Join-Path $PSScriptRoot 'application_archive.ps1')
 . (Join-Path $PSScriptRoot 'application_prompts.ps1')
 . (Join-Path $PSScriptRoot 'application_sd.ps1')
-. (Join-Path $PSScriptRoot 'terminal_effects.ps1')
 
 function ConvertFrom-ApplicationPayload([string]$Json) {
     # Bound parser nesting before ConvertFrom-Json sees a hostile frame.
@@ -109,15 +108,11 @@ function Invoke-ApplicationHostRequest {
             $State.NextOnionRoot=$root;$State.StopRequested=$true
             return @{Accepted=$true}
         }
-        'Display.Mode' {
-            $mode=[string]$payload.Mode
-            if ($mode -notin 'CRT','Smooth','Paused') {throw 'Unknown display mode.'}
-            if ($payload.PSObject.Properties['Preference']) {
-                $preference=[string]$payload.Preference
-                if ($preference -notin 'CRT','Smooth') {throw 'Unknown display preference.'}
-                $State.DisplayEffect=$preference
-            }
-            return @{Enabled=[bool](Set-OptiTerminalCrtMode $mode)}
+        'Display.Preference' {
+            $preference=[string]$payload.Preference
+            if ($preference -notin 'CRT','Smooth') {throw 'Unknown display preference.'}
+            $State.DisplayEffect=$preference
+            return @{Accepted=$true}
         }
         {$_ -in 'Native.Start','Native.Read','Native.Stop'} {
             return (Invoke-ApplicationNativeRequest -State $State.Native -BrokerSession $State.Broker -Operation $Request.Operation -Payload $payload)
@@ -266,8 +261,8 @@ function Invoke-ApplicationHost {
                 $worker=@{OnionRoot=$sd.StagedRoot;NoPause=$true}
             }
             Write-ApplicationBootstrap $session $Entry $worker $batch
-            $operations=[string[]]@('Policy.Source','Policy.C64','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Mode','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
-            if ($Arguments.Preview) {$operations=[string[]]@('Display.Mode')}
+            $operations=[string[]]@('Policy.Source','Policy.C64','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
+            if ($Arguments.Preview) {$operations=[string[]]@('Display.Preference')}
             $session.Start('boot.ps1',[string[]]$staged.Assemblies,$operations)
             $exitCode=Invoke-ApplicationHostLoop $state
             if ($native) {Close-ApplicationJobBroker $native}

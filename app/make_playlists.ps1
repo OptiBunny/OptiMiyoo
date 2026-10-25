@@ -29,6 +29,7 @@ $ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
 $NibConv=Join-Path $ScriptDir 'tools/nibconv.exe'
 . (Join-Path $ScriptDir 'source_policy.ps1')
 . (Join-Path $ScriptDir 'archive_limits.ps1')
+. (Join-Path $ScriptDir 'zip_integrity.ps1')
 . (Join-Path $ScriptDir 'native_process.ps1')
 . (Join-Path $ScriptDir 'archive_sandbox.ps1')
 . (Join-Path $ScriptDir 'overwrite_prompt.ps1')
@@ -259,121 +260,6 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
 }
 
 
-# ZIP CRCs are read from the central directory, including ZIP64 metadata.
-# .NET Framework's ZipArchive does not expose or enforce these checksums.
-# Format reference: https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
-# This helper is embedded in each worker; it needs no extra runtime or DLL.
-function Initialize-ZipIntegrity {
-    if ('OptiMiyoo.ZipCrc32' -as [type]) {return}
-    Add-OptiMiyooType -TypeDefinition @'
-using System;
-using System.IO;
-namespace OptiMiyoo {
-    public sealed class ZipCrc32 {
-        private uint state = 0xffffffffU;
-        private static readonly uint[] table = MakeTable();
-        private static uint[] MakeTable() {
-            uint[] result = new uint[256];
-            for (uint i = 0; i < 256; i++) {
-                uint c = i;
-                for (int b = 0; b < 8; b++) c = (c >> 1) ^ ((c & 1) == 0 ? 0 : 0xedb88320U);
-                result[i] = c;
-            }
-            return result;
-        }
-        public void Update(byte[] bytes, int count) {
-            if (count < 0 || count > bytes.Length) throw new ArgumentOutOfRangeException("count");
-            uint c = state;
-            for (int i = 0; i < count; i++) c = table[(c ^ bytes[i]) & 255] ^ (c >> 8);
-            state = c;
-        }
-        public void Verify(uint expected, string name) {
-            uint actual = state ^ 0xffffffffU;
-            if (actual != expected) throw new InvalidDataException(
-                "ZIP CRC mismatch: " + name + " (expected " + expected.ToString("X8") +
-                ", read " + actual.ToString("X8") + "). Archive is damaged; source kept.");
-        }
-        private static byte[] ReadBytes(BinaryReader reader, int count) {
-            byte[] bytes = reader.ReadBytes(count);
-            if (bytes.Length != count) throw new InvalidDataException("Truncated ZIP directory.");
-            return bytes;
-        }
-        private static ushort U16(byte[] bytes, int pos) { return BitConverter.ToUInt16(bytes, pos); }
-        private static uint U32(byte[] bytes, int pos) { return BitConverter.ToUInt32(bytes, pos); }
-        private static ulong U64(byte[] bytes, int pos) { return BitConverter.ToUInt64(bytes, pos); }
-        public static uint[] ReadChecksums(string path, int expectedCount) {
-            using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-            using (BinaryReader reader = new BinaryReader(stream)) {
-                int tailLength = (int)Math.Min(stream.Length, 65557L);
-                stream.Position = stream.Length - tailLength;
-                byte[] tail = ReadBytes(reader, tailLength);
-                int end = -1;
-                for (int i = tail.Length - 22; i >= 0; i--) {
-                    if (U32(tail, i) == 0x06054b50U && i + 22 + U16(tail, i + 20) == tail.Length) {
-                        end = i; break;
-                    }
-                }
-                if (end < 0) throw new InvalidDataException("ZIP end record is missing or truncated.");
-                long endPosition = stream.Length - tailLength + end;
-                if (U16(tail, end + 4) != 0 || U16(tail, end + 6) != 0)
-                    throw new InvalidDataException("Split ZIP archives are unsupported. Combine the parts first.");
-                ulong count = U16(tail, end + 10), onDisk = U16(tail, end + 8);
-                ulong size = U32(tail, end + 12), offset = U32(tail, end + 16);
-                long directoryLimit = endPosition;
-                bool zip64 = false;
-                if (endPosition >= 20) {
-                    stream.Position = endPosition - 20;
-                    byte[] locator = ReadBytes(reader, 20);
-                    if (U32(locator, 0) == 0x07064b50U) {
-                        zip64 = true;
-                        if (U32(locator, 4) != 0 || U32(locator, 16) != 1)
-                            throw new InvalidDataException("Split ZIP64 archives are unsupported.");
-                        ulong position = U64(locator, 8);
-                        if (position > (ulong)(endPosition - 20) || (ulong)(endPosition - 20) - position < 56)
-                            throw new InvalidDataException("Invalid ZIP64 directory location.");
-                        stream.Position = (long)position;
-                        byte[] record = ReadBytes(reader, 56);
-                        ulong recordSize = U64(record, 4);
-                        if (U32(record, 0) != 0x06064b50U || recordSize < 44 ||
-                            recordSize != (ulong)(endPosition - 20) - position - 12)
-                            throw new InvalidDataException("Invalid ZIP64 end record.");
-                        if (U32(record, 16) != 0 || U32(record, 20) != 0)
-                            throw new InvalidDataException("Split ZIP64 archives are unsupported.");
-                        onDisk = U64(record, 24); count = U64(record, 32);
-                        size = U64(record, 40); offset = U64(record, 48);
-                        directoryLimit = (long)position;
-                    }
-                }
-                if (!zip64 && (size == 0xffffffffU || offset == 0xffffffffU))
-                    throw new InvalidDataException("ZIP64 directory locator is missing.");
-                if (onDisk != count || count != (ulong)expectedCount || count > size / 46 ||
-                    offset > (ulong)directoryLimit || size > (ulong)directoryLimit - offset)
-                    throw new InvalidDataException("ZIP directory count or bounds mismatch.");
-                long directoryEnd = (long)(offset + size);
-                stream.Position = (long)offset;
-                uint[] checksums = new uint[expectedCount];
-                for (int i = 0; i < expectedCount; i++) {
-                    if (directoryEnd - stream.Position < 46) throw new InvalidDataException("Truncated ZIP directory entry.");
-                    byte[] header = ReadBytes(reader, 46);
-                    if (U32(header, 0) != 0x02014b50U) throw new InvalidDataException("Invalid ZIP directory entry.");
-                    if ((U16(header, 8) & 0x2041) != 0) throw new InvalidDataException("Encrypted ZIP entries are unsupported.");
-                    if (U16(header, 34) != 0) throw new InvalidDataException("Split ZIP entries are unsupported.");
-                    checksums[i] = U32(header, 16);
-                    int remaining = U16(header, 28) + U16(header, 30) + U16(header, 32);
-                    if (remaining > directoryEnd - stream.Position) throw new InvalidDataException("Truncated ZIP entry metadata.");
-                    stream.Position += remaining;
-                }
-                return checksums;
-            }
-        }
-    }
-}
-'@
-}
-function Get-ZipChecksums([string]$Path,[int]$EntryCount) {
-    Initialize-ZipIntegrity
-    return ,([OptiMiyoo.ZipCrc32]::ReadChecksums($Path,$EntryCount))
-}
 
 function Write-Log([string]$Message) {
     $Message=ConvertTo-SafeExternalText $Message
@@ -435,14 +321,14 @@ function Get-StreamHash([IO.Stream]$Stream,[string]$Name='Disk data') {
     }
     finally { $sha.Dispose() }
 }
-function Get-VerifiedHash([string]$LiteralPath,[string]$Algorithm='SHA256') {
+function Get-VerifiedHash([string]$LiteralPath) {
     $stream=[IO.File]::Open($LiteralPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
     $label=[IO.Path]::GetFileName($LiteralPath)
     if ($label.StartsWith('.m3u_')) {$label='New output for '+$script:UiGame}
     try {return [pscustomobject]@{Hash=(Get-StreamHash $stream $label)}}
     finally {$stream.Dispose()}
 }
-function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Length,[string]$Name,[double]$Base,[double]$Weight,[object]$ExpectedCrc=$null) {
+function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Length,[string]$Name,[object]$ExpectedCrc=$null) {
     $buffer=New-Object byte[] 1048576
     $sha=[Security.Cryptography.SHA256]::Create()
     $crc=$null; if ($null -ne $ExpectedCrc) {$crc=New-Object OptiMiyoo.ZipCrc32}
@@ -476,9 +362,9 @@ function Copy-FileVerified([string]$Source,[string]$Destination,[string]$Name) {
         if ($inputStream.Length -eq 0) { throw "Empty file: $Name" }
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination))
         $outputStream=[IO.File]::Open($Destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-        $hash=Copy-Stream $inputStream $outputStream $inputStream.Length $Name 0.15 0.65
+        $hash=Copy-Stream $inputStream $outputStream $inputStream.Length $Name
         $outputStream.Dispose(); $outputStream=$null
-        if ((Get-VerifiedHash -LiteralPath $Destination -Algorithm SHA256).Hash -ne $hash) { throw "Copied file does not match source: $Name" }
+        if ((Get-VerifiedHash -LiteralPath $Destination).Hash -ne $hash) { throw "Copied file does not match source: $Name" }
         $inputStream.Position=0
         if ((Get-StreamHash $inputStream) -ne $hash) { throw "Source changed during copying: $Name" }
         Write-Event 'CHECK' ($Name+' / copy and source hashes match')
@@ -565,7 +451,7 @@ function Assert-FolderManifest([string]$Directory,[hashtable]$Manifest) {
     foreach ($name in $Manifest.Keys) {
         $path=Join-Path $Directory $name.Replace('/',[IO.Path]::DirectorySeparatorChar)
         $item=Get-Item -LiteralPath $path -Force
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint -or $item.Length -ne $Manifest[$name].Length -or (Get-VerifiedHash -LiteralPath $path -Algorithm SHA256).Hash -ne $Manifest[$name].Hash) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint -or $item.Length -ne $Manifest[$name].Length -or (Get-VerifiedHash -LiteralPath $path).Hash -ne $Manifest[$name].Hash) {
             throw "Output folder content mismatch: $name"
         }
     }
@@ -602,7 +488,7 @@ function New-OutputZip([string]$Directory,[string]$Destination) {
             $inputStream=$null; $outputStream=$null
             try {
                 $inputStream=[IO.File]::OpenRead($entry.FullName); $outputStream=$member.Open()
-                $null=Copy-Stream $inputStream $outputStream $inputStream.Length $name 0 1
+                $null=Copy-Stream $inputStream $outputStream $inputStream.Length $name
             } finally {if ($outputStream) {$outputStream.Dispose()}; if ($inputStream) {$inputStream.Dispose()}}
         }
     } finally {$zip.Dispose()}
@@ -723,7 +609,7 @@ function Add-CopiedFile([string]$Source,[string]$Name,[string]$Directory,[hashta
     if ($sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw "Missing regular source file: $Source"}
     Assert-PlainOutputParents $Source ([IO.Path]::GetPathRoot($Source))
     if ($Manifest.ContainsKey($Name)) {
-        if ((Get-VerifiedHash -LiteralPath $Source -Algorithm SHA256).Hash -ne $Manifest[$Name].Hash) {throw "Two source files collide: $Name"}
+        if ((Get-VerifiedHash -LiteralPath $Source).Hash -ne $Manifest[$Name].Hash) {throw "Two source files collide: $Name"}
     } else {
         $Manifest[$Name]=Copy-FileVerified $Source (Join-Path $Directory $Name.Replace('/',[IO.Path]::DirectorySeparatorChar)) $Name
     }
@@ -1096,7 +982,7 @@ function Get-FolderManifest([string]$Directory) {
     $manifest=@{}
     foreach ($file in @(Get-ChildItem -LiteralPath $Directory -File -Force -Recurse)) {
         $name=$file.FullName.Substring($prefix.Length).Replace('\','/')
-        $manifest[$name]=[pscustomobject]@{Length=$file.Length; Hash=(Get-VerifiedHash -LiteralPath $file.FullName -Algorithm SHA256).Hash}
+        $manifest[$name]=[pscustomobject]@{Length=$file.Length; Hash=(Get-VerifiedHash -LiteralPath $file.FullName).Hash}
     }
     return $manifest
 }
@@ -1147,7 +1033,7 @@ function Convert-NibSet([string[]]$Names,[string]$Directory) {
     }
 }
 
-function Assert-NoMediaNesting($Job,[string]$DestinationRoot,[bool]$ZipMode,[string]$PlaylistExtension) {
+function Assert-NoMediaNesting($Job,[string]$DestinationRoot,[bool]$ZipMode) {
     # An older run may have produced a game where this run wants a collection.
     # Never replace a folder containing another game's media.
     $parts=$Job.Stem.Split('/')
@@ -1635,7 +1521,7 @@ try {
             $dataPath=$plan.DataPath;$m3uPath=$plan.M3uPath;$retired=@($plan.Retired)
             $paths=@($plan.Writes)+@($plan.Retired)+@($plan.VisibleCandidates)
             foreach ($target in $paths) {Assert-PlainOutputParents $target.Destination $destinationRoot}
-            Assert-NoMediaNesting $job $destinationRoot $zipMode $profile.Playlist
+            Assert-NoMediaNesting $job $destinationRoot $zipMode
             Write-Log ('GAME: '+$job.System+'/'+$job.Source)
             $conflicts=@($paths | Where-Object {Test-Path -LiteralPath $_.Destination})
             $overwrite=$false
@@ -1668,9 +1554,9 @@ try {
                     $dest=$null
                     try {
                         $dest=[IO.File]::Open($stageData,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
-                        $dataHash=Copy-Stream $sourceLock $dest $sourceLock.Length $job.Source 0.60 0.25
+                        $dataHash=Copy-Stream $sourceLock $dest $sourceLock.Length $job.Source
                     } finally {if ($dest) {$dest.Dispose()}}
-                    if ($dataHash -ne $sourceHash -or (Get-VerifiedHash -LiteralPath $stageData -Algorithm SHA256).Hash -ne $sourceHash) {throw 'ZIP copy differs from source.'}
+                    if ($dataHash -ne $sourceHash -or (Get-VerifiedHash -LiteralPath $stageData).Hash -ne $sourceHash) {throw 'ZIP copy differs from source.'}
                 } else {
                     $workData=$stageData
                     if ($zipMode) {$workData=$stageData+'.folder'}
@@ -1691,7 +1577,7 @@ try {
                             if ($checkManifest.Count -ne $manifest.Count) {throw 'Repacked ZIP file count mismatch.'}
                             foreach ($name in $manifest.Keys) {if (-not $checkManifest.ContainsKey($name) -or $manifest[$name].Hash -ne $checkManifest[$name].Hash) {throw "Repacked ZIP content mismatch: $name"}}
                         } finally {$checkZip.Dispose()}
-                        $dataHash=(Get-VerifiedHash -LiteralPath $stageData -Algorithm SHA256).Hash
+                        $dataHash=(Get-VerifiedHash -LiteralPath $stageData).Hash
                     }
                 }
                 $sourceLock.Position=0
@@ -1717,7 +1603,7 @@ try {
             }
             if ($isMulti) {
                 New-Playlist $diskNames $job.Stem $stageM3u $zipMode
-                $items+=[pscustomobject]@{Staged=$stageM3u;Destination=$m3uPath;Folder=$false;Hash=(Get-VerifiedHash -LiteralPath $stageM3u -Algorithm SHA256).Hash}
+                $items+=[pscustomobject]@{Staged=$stageM3u;Destination=$m3uPath;Folder=$false;Hash=(Get-VerifiedHash -LiteralPath $stageM3u).Hash}
             }
             # Recheck folder boundaries immediately before the transaction.
             Assert-PlaylistOutputOwnership $plan $expectedNames

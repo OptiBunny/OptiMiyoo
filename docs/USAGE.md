@@ -22,8 +22,15 @@ In option menus, **B** goes back and **Q** exits.
 
 ## Prepare a batch
 
-Copy one system's games into `SRC` as loose files or one ZIP per game. Keep CUE
-files with their referenced tracks and matching SBI files.
+Copy one system's inputs into `SRC`, using the layout for your main-menu option below.
+
+To use a separate batch folder, create `SRC` and `DST` inside it and drag the
+folder onto `OptiMiyoo.bat`.
+
+### Numbered options: playlists
+
+Use loose files or one ZIP per game. Keep CUE files with their referenced tracks
+and matching SBI files.
 
 Loose discs need matching game names and numbered labels, even inside folders:
 
@@ -36,8 +43,20 @@ Use `Game (Side A).tap` and `Game (Side B).tap` for tape sides. Extract separate
 disc or side ZIPs first, then name the files or combine the images into one game ZIP.
 Keep alternate releases and formats of the same disc in separate batches.
 
-To use a separate batch folder, create `SRC` and `DST` inside it and drag the
-folder onto `OptiMiyoo.bat`.
+### C: C64 conversion
+
+Put each game's NIB/NBZ images in a ZIP, then copy the ZIPs into `SRC`. Existing
+G64 images can be included and are kept unchanged. **C reads ZIPs only**; loose
+NIB/NBZ files must be zipped first.
+
+Name each ZIP after its game: `Game.zip` produces `Game.zip` or `Game/` in `DST`.
+The images inside do not need disc or side numbering for conversion.
+
+### Z: ZX conversion
+
+Copy loose `.ipf` files or ZIPs containing IPF images into `SRC`. ZIPs can contain
+one or several images; **each IPF is converted separately**. Disc or side
+numbering is not required. Files and ZIPs can also be in subfolders.
 
 ## Create playlists
 
@@ -52,7 +71,7 @@ Loose files stay loose; media formats remain unchanged.
 
 Multi-disc games get a playlist in `DST` and media under `.hidden`. Single-media
 games stay visible without a playlist. Converted images can be used as inputs
-in a separate batch, following the same [grouping rules](#prepare-a-batch).
+in a separate batch, following the same [grouping rules](#numbered-options-playlists).
 
 ### Systems and ROM folders
 
@@ -80,8 +99,7 @@ the cores on your SD card. C64 tape-side support is shown in its playlist menu.
 
 ### C64 converter: C
 
-Choose **C** for ZIPs containing NIB/NBZ images, with one ZIP per game. Existing
-G64 images are kept unchanged.
+After [preparing the C64 ZIPs](#c-c64-conversion), choose **C** and a mode:
 
 | Choose | Output | Originals |
 | --- | --- | --- |
@@ -94,7 +112,7 @@ Selecting a mode starts the batch.
 
 ### ZX converter: Z
 
-Choose **Z** for loose IPF files or ZIPs containing IPF files, then select:
+After [preparing the IPF inputs](#z-zx-conversion), choose **Z** and an output format:
 
 - **1: Loose DSK files**
 - **2: One ZIP per DSK** (default)

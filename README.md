@@ -12,8 +12,8 @@ Create multi-disc playlists or convert disk images for **Onion OS on Miyoo Mini 
 **Windows 10 (1809+) / 11 x64 · Windows PowerShell 5.1**
 
 1. Download and extract the ZIP to a writable folder.
-2. Copy one system's game files into `SRC` as loose files, folders, or one ZIP per
-   game. Keep each game's discs, tape sides, and companion files together.
+2. Copy one system's game files into `SRC`, using the
+   [input layout for your task](docs/USAGE.md#prepare-a-batch).
 3. Run **`OptiMiyoo.bat`**. Choose a **numbered system** to create playlists, or
    **C/Z** for conversion only, then follow the prompts.
 4. Copy `DST` contents—including `.hidden` when present—to the matching

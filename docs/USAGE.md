@@ -18,20 +18,21 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 ## Prepare a batch
 
 Copy one system's game files into `SRC`; finished files go into `DST`.
-You can use individual files or ZIPs for playlists and conversion.
-Files can also be in subfolders.
+Files can be in subfolders.
 
 - **[Playlists (1–10)](#create-playlists):** group each game's discs or tape sides
   using the naming examples below.
-- **[Conversion (C or Z)](#convert-disk-images):** use NIB/NBZ for C64 or IPF for ZX.
-  Disc and side labels are not required.
+- **[Conversion (C or Z)](#convert-disk-images):** use NIB/NBZ for C64 or IPF for ZX,
+  as individual files or in ZIPs. Disc and side labels are not required.
 
 For a separate batch folder, create `SRC` and `DST` inside it, then drag the
 folder onto `OptiMiyoo.bat`.
 
 ## Create playlists
 
-Use one ZIP per game, or loose images with matching game names and disc numbers:
+Keep each game's discs or tape sides together, either as individual files or in
+one ZIP. Give individual files matching game names and disc numbers, even inside
+folders:
 
 ```text
 Game (Disc 1).chd
@@ -39,16 +40,14 @@ Game (Disc 2).chd
 ```
 
 For tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
-Folders alone do not group loose images. Extract separate disc/side ZIPs first,
-or combine their images into one game ZIP.
 
 Keep CUE files with their referenced tracks and matching SBI files.
 Keep alternate releases or formats of the same disc in separate batches.
 
 Choose your [system number](#systems-and-rom-folders), then storage:
 
-- **1: Auto** (default) keeps supported Amiga, C64, and VIC-20 ZIPs intact;
-  other ZIPs are extracted.
+- **1: Auto** (default) keeps supported ZIPs intact for Amiga, C64, and VIC-20,
+  and extracts them for other systems.
 - **2: Folders** extracts ZIPs. Use this for games that write to disk images.
 
 Then [choose what happens to originals](#originals-and-existing-outputs) to start.
@@ -71,12 +70,11 @@ if you also need one.
 ### C64 converter: C
 
 Converts NIB/NBZ to G64 and copies existing G64 images unchanged.
-An individual file produces one G64 file or ZIP. A game ZIP produces a folder or ZIP,
-keeping its images and companion files together.
+Images and companion files from the same game ZIP stay together.
 
 ### ZX converter: Z
 
-Converts each IPF to a DSK file or ZIP, even when several IPFs are in the same ZIP.
+Converts each IPF to DSK separately.
 Some IPF copy-protection details cannot be preserved in DSK.
 
 ## Originals and existing outputs

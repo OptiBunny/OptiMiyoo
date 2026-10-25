@@ -1196,7 +1196,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
             $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
-            $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport
+            $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -Conversion
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             Write-MenuLine ('  1. ZIPs (default) / one per game'+$zipLabel) ('1. ZIPs (default)'+$zipLabel)
             Write-MenuLine '  2. Folders / one per game'
@@ -1617,7 +1617,7 @@ try {
                 if ($plan.InternalPlaylistName) {
                     $result.Detail='ZIP playlist package verified [unpack before playing].'
                     $script:UiSay='ZIP playlist ready [unpack before playing].'
-                } elseif ($job.ZipOutputNotice.Label) {
+                } elseif ($job.ZipOutputNotice.Label -and $job.ZipOutputNotice.Label -ne '[unpack for playlists]') {
                     $result.Detail='ZIP game verified '+$job.ZipOutputNotice.Label+'. Unpack before playing.'
                     $script:UiSay='ZIP game ready [unpack before playing].'
                 }

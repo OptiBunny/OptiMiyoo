@@ -7,7 +7,7 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 
 | Choose | Task |
 | --- | --- |
-| **1–10** | [Create playlists](#create-playlists), preserving media formats. |
+| **1–10** | [Create playlists](#create-playlists) without changing file formats. |
 | **C** | [Convert C64 NIB/NBZ to G64](#c64-converter-c). |
 | **Z** | [Convert ZX Spectrum IPF to DSK](#zx-converter-z). |
 | **S** | [Set up playlist visibility](#sd-setup-and-disc-swapping) on an Onion SD card. |
@@ -17,8 +17,9 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 
 ## Prepare a batch
 
-Copy one system's inputs into `SRC`; finished files go into `DST`.
-Both workflows accept loose files or ZIPs, including subfolders:
+Copy one system's game files into `SRC`; finished files go into `DST`.
+You can use individual files or ZIPs for playlists and conversion.
+Files can also be in subfolders.
 
 - **[Playlists (1–10)](#create-playlists):** group each game's discs or tape sides
   using the naming examples below.
@@ -52,8 +53,9 @@ Choose your [system number](#systems-and-rom-folders), then storage:
 
 Then [choose what happens to originals](#originals-and-existing-outputs) to start.
 
-Multi-disc games get a playlist with media in `.hidden`. Single-media games stay
-visible without a playlist.
+For games with multiple discs or tape sides, the playlist stays visible and the
+game files go into `.hidden`. Games with one disc or tape side stay visible
+without a playlist.
 
 ## Convert disk images
 
@@ -69,19 +71,19 @@ if you also need one.
 ### C64 converter: C
 
 Converts NIB/NBZ to G64 and copies existing G64 images unchanged.
-A loose input produces one G64 file or ZIP. A game ZIP produces a folder or ZIP,
+An individual file produces one G64 file or ZIP. A game ZIP produces a folder or ZIP,
 keeping its images and companion files together.
 
 ### ZX converter: Z
 
-Converts each IPF to a DSK file or ZIP, even when several IPFs share an input ZIP.
+Converts each IPF to a DSK file or ZIP, even when several IPFs are in the same ZIP.
 Some IPF copy-protection details cannot be preserved in DSK.
 
 ## Originals and existing outputs
 
 Choose **1: Keep originals** (default) or **2: Remove originals** to start a batch.
-Remove deletes inputs from `SRC` only after their outputs verify successfully.
-Skipped or failed inputs are kept.
+Remove deletes original files from `SRC` only after checking the finished files
+in `DST`. Skipped or failed files are kept.
 
 When an output already exists:
 

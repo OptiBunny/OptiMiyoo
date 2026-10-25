@@ -32,11 +32,10 @@ as described below.
 | Main menu | Action |
 | --- | --- |
 | **1–10** | Create playlists for a [numbered system](#systems-and-rom-folders). Enter selects **1: Amiga**. |
-| **2** | Create C64 disk and TAP/T64 tape-side playlists, keeping original formats including NIB/NBZ. |
 | **C** | Convert C64 NIB/NBZ game ZIPs to visible G64 ZIPs or folders. |
 | **Z** | Convert ZX Spectrum IPF → DSK. |
 | **S** | Check an SD card's selected cores and enable supported playlist extensions. |
-| **D** | Preview the workflow without changing game or SD files. |
+| **D** | Open a demo showcasing the menus, animations, and processing workflow without changing game or SD files. |
 | **F** | Switch the bunny and logo between CRT and Smooth. |
 | **Q** | Exit. |
 

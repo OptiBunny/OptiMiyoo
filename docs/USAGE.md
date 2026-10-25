@@ -31,7 +31,8 @@ as described below.
 | Main menu | Action |
 | --- | --- |
 | **1–10** | Create playlists for a [numbered system](#systems-and-rom-folders). Enter selects **1: Amiga**. |
-| **C** | Convert C64 NIB/NBZ → G64. Use **2** for C64 disk or TAP/T64 playlists. |
+| **2** | Create C64 disk and TAP/T64 tape-side playlists from loose files or ZIPs. NIB/NBZ images convert to G64 automatically. |
+| **C** | Batch-convert C64 NIB/NBZ game ZIPs to G64; multi-disk ZIPs also get playlists. |
 | **Z** | Convert ZX Spectrum IPF → DSK. |
 | **S** | Check an SD card's selected cores and enable supported playlist extensions. |
 | **D** | Preview the workflow without changing game or SD files. |
@@ -54,6 +55,9 @@ Unsupported or unverified cores show an explanation instead of creating playlist
 
 ### C64 converter: C
 
+Put one game's NIB/NBZ or G64 disk images in each ZIP. This option processes
+ZIPs; use main-menu **2** for loose files or other C64 disk and tape formats.
+
 | Option | Output | Originals in `SRC` |
 | --- | --- | --- |
 | **1** (default) | ZIP | Keep |
@@ -61,8 +65,9 @@ Unsupported or unverified cores show an explanation instead of creating playlist
 | **3** | Folders | Keep |
 | **4** | Folders | Remove |
 
-Each choice starts the batch. G64 images are copied without conversion; multi-disk
-ZIPs receive a playlist and media under `.hidden`.
+Each choice starts the batch. NIB/NBZ images convert to G64; existing G64 images
+keep their bytes. Games with multiple disk images also receive an `.m3u` playlist
+and media under `.hidden`, so they do not need a second pass through **2**.
 
 ### ZX converter: Z
 

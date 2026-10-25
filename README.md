@@ -2,26 +2,28 @@
 
 Create multi-disc playlists or convert disk images for **Onion OS on Miyoo Mini Plus**.
 
-[**Download ZIP for Windows**](https://github.com/OptiBunny/OptiMiyoo/archive/refs/heads/main.zip)
+[**Download for Windows**](https://github.com/OptiBunny/OptiMiyoo/archive/refs/heads/main.zip)
 · [**User guide**](docs/USAGE.md)
 
 ![Animated OptiMiyoo terminal interface](assets/preview.gif)
 
 ## Quick start
 
-**Windows 10 (1809+) / 11 x64 · Windows PowerShell 5.1**
+**Windows 10 (1809+) / 11 · x64 · Windows PowerShell 5.1**
 
 1. Download and extract the ZIP to a writable folder.
-2. Copy one system's game files into `SRC`, using the
-   [input layout for your task](docs/USAGE.md#prepare-a-batch).
-3. Run **`OptiMiyoo.bat`**. Choose a **numbered system** to create playlists, or
-   **C/Z** for conversion only, then follow the prompts.
-4. Copy `DST` contents—including `.hidden` when present—to the matching
-   [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders), then refresh the game list.
+2. Copy one system's game files into `SRC`. See
+   [how to arrange them](docs/USAGE.md#prepare-a-batch).
+3. Run **`OptiMiyoo.bat`**. Choose a **numbered system** for playlists,
+   **C** for C64 conversion, or **Z** for ZX Spectrum conversion.
+   Follow the prompts; originals are kept by default.
+4. Copy the contents of `DST`, including `.hidden` when present, to the matching
+   [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders). Refresh the game list.
 
-Originals are kept by default.
+Choose **D** for a demo showcasing the menus, animations, and workflows without
+changing game files.
 
-Choose **D** for a demo showcasing menus, animations, and workflows without changing game files.
+## Credits and disclosure
 
 Converter tools are included; ROMs, BIOS files, and Onion cores are not.
 

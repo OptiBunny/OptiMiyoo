@@ -17,28 +17,23 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 
 ## Prepare a batch
 
-Copy one system's game files into `SRC`; finished files go into `DST`.
-Files can be in subfolders.
-
-- **[Playlists (1–10)](#create-playlists):** group each game's discs or tape sides
-  using the naming examples below.
-- **[Conversion (C or Z)](#convert-disk-images):** use NIB/NBZ for C64 or IPF for ZX,
-  as individual files or in ZIPs. Disc and side labels are not required.
+Copy one system's games into `SRC`. They can be individual files, a folder per
+game, or one ZIP per game. OptiMiyoo reads subfolders too and saves the finished
+files in `DST`.
 
 For a separate batch folder, create `SRC` and `DST` inside it, then drag the
 folder onto `OptiMiyoo.bat`.
 
 ## Create playlists
 
-Keep each game's discs or tape sides together, either as individual files or in
-one ZIP. Give individual files matching game names and disc numbers, even inside
-folders:
+For multi-disc playlists, use numbered filenames like these:
 
 ```text
 Game (Disc 1).chd
 Game (Disc 2).chd
 ```
 
+Inside a game folder, `Disc 1.chd` and `Disc 2.chd` also work.
 For tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 
 Keep CUE files with their referenced tracks and matching SBI files.

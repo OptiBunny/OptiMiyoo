@@ -26,85 +26,14 @@ if (-not (Test-ApplicationWorker)) {
 $script:AppVersion='0.0.9'
 $ErrorActionPreference='Stop'
 $ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
-$NibConv=Join-Path $ScriptDir 'tools/nibconv.exe'
 . (Join-Path $ScriptDir 'source_policy.ps1')
 . (Join-Path $ScriptDir 'archive_limits.ps1')
 . (Join-Path $ScriptDir 'zip_integrity.ps1')
-. (Join-Path $ScriptDir 'native_process.ps1')
 . (Join-Path $ScriptDir 'archive_sandbox.ps1')
 . (Join-Path $ScriptDir 'overwrite_prompt.ps1')
-. (Join-Path $ScriptDir 'media_validation.ps1')
 . (Join-Path $ScriptDir 'core_support.ps1')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-Initialize-NativeTextCapture
-
-function Assert-G64([string]$Path) {
-    # Some nibconv failures return exit code zero: validate actual output too.
-    $stream = [IO.File]::OpenRead($Path)
-    $reader = New-Object IO.BinaryReader($stream)
-    try {
-        if ($stream.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)) -ne 'GCR-1541') { throw 'nibconv did not produce a G64 image.' }
-        if ($reader.ReadByte() -ne 0) { throw 'Unsupported G64 version.' }
-        $tracks = [int]$reader.ReadByte()
-        $maxLength = [int]$reader.ReadUInt16()
-        $dataStart = 12 + 8 * $tracks
-        if ($tracks -eq 0 -or $stream.Length -lt $dataStart) { throw 'Truncated G64 tables.' }
-        $offsets = @(); $speeds = @()
-        for ($i = 0; $i -lt $tracks; $i++) { $offsets += $reader.ReadUInt32() }
-        for ($i = 0; $i -lt $tracks; $i++) { $speeds += $reader.ReadUInt32() }
-        for ($i = 0; $i -lt $tracks; $i++) {
-            if ($offsets[$i] -eq 0) { continue }
-            if ($offsets[$i] -lt $dataStart -or ($offsets[$i] + 2) -gt $stream.Length) { throw 'Invalid G64 track offset.' }
-            $stream.Position = $offsets[$i]
-            $length = [int]$reader.ReadUInt16()
-            if ($length -gt $maxLength -or ($offsets[$i] + 2 + $length) -gt $stream.Length) { throw 'Truncated G64 track.' }
-            if ($speeds[$i] -gt 3 -and ($speeds[$i] -lt $dataStart -or
-                    ($speeds[$i] + [Math]::Ceiling($length / 4.0)) -gt $stream.Length)) { throw 'Invalid G64 speed map.' }
-        }
-    } finally { $reader.Dispose() }
-}
-
-function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Index, [int]$Count, [string]$DisplayName) {
-    $capture = New-NativeNibCapture $NibConv $InputPath $OutputPath
-    $phase = 'Starting'; [double]$fraction = 0; $trackDetail = 'waiting for nibconv output'
-    $conversionProblem = $null
-    $diskClock = [Diagnostics.Stopwatch]::StartNew()
-    try {
-        do {
-            $finished = $capture.Child.HasExited
-            if ($diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
-            if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
-            if ($finished -and -not $capture.WaitOutput(5000)) {throw 'nibconv diagnostic capture did not complete. Original kept.'}
-            if ($capture.CaptureFailed) {throw 'nibconv diagnostic capture failed. Original kept.'}
-            while ($null -ne ($line = $capture.NextLine())) {
-                Write-Log ('nibconv: ' + $line)
-                if ($line -match 'Not valid NIB data') { $conversionProblem = $line.Trim() }
-                if ($line -match 'Aligning tracks') { $phase = 'Aligning'; $fraction = [Math]::Max($fraction, 0.02) }
-                elseif ($line -match 'Searching for fat tracks') { $phase = 'Checking tracks'; $fraction = [Math]::Max($fraction, 0.75) }
-                elseif ($line -match 'Writing G64 file') { $phase = 'Writing G64'; $fraction = [Math]::Max($fraction, 0.80) }
-                elseif ($line -match '^\s*(\d+\.\d+)\s*:') {
-                    $track = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
-                    $trackDetail = 'track ' + $Matches[1]
-                    if ($phase -eq 'Aligning') { $fraction = [Math]::Max($fraction, 0.02 + 0.70 * [Math]::Min(1, $track / 42)) }
-                    elseif ($phase -eq 'Writing G64') { $fraction = [Math]::Max($fraction, 0.80 + 0.18 * [Math]::Min(1, $track / 42.5)) }
-                }
-            }
-            $detail = ('{0} | {1}, {2} | Disk elapsed {3}' -f $DisplayName, $phase, $trackDetail,
-                (Format-Duration $diskClock.Elapsed.TotalSeconds))
-            Show-Stage (0.15 + 0.65 * (($Index + $fraction) / $Count)) ('Converting disk {0}/{1}' -f ($Index+1),$Count) $detail
-            if (-not $finished) { Start-Sleep -Milliseconds 125 }
-        } while (-not $finished)
-        if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
-        if ($capture.Child.ExitCode -ne 0) { throw "nibconv exit code $($capture.Child.ExitCode)." }
-        if ($conversionProblem) { throw $conversionProblem }
-        $capture.Export()
-        if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output. See the log for its messages.' }
-        Assert-G64 $OutputPath
-        Show-Stage 0.8 'Converted disk' $DisplayName
-    } finally { $capture.Dispose() }
-}
-
 
 function Format-Duration([double]$Seconds) {
     if ($Seconds -lt 0 -or [double]::IsInfinity($Seconds)) { return 'calculating...' }
@@ -476,24 +405,6 @@ function New-Playlist([string[]]$DiskNames,[string]$RelativeStem,[string]$Destin
     for ($i=0;$i -lt $DiskNames.Count;$i++) {Write-Event ('DISK '+($i+1)) $DiskNames[$i]}
 }
 
-function New-OutputZip([string]$Directory,[string]$Destination) {
-    Write-Event 'PACK' 'Building a ZIP from the converted disk set and its companion files.'
-    $prefix=$Directory.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
-    $zip=[IO.Compression.ZipFile]::Open($Destination,[IO.Compression.ZipArchiveMode]::Create)
-    try {
-        foreach ($entry in @(Get-ChildItem -LiteralPath $Directory -Recurse -Force | Sort-Object FullName)) {
-            $name=$entry.FullName.Substring($prefix.Length).Replace('\','/')
-            if ($entry.PSIsContainer) {[void]$zip.CreateEntry($name+'/'); continue}
-            $member=$zip.CreateEntry($name,[IO.Compression.CompressionLevel]::Optimal)
-            $inputStream=$null; $outputStream=$null
-            try {
-                $inputStream=[IO.File]::OpenRead($entry.FullName); $outputStream=$member.Open()
-                $null=Copy-Stream $inputStream $outputStream $inputStream.Length $name
-            } finally {if ($outputStream) {$outputStream.Dispose()}; if ($inputStream) {$inputStream.Dispose()}}
-        }
-    } finally {$zip.Dispose()}
-}
-
 function Get-TapeGrouping([string]$Title) {
     $pattern='(?i)\s*[\(\[]\s*(?:(?:tape|cassette)\s*(?<tape>\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?(?:\s+side\s*(?<side>\d+|[a-z]))?|side\s*(?<side>\d+|[a-z]))\s*[\)\]]'
     $found=[regex]::Matches($Title,$pattern)
@@ -703,8 +614,7 @@ function Get-GameMediaNames($Job,[string]$Storage='Auto') {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
-            $hasNib=@($diskNames | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count -gt 0
-            if (-not $Job.Profile.Zip -or $Storage -eq 'Folders' -or $hasNib) {Assert-ZipExtractionNames $archive}
+            if (-not $Job.Profile.Zip -or $Storage -eq 'Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
         } finally {$archive.Dispose()}
     } else {
@@ -777,7 +687,6 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     elseif ($singleFile) {
         if ($Job.Zip) {$relativeData=$Job.Stem+[IO.Path]::GetExtension($Media.DiskNames[0])}
         else {$relativeData=$Job.Disks[0].Path.Substring($SourceRoot.TrimEnd('\','/').Length+1).Replace('\','/')}
-        if ([IO.Path]::GetExtension($relativeData) -in '.nib','.nbz') {$relativeData=[IO.Path]::ChangeExtension($relativeData,'.g64')}
     }
     Assert-RelativeName $relativeData
     $dataPath=Join-Path $DestinationRoot $relativeData.Replace('/',[IO.Path]::DirectorySeparatorChar)
@@ -796,13 +705,11 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $relativeCandidates=@($Job.Stem,($Job.Stem+'.zip'))
     foreach ($ext in $profile.Extensions) {
-        if ($ext -in '.nib','.nbz') {$ext='.g64'}
         $relativeCandidates+=($Job.Stem+$ext)
     }
     if (-not $Job.Zip) {
         foreach ($disk in $Job.Disks) {
             $relative=$disk.Path.Substring($SourceRoot.TrimEnd('\','/').Length+1).Replace('\','/')
-            if ([IO.Path]::GetExtension($relative) -in '.nib','.nbz') {$relative=[IO.Path]::ChangeExtension($relative,'.g64')}
             $relativeCandidates+=$relative
         }
     }
@@ -977,62 +884,6 @@ function Assert-CueTargets([string[]]$Names,[string]$Directory) {
     }
 }
 
-function Get-FolderManifest([string]$Directory) {
-    $prefix=$Directory.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
-    $manifest=@{}
-    foreach ($file in @(Get-ChildItem -LiteralPath $Directory -File -Force -Recurse)) {
-        $name=$file.FullName.Substring($prefix.Length).Replace('\','/')
-        $manifest[$name]=[pscustomobject]@{Length=$file.Length; Hash=(Get-VerifiedHash -LiteralPath $file.FullName).Hash}
-    }
-    return $manifest
-}
-
-function Convert-NibSet([string[]]$Names,[string]$Directory) {
-    $nibs=@($Names | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'})
-    if ($nibs.Count -eq 0) {return $Names}
-    if (-not (Test-ApplicationWorker) -and -not (Test-Path -LiteralPath $NibConv -PathType Leaf)) {throw 'nibconv.exe is missing. Extract the complete release ZIP.'}
-    $targets=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in $nibs) {
-        $target=[IO.Path]::ChangeExtension($name,'.g64')
-        if ((Test-Path -LiteralPath (Join-Path $Directory $target)) -or -not $targets.Add($target)) {throw "NIB conversion conflicts with an existing G64: $name"}
-    }
-    $temp=Join-Path ([IO.Path]::GetTempPath()) ('m3un_'+[Guid]::NewGuid().ToString('N').Substring(0,12))
-    $tempParentLock=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($temp))
-    $tempLock=$null
-    try {
-        [void][IO.Directory]::CreateDirectory($temp)
-        $tempLock=Open-SourcePolicyDirectoryLease $temp
-        for ($i=0;$i -lt $nibs.Count;$i++) {
-            $name=$nibs[$i]; $path=Join-Path $Directory $name
-            $inputPath=Join-Path $temp ('input'+[IO.Path]::GetExtension($name).ToLowerInvariant())
-            $outputPath=Join-Path $temp 'output.g64'
-            $mediaParentLock=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($path))
-            try {
-                Assert-NibSource $path
-                [IO.File]::Copy($path,$inputPath)
-                $nativeInputLease=$null
-                try {
-                    $nativeInputLease=Open-SourcePolicyReadLease $inputPath $temp
-                    Assert-NibSource $inputPath
-                    Invoke-NibConversion $inputPath $outputPath $i $nibs.Count $name
-                } finally {if ($nativeInputLease) {$nativeInputLease.Dispose()}}
-                [IO.File]::Move($outputPath,[IO.Path]::ChangeExtension($path,'.g64'))
-                Remove-SourcePolicyOwnedPath $path $Directory
-                Remove-SourcePolicyOwnedPath $inputPath $temp
-            } finally {$mediaParentLock.Dispose()}
-        }
-    } finally {
-        if ($tempLock) {$tempLock.Dispose()}
-        try {if (Test-Path -LiteralPath $temp) {Remove-SourcePolicyOwnedPath $temp ([IO.Path]::GetDirectoryName($temp))}}
-        catch {Write-Event 'WARNING' ('Conversion temporary files retained: '+$temp+' / '+$_.Exception.Message)}
-        finally {$tempParentLock.Dispose()}
-    }
-    foreach ($name in $Names) {
-        if ([IO.Path]::GetExtension($name) -in '.nib','.nbz') {[IO.Path]::ChangeExtension($name,'.g64')}
-        else {$name}
-    }
-}
-
 function Assert-NoMediaNesting($Job,[string]$DestinationRoot,[bool]$ZipMode) {
     # An older run may have produced a game where this run wants a collection.
     # Never replace a folder containing another game's media.
@@ -1188,8 +1039,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
         if ($page -eq 'C64') {
             $pageName='Commodore 64'
             Show-MenuTitle $pageName
-            Write-MenuLine '  Convert NIB/NBZ to G64. Existing G64 images keep their bytes.'
-            Write-MenuLine '  Multi-disk ZIPs receive a playlist and media inside .hidden.'
+            Write-MenuLine '  Convert NIB/NBZ ZIPs to G64. Existing G64 images keep their bytes.'
+            Write-MenuLine '  Conversion only; use menu 2 afterward to build playlists.'
             Write-MenuLine '  1. ZIP output / KEEP originals in SRC'
             Write-MenuLine '  2. ZIP output / REMOVE originals only after verified success'
             Write-MenuLine '  3. Folder output / KEEP originals in SRC'
@@ -1464,7 +1315,7 @@ try {
         $script:UiGame=$job.Stem; $script:UiSystem=$job.System; $script:UiLastStage=''
         Write-Event 'GAME' ('{0}/{1} | {2}/{3}' -f ($script:Processed+1),$script:Total,$job.System,$job.Source)
         $destinationRoot=Join-Path $Root 'DST'
-        $stageData=$null; $stageM3u=$null; $workData=$null; $commit=$null; $archive=$null; $sourceLock=$null; $items=@()
+        $stageData=$null; $stageM3u=$null; $commit=$null; $archive=$null; $sourceLock=$null; $items=@()
         $outputDirectoryLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
         $zipMode=([bool]$profile.Zip -and $Storage -eq 'Auto' -and [bool]$job.Zip)
         $result=[pscustomobject]@{System=$job.System; Source=$job.Source; Playlist=($job.Stem+$profile.Playlist); DiskImages=0; Result='Failed'; Original='Kept in SRC'; RemovedFiles=0; KeptFiles=0; RemovalFailures=0; Detail=''}
@@ -1532,7 +1383,7 @@ try {
                     Write-Event 'SKIP' ($job.System+'/'+$job.Source+' - original kept; output not compared or copied.'); continue
                 }
             }
-            $expectedNames=@($contentNames)+@($contentNames | ForEach-Object {if ([IO.Path]::GetExtension($_) -in '.nib','.nbz') {[IO.Path]::ChangeExtension($_,'.g64')}})
+            $expectedNames=@($contentNames)
             Assert-PlaylistOutputOwnership $plan $expectedNames
             foreach ($path in @($dataPath,$m3uPath)) {
                 $parent=[IO.Path]::GetDirectoryName($path); $parentAnchor=$parent
@@ -1547,8 +1398,7 @@ try {
             if ($job.Zip) {
                 $sourceLock.Position=0; $sourceHash=Get-StreamHash $sourceLock $job.Source
                 $sourceHashes[[IO.Path]::GetFullPath($job.Zip)]=$sourceHash
-                $hasNib=@($diskNames | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count -gt 0
-                if ($zipMode -and -not $hasNib) {
+                if ($zipMode) {
                     $manifest=Read-ZipContents $archive '' $job.Zip
                     $archive.Dispose(); $archive=$null; $sourceLock.Position=0
                     $dest=$null
@@ -1558,27 +1408,11 @@ try {
                     } finally {if ($dest) {$dest.Dispose()}}
                     if ($dataHash -ne $sourceHash -or (Get-VerifiedHash -LiteralPath $stageData).Hash -ne $sourceHash) {throw 'ZIP copy differs from source.'}
                 } else {
-                    $workData=$stageData
-                    if ($zipMode) {$workData=$stageData+'.folder'}
-                    [void][IO.Directory]::CreateDirectory($workData)
-                    $manifest=Read-ZipContents $archive $workData $job.Zip
+                    [void][IO.Directory]::CreateDirectory($stageData)
+                    $manifest=Read-ZipContents $archive $stageData $job.Zip
                     $archive.Dispose(); $archive=$null
-                    Assert-FolderManifest $workData $manifest
-                    if ($hasNib) {
-                        $diskNames=@(Convert-NibSet $diskNames $workData)
-                        $manifest=Get-FolderManifest $workData
-                    }
-                    Assert-CueTargets $diskNames $workData
-                    if ($zipMode) {
-                        New-OutputZip $workData $stageData
-                        $checkZip=Open-ArchiveWithBudget -Path $stageData -Profile Media
-                        try {
-                            $checkManifest=Read-ZipContents $checkZip '' $stageData
-                            if ($checkManifest.Count -ne $manifest.Count) {throw 'Repacked ZIP file count mismatch.'}
-                            foreach ($name in $manifest.Keys) {if (-not $checkManifest.ContainsKey($name) -or $manifest[$name].Hash -ne $checkManifest[$name].Hash) {throw "Repacked ZIP content mismatch: $name"}}
-                        } finally {$checkZip.Dispose()}
-                        $dataHash=(Get-VerifiedHash -LiteralPath $stageData).Hash
-                    }
+                    Assert-FolderManifest $stageData $manifest
+                    Assert-CueTargets $diskNames $stageData
                 }
                 $sourceLock.Position=0
                 if ((Get-StreamHash $sourceLock $job.Source) -ne $sourceHash) {throw 'Source ZIP changed during processing.'}
@@ -1588,10 +1422,6 @@ try {
                 $manifest=Copy-LooseSet $job $stageData $sourceHashes
                 Assert-FolderManifest $stageData $manifest
                 $diskNames=@($job.Disks | ForEach-Object {$_.Name})
-                if (@($diskNames | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count -gt 0) {
-                    $diskNames=@(Convert-NibSet $diskNames $stageData)
-                    $manifest=Get-FolderManifest $stageData
-                }
                 Assert-CueTargets $diskNames $stageData
             }
             $result.DiskImages=$diskNames.Count
@@ -1632,7 +1462,7 @@ try {
             if ($archive) {$archive.Dispose()}
             if ($sourceLock) {$sourceLock.Dispose()}
             if ($commit) {foreach ($lock in $commit.Locks) {$lock.Dispose()}}
-            foreach ($path in @($stageData,$stageM3u,$workData)) {
+            foreach ($path in @($stageData,$stageM3u)) {
                 if ($path -and (Test-Path -LiteralPath $path)) {
                     $retain=$false
                     foreach ($item in $items) {

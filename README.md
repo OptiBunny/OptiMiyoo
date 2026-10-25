@@ -14,10 +14,13 @@ including C64 NIB/NBZ → G64 and ZX Spectrum IPF → DSK conversion.
 
 1. Download and extract the ZIP to a writable folder.
 2. Put one system's games in `SRC`, then run **`OptiMiyoo.bat`**.
-3. Choose a numbered system for playlists (**2** for C64), **C** to convert C64
-   NIB/NBZ game ZIPs to G64, or **Z** to convert ZX IPF to DSK.
-4. Copy the resulting `DST` contents—including `.hidden`—to the matching
+3. Choose a numbered system for playlists in the original formats (**2** for C64),
+   **C** to convert C64 NIB/NBZ game ZIPs to G64, or **Z** to convert ZX IPF to DSK.
+4. Copy the resulting `DST` contents—including `.hidden` when present—to the matching
    [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders), then refresh the game list.
+
+Use **C** or **Z** only when you want conversion; numbered playlist modes keep
+the original formats. [Using converted media in playlists](docs/USAGE.md#playlists-after-conversion).
 
 Originals are kept by default. **D** previews the workflow without changing game files.
 Converter tools are included; ROMs, BIOS files, and Onion cores are not.

@@ -1032,7 +1032,7 @@ function Show-Stage([double]$Fraction,[string]$Stage,[string]$Detail,[double]$Me
     if ($Stage -match 'Hash|Verif|Check') {$script:UiMood='check'; $script:UiSay='Verifying output integrity before installation.'}
     elseif ($Stage -match 'Scan|Prepar|Read') {$script:UiMood='scan'; $script:UiSay='Reading disk images and checking set order.'}
     elseif ($Stage -match 'HxC|IPF.*DSK') {$script:UiSay='Converting IPF data to DSK.'}
-    elseif ($Stage -match 'Convert') {$script:UiSay='Converting NIB data to G64.'}
+    elseif ($Stage -match 'Convert') {$script:UiSay='Converting disk images.'}
     elseif ($Stage -match 'Playlist|Install') {$script:UiSay='Installing the playlist and disk images.'}
     $changed=($script:UiLastStage -ne $Stage)
     if ($changed) {
@@ -1184,21 +1184,23 @@ function Get-MioPreviewTourBar([int]$Width) {
 function Get-MioPreviewScenes([string]$Section='Tour') {
     # Entirely synthetic data: never call workers, file scanners or log writers.
     $scenes=@(
-        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','3. PlayStation playlists','C. Commodore 64 / NIB -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Animated menus and shared status display.'},
+        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
         @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding disk sets, companion files and existing outputs.'},
         @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC, PCECD and ZXS: playlist unsupported.','ZX IPF-to-DSK conversion remains available.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
         @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Read launcher and core support. Keep selected cores.'},
         @{Group='Setup';Mood='check';Stage='Playlist visibility setup';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up config; add needed playlist extensions only.'},
-        @{Group='C64';Mood='idle';Stage='Commodore 64 settings';System='MENU';Menu=@('DEMO / no file changes','1. ZIP output / keep originals','2. ZIP output / remove after verification','3. Folder output / keep originals','4. Folder output / remove after verification','B. Back to main menu');Detail='All converter menus include the same bunny.'},
+        @{Group='C64';Mood='idle';Stage='Commodore 64 settings';System='MENU';Menu=@('DEMO / conversion only','1. ZIP output / keep originals','2. ZIP output / remove after verification','3. Folder output / keep originals','4. Folder output / remove after verification','B. Back to main menu');Detail='Visible G64 output; playlists are a separate step.'},
         @{Group='C64';Mood='scan';Stage='Reading NIB and NBZ images';System='COMMODORE 64';Game='Demo disk set.zip';Detail='2 disk sides found. G64 files need no conversion.'},
         @{Group='C64';Mood='work';Stage='Converting NIB to G64';System='COMMODORE 64';Game='Demo disk set / Side A.nib';Detail='Simulated nibconv track activity';Progress=$true;Tracks=$true},
         @{Group='C64';Mood='check';Stage='Preserving an existing G64';System='COMMODORE 64';Game='Demo disk set / Side B.g64';Detail='Existing G64 bytes are copied and verified.';Progress=$true},
         @{Group='C64';Mood='check';Stage='Verifying the converted images';System='COMMODORE 64';Game='Demo disk set';Detail='G64 structure, image hashes and ZIP contents.';Progress=$true;CompleteSet=$true},
-        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / no file changes','1. Loose DSK output','2. One ZIP per DSK','Next: Keep / Remove verified originals.','B. Back to main menu');Detail='Conversion is separate from playlist support.'},
+        @{Group='C64';Mood='happy';Stage='Converted disks, optional playlists';System='MENU';Menu=@('DEMO / converted G64 output','DST/Demo disk set.zip stays visible.','For playlists, create a separate batch folder.','Copy wanted converted output into its SRC.','Drag the batch folder onto OptiMiyoo.bat.','Choose main-menu 2 for C64 playlists.','Keep the original input batch intact.');Detail='C converts images. Menu 2 creates playlists.'},
+        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','1. Loose DSK output','2. One ZIP per DSK','Next: Keep / Remove verified originals.','Menu 10 keeps IPF/DSK with playlist support.','Stock Onion Fuse: playlists unsupported.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
         @{Group='ZX';Mood='scan';Stage='Reading an IPF image';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='HxC and CAPSIMG decode the preservation image.'},
         @{Group='ZX';Mood='work';Stage='Converting IPF to DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='Engine activity is shown without a guessed percentage.'},
         @{Group='ZX';Mood='check';Stage='Verifying DSK and ZIP output';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.zip';Detail='Check DSK structure, archive contents and source policy.';Progress=$true;CompleteSet=$true},
         @{Group='Playlists';Mood='scan';Stage='Amiga IPF and ADF disk sets';System='AMIGA';Game='Demo Amiga / Disk 1.ipf';Detail='Keep IPF/ADF images; Auto can keep supported ZIPs.'},
+        @{Group='Playlists';Mood='scan';Stage='C64 disk and tape-side playlists';System='COMMODORE 64';Game='Demo C64 / Side A.nib';Detail='Original formats are kept. Choose C separately for G64.'},
         @{Group='Playlists';Mood='scan';Stage='PlayStation multi-disc sets';System='PLAYSTATION';Game='Demo PlayStation / Disc 1.chd';Detail='Keep CHD files. CUE sets retain referenced tracks.'},
         @{Group='Playlists';Mood='idle';Stage='Other supported playlist systems';System='MENU';Menu=@('DEMO / supported default cores','Sega CD / Mega-CD: disc sets','MSX / MSX2: floppy disk sets','VIC-20: floppy disk sets','MS-DOS: DOSBox Pure M3U8 disk sets','Choose one system for the shared SRC folder.');Detail='Use the system profile that matches your input set.'},
         @{Group='Playlists';Mood='scan';Stage='Ordering multiple disks';System='PLAYLISTS';Game='Demo Adventure';Detail='Natural disk order: Disk 1, Disk 2, Disk 10.'},

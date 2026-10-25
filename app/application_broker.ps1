@@ -314,7 +314,7 @@ function Add-ApplicationBrokerExpectedFile([hashtable]$Manifest,[string]$Name,$F
     $Manifest[$Name]=[pscustomobject]@{Hash=[string]$File.Hash;Length=[long]$File.Length;Converter=$Converter;InputHash=[string]$File.Hash}
 }
 
-function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job,[switch]$ConvertAllNib) {
+function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job) {
     $manifest=@{};$sourceRoot=Join-Path $State.OriginalRoot 'SRC'
     if($Job.Zip){
         $archiveFiles=Get-ApplicationBrokerArchive $Module ([string]$Job.Zip)
@@ -333,13 +333,6 @@ function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job,[switch]$Convert
                 Add-ApplicationBrokerExpectedFile $manifest $source.Name $State.SourceSnapshot.Files[$key]
             }
         }
-    }
-    $toConvert=@($manifest.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'})
-    foreach($name in $toConvert){
-        if(-not $ConvertAllNib -and $name -notin $Job.OutputPlan.DiskNames){continue}
-        $target=[IO.Path]::ChangeExtension($name,'.g64').Replace('\','/')
-        if($manifest.ContainsKey($target)){throw 'Converted media would replace another archive member.'}
-        $file=$manifest[$name];$manifest.Remove($name);$file.Converter='Nib';$file.Hash='';$file.Length=-1;$manifest[$target]=$file
     }
     return $manifest
 }
@@ -397,8 +390,8 @@ function Start-ApplicationBrokerBatch {
                 $plan=& $module {param($job,$src,$dst,$storage,$media)Get-PlaylistOutputPlan $job $src $dst $storage $media} $sourceJob $src $dst $Storage $media
                 $sourceJob.OutputPlan=$plan;$job.Plan=$plan;$job.Writes=@($plan.Writes);$job.Retired=@($plan.Retired)
                 $job.Files=Get-ApplicationBrokerExpectedFiles $state $module $sourceJob
-                if($plan.ZipMode -and @($job.Files.Values | Where-Object {$_.Converter}).Count -eq 0){$job.ContainerHash=$state.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $sourceJob.Zip $src)].Hash}
-                $job.DiskNames=@($media.DiskNames | ForEach-Object {if([IO.Path]::GetExtension($_) -in '.nib','.nbz'){[IO.Path]::ChangeExtension($_,'.g64').Replace('\','/')}else{$_}})
+                if($plan.ZipMode){$job.ContainerHash=$state.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $sourceJob.Zip $src)].Hash}
+                $job.DiskNames=@($media.DiskNames)
                 $job.DataKind='Folder';if($plan.ZipMode){$job.DataKind='Zip'}elseif($plan.SingleFile){$job.DataKind='File'}
                 if($plan.IsMulti){
                     $prefix=('../'*(@($sourceJob.Stem.Split('/')).Count-1))+'.hidden/'+$sourceJob.Stem
@@ -435,9 +428,8 @@ function Start-ApplicationBrokerBatch {
                     $target=[IO.Path]::ChangeExtension($name,'.g64').Replace('\','/');if($job.Files.ContainsKey($target)){throw 'Converted media name collides with existing image.'}
                     $file=$job.Files[$name];$job.Files.Remove($name);$file.Converter='Nib';$file.Hash='';$file.Length=-1;$job.Files[$target]=$file
                 }
-                $job.DiskNames=@(& $module {param($names)$names | Where-Object {[IO.Path]::GetExtension($_) -eq '.g64'} | Sort-Object @{Expression={Get-NaturalDiskKey $_}},@{Expression={$_}}} @($job.Files.Keys))
+                $job.DiskNames=@(& $module {param($names)$names | Where-Object {[IO.Path]::GetExtension($_) -eq '.g64'} | Sort-Object} @($job.Files.Keys))
                 $job.Writes=@([pscustomobject]@{Destination=$plan.Destination;Folder=$plan.Folder})
-                if($plan.Multi){$job.Writes+=[pscustomobject]@{Destination=$plan.Playlist;Folder=$false};$separator='#';if($plan.Folder){$separator='/'};$lines=@($job.DiskNames | ForEach-Object {$plan.MediaPath+$separator+$_});foreach($line in $lines){if([Text.Encoding]::UTF8.GetByteCount($line) -gt 1000){throw 'Playlist line exceeds the supported length.'}};$job.PlaylistText=($lines -join "`n")+"`n"}
                 $job.Retired=@($plan.Retired);$job.DataKind='Zip';if($plan.Folder){$job.DataKind='Folder'}
                 $job.Conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
             } catch {$job.BlockedReason=$_.Exception.Message}
@@ -720,7 +712,7 @@ function Complete-ApplicationBrokerBatch {
             $job=$batch.Jobs[$result.JobId];$playlist='';$destination='';$diskImages=0
             if($job.Plan){
                 if($batch.Operation -eq 'Playlist'){$diskImages=@($job.Plan.DiskNames).Count;$destination=$job.Plan.RelativeData;if($job.Plan.IsMulti){$playlist=Get-ApplicationBrokerRelative $job.Plan.M3uPath $dst}}
-                elseif($batch.Operation -eq 'C64'){$diskImages=$job.SourceJob.Images;$destination=$job.Plan.RelativeData;if($job.Plan.Multi){$playlist=$job.Plan.RelativePlaylist}}
+                elseif($batch.Operation -eq 'C64'){$diskImages=$job.SourceJob.Images;$destination=$job.Plan.RelativeData}
                 else {$diskImages=1;$destination=$job.Plan.RelativeData}
             }
             $result | Add-Member NoteProperty System $batch.System

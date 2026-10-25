@@ -57,7 +57,8 @@ function Get-ApplicationPromptModel {
         return [pscustomobject]@{Title=($title+' / originals');Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
     }
     if($Kind -eq 'C64Mode') {
-        $lines=@('Convert NIB/NBZ to G64.',
+        $lines=@('Convert NIB/NBZ game ZIPs to G64.',
+            'Visible output; use menu 2 for playlists.',
             '1. ZIP output / KEEP originals (default)','2. ZIP output / REMOVE after verified success',
             '3. Folder output / KEEP originals','4. Folder output / REMOVE after verified success',
             'B. Back to main menu     Q. Exit')

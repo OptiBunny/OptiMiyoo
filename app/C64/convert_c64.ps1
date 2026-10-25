@@ -79,41 +79,25 @@ function Get-C64SourceZips([string]$Directory) {
     }
 }
 
-function Get-C64OutputPlan([string]$RelativeZip,[int]$Images,[string]$Storage,[string]$DestinationRoot) {
+function Get-C64OutputPlan([string]$RelativeZip,[string]$Storage,[string]$DestinationRoot) {
     $relative=$RelativeZip.Replace('\','/')
     $stem=$relative.Substring(0,$relative.Length-[IO.Path]::GetExtension($relative).Length)
-    $multi=$Images -gt 1
     $folder=$Storage -eq 'Folders'
     $relativeData=$stem
-    if ($multi) {$relativeData='.hidden/'+$stem}
     if (-not $folder) {$relativeData+='.zip'}
-    $targets=@(
-        [pscustomobject]@{Name=$stem+'.zip';Folder=$false;Role='Visible'}
-        [pscustomobject]@{Name=$stem;Folder=$true;Role='Visible'}
-        [pscustomobject]@{Name=$stem+'.m3u';Folder=$false;Role='Playlist'}
-        [pscustomobject]@{Name='.hidden/'+$stem+'.zip';Folder=$false;Role='Hidden'}
-        [pscustomobject]@{Name='.hidden/'+$stem;Folder=$true;Role='Hidden'}
-    )
-    foreach ($target in $targets) {
-        $target | Add-Member NoteProperty Destination ([IO.Path]::GetFullPath((Join-Path $DestinationRoot $target.Name.Replace('/',[IO.Path]::DirectorySeparatorChar))))
-    }
-    $data=@($targets | Where-Object {$_.Name -eq $relativeData})[0]
-    $playlist=@($targets | Where-Object {$_.Role -eq 'Playlist'})[0]
-    $retired=@($targets | Where-Object {$_.Name -ne $relativeData -and (-not $multi -or $_.Role -ne 'Playlist')})
-    $depth=@($stem.Split('/')).Count-1
-    return [pscustomobject]@{Stem=$stem;Destination=$data.Destination;Playlist=$playlist.Destination;
-        RelativeData=$relativeData;RelativePlaylist=($stem+'.m3u');MediaPath=(('../'*$depth)+$relativeData);
-        Targets=$targets;Retired=$retired;Multi=$multi;Folder=$folder}
+    $target=[pscustomobject]@{Name=$relativeData;Folder=$folder;Role='Visible';
+        Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData.Replace('/',[IO.Path]::DirectorySeparatorChar)))}
+    return [pscustomobject]@{Stem=$stem;Destination=$target.Destination;RelativeData=$relativeData;
+        Targets=@($target);Retired=@();Folder=$folder}
 }
 
 function Set-C64OutputConflicts([object[]]$Jobs,[string]$SourcePrefix,[string]$DestinationRoot,[string]$Storage) {
-    # Reserve installation AND retirement paths before processing any source.
-    # A hidden-data collision must never be resolved by processing order.
+    # Reserve actual conversion destinations before processing any source.
     $owners=@{}; $planned=0
-    Show-PreparationProgress 'Planning game outputs' 'Collecting installation and retirement paths.' 0 $Jobs.Count 'ZIPs'
+    Show-PreparationProgress 'Planning game outputs' 'Collecting conversion destinations.' 0 $Jobs.Count 'ZIPs'
     foreach ($job in $Jobs) {
         $relative=$job.Zip.FullName.Substring($SourcePrefix.Length).Replace('\','/')
-        $job.Plan=Get-C64OutputPlan $relative $job.Images $Storage $DestinationRoot
+        $job.Plan=Get-C64OutputPlan $relative $Storage $DestinationRoot
         $planned++; Show-PreparationProgress 'Planning game outputs' $relative $planned $Jobs.Count 'ZIPs'
         if ($job.Images -eq 0 -and -not $job.ScanError) {continue}
         foreach ($part in $job.Plan.Stem.Split('/')) {
@@ -131,7 +115,7 @@ function Set-C64OutputConflicts([object[]]$Jobs,[string]$SourcePrefix,[string]$D
     foreach ($key in $keys) {
         $participants=$owners[$key]
         if ($participants.Count -gt 1) {
-            foreach ($job in $participants) {$job.ScanError='Source ZIPs share an output or obsolete-output path. Rename the conflicting game or collection; no conflicting outputs were written.'}
+            foreach ($job in $participants) {$job.ScanError='Source ZIPs share an output path. Rename the conflicting game or collection; no conflicting outputs were written.'}
         }
         $parent=$key
         while ($parent.Contains('/')) {
@@ -154,32 +138,44 @@ function Assert-C64MediaName([string]$Name) {
     }
 }
 
-function Get-C64OwnedPlaylist([string]$Path,[string]$Stem) {
-    $names=New-Object 'System.Collections.Generic.List[string]'
-    if (-not (Test-Path -LiteralPath $Path)) {return ,$names.ToArray()}
-    $item=Get-Item -LiteralPath $Path -Force
-    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Existing playlist is a link or has the wrong type; output left alone.'}
-    $depth=@($Stem.Split('/')).Count-1
-    $prefix=('../'*$depth)+'.hidden/'+$Stem
-    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-    $reader=$null
-    try {
-        if ($stream.Length -gt 1MB) {throw 'Existing playlist exceeds the 1 MiB size limit; output left alone.'}
-        $reader=New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
-        while ($null -ne ($line=$reader.ReadLine())) {
-            if ($line.Length -gt 8192 -or $names.Count -ge 20000) {throw 'Existing playlist exceeds the line or entry limit; output left alone.'}
-            if ([string]::IsNullOrWhiteSpace($line)) {continue}
-            if ($line.StartsWith($prefix+'/',[StringComparison]::Ordinal)) {$name=$line.Substring($prefix.Length+1)}
-            elseif ($line.StartsWith($prefix+'.zip#',[StringComparison]::Ordinal)) {$name=$line.Substring($prefix.Length+5)}
-            else {throw 'Existing playlist does not belong exclusively to this game; output left alone.'}
-            Assert-C64MediaName $name
-            Assert-PlaylistName $name
-            if ([IO.Path]::GetExtension($name) -ne '.g64') {throw 'Existing playlist contains unexpected media; output left alone.'}
-            $names.Add($name)
+function Read-C64PlaylistLines([string]$Path,[string]$Root) {
+    $text=Read-OptiTextFile $Path 1MB 'Existing playlist' $Root
+    $lines=@($text -split '\r\n|\n|\r')
+    # A trailing newline is not an extra playlist entry.
+    if ($lines.Count -gt 0 -and $lines[-1] -eq '') {$lines=@($lines | Select-Object -First ($lines.Count-1))}
+    if ($lines.Count -gt 20000) {throw 'Existing playlist exceeds the entry limit; output left alone.'}
+    foreach ($line in $lines) {if ($line.Length -gt 8192) {throw 'Existing playlist exceeds the line limit; output left alone.'}}
+    return ,$lines
+}
+
+function Assert-C64OutputUnreferenced($Plan,[string]$DestinationRoot) {
+    if (-not (Test-Path -LiteralPath $Plan.Destination)) {return}
+    $pending=New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push($DestinationRoot);$count=0
+    while ($pending.Count -gt 0) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $pending.Pop() -Force)) {
+            if (++$count -gt 100000) {throw 'Playlist ownership inspection exceeds its entry limit; output left alone.'}
+            if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                if ($file.PSIsContainer -or $file.Extension -in '.m3u','.m3u8') {throw 'An output link prevents checking playlist references; output left alone.'}
+                continue
+            }
+            if ($file.PSIsContainer) {$pending.Push($file.FullName);continue}
+            if ($file.Extension -notin '.m3u','.m3u8') {continue}
+            foreach ($line in (Read-C64PlaylistLines $file.FullName $DestinationRoot)) {
+                $reference=$line.Trim()
+                if (-not $reference -or $reference.StartsWith('#')) {continue}
+                $reference=($reference -split '#',2)[0].Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
+                try {
+                    if ([IO.Path]::IsPathRooted($reference)) {$full=[IO.Path]::GetFullPath($reference)}
+                    else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $reference))}
+                } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
+                if ($full.Equals($Plan.Destination,[StringComparison]::OrdinalIgnoreCase) -or
+                    ($Plan.Folder -and $full.StartsWith($Plan.Destination+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase))) {
+                    throw ('An existing playlist uses this output: '+$file.FullName+'. Output left alone; use a separate DST.')
+                }
+            }
         }
-    } finally {if ($reader) {$reader.Dispose()} else {$stream.Dispose()}}
-    if ($names.Count -eq 0) {throw 'Existing playlist is empty; output left alone.'}
-    return ,$names.ToArray()
+    }
 }
 
 function Get-C64ExistingMedia($Target,[string[]]$ExpectedFiles=@()) {
@@ -217,33 +213,25 @@ function Get-C64ExistingMedia($Target,[string[]]$ExpectedFiles=@()) {
 function Assert-C64OwnedOutputs($Plan,[string[]]$IncomingNames,[string]$DestinationRoot,[string[]]$IncomingFiles=@()) {
     foreach ($target in $Plan.Targets) {
         Assert-PlainOutputParents $target.Destination $DestinationRoot
-        if (Test-Path -LiteralPath $target.Destination) {
-            $item=Get-Item -LiteralPath $target.Destination -Force
-            if ([bool]$item.PSIsContainer -ne [bool]$target.Folder -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw ('Existing output is a link or has the wrong type: '+$target.Destination)}
-        }
-    }
-    $oldNames=Get-C64OwnedPlaylist $Plan.Playlist $Plan.Stem
-    $allowed=@($IncomingNames)+@($oldNames)
-    foreach ($target in $Plan.Targets) {
-        if ($target.Role -eq 'Playlist' -or -not (Test-Path -LiteralPath $target.Destination)) {continue}
+        if (-not (Test-Path -LiteralPath $target.Destination)) {continue}
+        $item=Get-Item -LiteralPath $target.Destination -Force
+        if ([bool]$item.PSIsContainer -ne [bool]$target.Folder -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw ('Existing output is a link or has the wrong type: '+$target.Destination)}
         $names=Get-C64ExistingMedia $target $IncomingFiles
-        $retiring=-not $target.Destination.Equals($Plan.Destination,[StringComparison]::OrdinalIgnoreCase)
-        if ($retiring -and $names.Count -eq 0) {throw ('Cannot establish ownership of obsolete output; output left alone: '+$target.Destination)}
         foreach ($name in $names) {
-            # Direct overwrite may replace a game's top-level disk names. An
-            # inferred retirement or nested disk must match known game media.
-            if (($retiring -or $name.Contains('/')) -and $name -notin $allowed) {
+            # An approved replacement may change top-level disk names, but must
+            # not adopt nested media belonging to another game or collection.
+            if ($name.Contains('/') -and $name -notin $IncomingNames) {
                 throw ('Existing output contains media outside this game layout; output left alone: '+$target.Destination)
             }
         }
     }
-    # A collection cannot be written underneath another game's media folder.
-    Assert-C64CollectionOutput $null $Plan.Playlist $DestinationRoot
+    Assert-C64OutputUnreferenced $Plan $DestinationRoot
+    $folderPath=$null;if ($Plan.Folder) {$folderPath=$Plan.Destination}
+    Assert-C64CollectionOutput $folderPath $Plan.Destination $DestinationRoot $IncomingNames
 }
 
-function Assert-C64CollectionOutput([string]$CollectionPath,[string]$PlaylistPath,[string]$DestinationRoot,[string[]]$ExpectedMedia) {
-    # Older releases could put another game's playlist inside the directory
-    # treated as this game's legacy output. Never migrate/delete a collection.
+function Assert-C64CollectionOutput([string]$CollectionPath,[string]$OutputPath,[string]$DestinationRoot,[string[]]$ExpectedMedia) {
+    # Never replace a collection containing another game's playlist or media.
     if ($CollectionPath -and (Test-Path -LiteralPath $CollectionPath -PathType Container)) {
         $prefix=$CollectionPath.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
         $pending=New-Object 'System.Collections.Generic.Stack[string]'
@@ -266,10 +254,9 @@ function Assert-C64CollectionOutput([string]$CollectionPath,[string]$PlaylistPat
             }
         }
     }
-    if ($PlaylistPath) {
-        # In folder mode, a child set would be written inside an existing
-        # parent game's hidden media. Block that case before either is touched.
-        $parent=[IO.Path]::GetDirectoryName($PlaylistPath)
+    if ($OutputPath) {
+        # A child output must not be written inside another game's media.
+        $parent=[IO.Path]::GetDirectoryName($OutputPath)
         while ($parent -and -not $parent.Equals($DestinationRoot,[StringComparison]::OrdinalIgnoreCase)) {
             $parentPlaylist=$parent+'.m3u'
             if (Test-Path -LiteralPath $parentPlaylist -PathType Leaf) {
@@ -307,7 +294,6 @@ function Write-Log([string]$Message) {
         }
     }
 }
-
 
 function Copy-WithProgress {
     param([IO.Stream]$InputStream, [IO.Stream]$OutputStream,
@@ -518,17 +504,13 @@ function New-FolderWithProgress([string]$Directory, [string]$Destination) {
     return $expected
 }
 
-function Confirm-Overwrite([string]$Destination, [bool]$Folder, [bool]$PlaylistSet=$false) {
+function Confirm-Overwrite([string]$Destination, [bool]$Folder) {
     if ($script:ExistingPolicy -eq 'Overwrite') { return $true }
     if ($script:ExistingPolicy -eq 'Skip') { return $false }
     foreach ($id in 2, 1, 0) { Write-Progress -Id $id -Activity 'Waiting for overwrite choice' -Completed }
     $paths=@($Destination -split '\r?\n *')
     $warnings=@('Skip: no conversion or comparison.', 'Skipped originals stay in SRC.')
     if ($Folder) {$warnings+='Replacing this folder replaces ALL contents.'}
-    if ($PlaylistSet) {
-        $warnings+='Replaces playlist + hidden media together.'
-        $warnings+='Replaces obsolete outputs; avoids duplicates.'
-    }
     $choices=@(Get-OverwriteChoiceRows)
     $invalid=$false
     $script:Clock.Stop()
@@ -578,42 +560,6 @@ function Move-OutputPath([string]$Source, [string]$Destination, [bool]$Folder) {
     else { [IO.File]::Move($Source, $Destination) }
 }
 
-function Get-NaturalDiskKey([string]$Name) {
-    # Compare numbers numerically: Disk 2 sorts before Disk 10.
-    return [regex]::Replace($Name.ToLowerInvariant(), '\d+', {
-        param($match)
-        $match.Value.TrimStart('0').PadLeft(20, '0')
-    })
-}
-
-function Assert-PlaylistName([string]$Name) {
-    # These characters are VICE playlist syntax, not literal filename characters.
-    if ($Name.IndexOfAny([char[]]"#|:`r`n") -ge 0) {
-        throw "Cannot safely reference this name in a VICE M3U: $Name. Rename it without #, |, colon or line breaks. Original kept."
-    }
-}
-
-function New-GamePlaylist([string]$Directory, [string]$MediaPath, [string]$Destination, [bool]$Folder) {
-    Assert-PlaylistName $MediaPath
-    $prefixLength = $Directory.TrimEnd([IO.Path]::DirectorySeparatorChar).Length + 1
-    $names = @(Get-ChildItem -LiteralPath $Directory -Recurse -File -Force |
-        Where-Object { $_.Extension -eq '.g64' } |
-        ForEach-Object { $_.FullName.Substring($prefixLength).Replace('\', '/') } |
-        Sort-Object @{ Expression = { Get-NaturalDiskKey $_ } }, @{ Expression = { $_ } })
-    if ($names.Count -lt 2) { throw 'A multi-disk playlist must contain at least two disk images.' }
-    $lines = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($name in $names) {
-        Assert-PlaylistName $name
-        if ($Folder) { $line = $MediaPath + '/' + $name }
-        else { $line = $MediaPath + '#' + $name }
-        if ([Text.Encoding]::UTF8.GetByteCount($line) -gt 1000) { throw "Playlist path is too long for VICE: $name" }
-        $lines.Add($line)
-    }
-    # UTF-8 without BOM, forward slashes, LF endings, no quotes around spaces.
-    [IO.File]::WriteAllText($Destination, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
-    Write-Log ('PLAYLIST ORDER: ' + ($names -join ' -> '))
-}
-
 function Assert-PlainOutputParents([string]$Path, [string]$Root) {
     if (Get-Command Get-ApplicationValidationRoot -ErrorAction SilentlyContinue) {$Root=Get-ApplicationValidationRoot $Path $Root}
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -631,8 +577,8 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
 }
 
 function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$LegacyFolder, [bool]$Overwrite, [object[]]$Retired=@()) {
-    # A playlist and its disk data are one replacement. Roll back both if either
-    # install fails; never leave a new playlist pointing at missing/old data.
+    # Verify replacement outputs as one transaction and restore previous bytes
+    # if installation or verification fails.
     $backups = New-Object 'System.Collections.Generic.List[object]'
     $installed = New-Object 'System.Collections.Generic.List[object]'
     $locks = New-Object 'System.Collections.Generic.List[System.IDisposable]'
@@ -671,8 +617,8 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
             $installed.Add($item)
         }
         # Native verification leases pin the destination's parent directories.
-        # Install the whole set before taking them, so a data lease cannot block
-        # its playlist's rename. Verify every installed hash while holding those
+        # Install all staged paths before taking them, so a verification lease
+        # cannot block a remaining rename. Verify every installed hash with those
         # same leases before returning; any failure still rolls back the set.
         foreach ($lock in (Open-SourcePolicyOutputs $Items {
             param($stage,$detail,$done,$total)
@@ -711,7 +657,6 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
     } finally {foreach ($parentLock in $parentLocks) {$parentLock.Dispose()}}
 }
 
-
 $script:ExistingPolicy = $Existing
 $script:Log = $null; $script:ReportProblem=$false; $exitCode = 0
 $script:Clock=[Diagnostics.Stopwatch]::StartNew()
@@ -719,10 +664,6 @@ $script:Total=0; $script:Processed=0; $script:Ok=0; $script:Skipped=0; $script:F
 . (Join-Path $ScriptDir 'display.ps1')
 . (Join-Path $ScriptDir 'core_support.ps1')
 try {
-    $profileData=Get-Content -LiteralPath (Join-Path $ScriptDir 'systems.json') -Raw | ConvertFrom-Json
-    $profile=@($profileData) | Where-Object {$_.Folder -eq 'COMMODORE'}
-    $support=Get-PlaylistSupport $profile $OnionRoot
-    if (-not $support.CanBuild) {Write-C64Text ('UNSUPPORTED: '+$support.Reason); exit 2}
     if ([string]::IsNullOrWhiteSpace($Root)) { $Root = Split-Path -Parent $ScriptDir }
     $Root = (Resolve-Path -LiteralPath $Root).ProviderPath
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw 'Root must be the folder containing SRC and DST.' }
@@ -763,7 +704,7 @@ try {
         if ($removeOriginals) {Write-C64Text '  Originals are removed only after ALL their outputs are verified in DST.' -ForegroundColor Magenta}
         else {Write-C64Text '  Originals stay in SRC.' -ForegroundColor Cyan}
     }
-    Write-C64Text '  Multi-disk: Game.m3u + .hidden/Game.zip (or a folder in options 3/4).' -ForegroundColor Cyan
+    Write-C64Text '  Converted disks are saved in Game.zip (or Game/ in folder mode).' -ForegroundColor Cyan
     Write-C64Text '  Already-converted G64 ZIPs are supported; nibconv is needed only for NIB/NBZ.'
     Write-C64Text '  Existing outputs: Yes / No / Yes to all / No to all (all modes).'
     Write-C64Text '  No / No to all always keeps the original in SRC; no conversion or comparison.'
@@ -810,7 +751,7 @@ try {
     Write-Log ('Source policy: '+$SourcePolicy)
         $script:Processed = 0; $script:Ok = 0; $script:Skipped = 0; $script:Failed = 0; $script:SavedImages = 0
         $script:Removed = 0; $script:RemoveFailed = 0
-        $script:Overwritten = 0; $script:Playlists = 0
+        $script:Overwritten = 0
         $script:NoImages = 0; $script:Declined = 0
         $results = New-Object 'System.Collections.Generic.List[object]'
         $script:LastDraw = -1000
@@ -821,26 +762,22 @@ try {
             Set-ApplicationCurrentJob $relativeZip
             $plan=$job.Plan
             $relativeOutput=$plan.RelativeData
-            $isMulti=$plan.Multi
             $destination=$plan.Destination
-            $playlistPath=$null; $relativePlaylist=''; $mediaPath=$plan.MediaPath
-            if ($isMulti) {$playlistPath=$plan.Playlist; $relativePlaylist=$plan.RelativePlaylist}
             $script:ZipName = $relativeZip; $script:ZipFraction = 0
             $script:UiLastStage=''
             Write-Event 'GAME' ('{0}/{1} | {2}' -f ($script:Processed+1),$script:Total,$relativeZip)
-            $tempBase = $null; $newZip = $null; $newFolder = $null; $newM3u = $null; $playlistCommit = $null
+            $tempBase = $null; $newZip = $null; $newFolder = $null; $outputCommit = $null
             $sourceLease=$null; $installItems=@()
             $overwrite = $false; $existingOutput = $false
             $removedBefore = $script:Removed
             $result = [pscustomobject]@{
-                Source = $relativeZip; Destination = $relativeOutput; Playlist = $relativePlaylist; DiskImages = $job.Images
+                Source = $relativeZip; Destination = $relativeOutput; DiskImages = $job.Images
                 Result = 'Failed'; Original = 'Kept in SRC'; Detail = ''
             }
             try {
                 Show-Progress 0 'Opening ZIP' $zip.FullName -1 -Force
                 Write-Log ('ZIP: ' + $zip.FullName)
                 if (-not $destination.StartsWith($destinationPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Destination leaves DST.' }
-                if ($playlistPath -and -not $playlistPath.StartsWith($destinationPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Playlist leaves DST.' }
                 if ($job.ScanError) { throw $job.ScanError }
                 if ($job.Images -eq 0) {
                     $script:Skipped++; $script:NoImages++
@@ -850,11 +787,10 @@ try {
                     continue
                 }
                 Assert-PlainOutputParents $destination $destinationRoot
-                if ($playlistPath) { Assert-PlainOutputParents $playlistPath $destinationRoot }
                 $conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination} | ForEach-Object {$_.Destination})
                 $existingOutput = $conflicts.Count -gt 0
                 if ($existingOutput) {
-                    $overwrite = Confirm-Overwrite ($conflicts -join "`n                  ") ($Mode -eq 'Folders') $isMulti
+                    $overwrite = Confirm-Overwrite ($conflicts -join "`n                  ") ($Mode -eq 'Folders')
                     Write-Log ('EXISTING OUTPUT: overwrite={0}; policy={1}; path={2}' -f $overwrite, $script:ExistingPolicy, $destination)
                     if (-not $overwrite) {
                         $script:Skipped++
@@ -926,51 +862,27 @@ try {
                 }
                 $zip.Refresh()
                 if ($zip.Length -ne $sourceLength -or $zip.LastWriteTimeUtc -ne $sourceTime) { throw 'Source ZIP changed during processing; save cancelled.' }
-                if ($isMulti) {
-                    $playlistDirectory = [IO.Path]::GetDirectoryName($playlistPath)
-                    [void][IO.Directory]::CreateDirectory($playlistDirectory)
-                    $newM3u = Join-Path $playlistDirectory ('.ppg_' + [Guid]::NewGuid().ToString('N') + '.tmp')
-                    New-GamePlaylist $extractDir $mediaPath $newM3u ($Mode -eq 'Folders')
-                    $m3uHash = (Get-FileHash -LiteralPath $newM3u -Algorithm SHA256).Hash
-                    $stagedData = $newZip; $dataHash = $null
-                    if ($Mode -eq 'Folders') { $stagedData = $newFolder }
-                    else { $dataHash = $newZipHash }
-                    $installItems = @(
-                        [pscustomobject]@{ Staged = $stagedData; Destination = $destination; Folder = ($Mode -eq 'Folders'); Hash = $dataHash; Manifest = $folderManifest }
-                        [pscustomobject]@{ Staged = $newM3u; Destination = $playlistPath; Folder = $false; Hash = $m3uHash }
-                    )
-                    Show-Progress 0.99 'Saving verified playlist and hidden disks' $relativePlaylist -1 -Force
-                    Assert-C64OwnedOutputs $plan $expectedMedia $destinationRoot $expectedFiles
-                    $playlistCommit = Install-PlaylistSet $installItems $null $false $overwrite $plan.Retired
-                }
-                # Single-disk outputs keep the existing ZIP/folder layout.
-                elseif ($Mode -eq 'Folders') {
+                if ($Mode -eq 'Folders') {
                     Show-Progress 0.99 'Saving verified folder to DST' $relativeOutput -1 -Force
                     $folderItem=[pscustomobject]@{Staged=$newFolder;Destination=$destination;Folder=$true;Manifest=$folderManifest}
                     Assert-C64OwnedOutputs $plan $expectedMedia $destinationRoot $expectedFiles
                     $installItems=@($folderItem)
-                    $playlistCommit=Install-PlaylistSet $installItems $null $false $overwrite $plan.Retired
+                    $outputCommit=Install-PlaylistSet $installItems $null $false $overwrite
                 } else {
                     Show-Progress 0.99 'Saving verified ZIP to DST' $relativeOutput -1 -Force
                     $fileItem=[pscustomobject]@{Staged=$newZip;Destination=$destination;Folder=$false;Hash=$newZipHash}
                     Assert-C64OwnedOutputs $plan $expectedMedia $destinationRoot $expectedFiles
                     $installItems=@($fileItem)
-                    $playlistCommit=Install-PlaylistSet $installItems $null $false $overwrite $plan.Retired
+                    $outputCommit=Install-PlaylistSet $installItems $null $false $overwrite
                 }
                 Complete-ApplicationCurrentJob
-                $didOverwrite = $playlistCommit -and $playlistCommit.Replaced
+                $didOverwrite = $outputCommit -and $outputCommit.Replaced
                 if ($didOverwrite) { $script:Overwritten++ }
                 $result.Result = 'Written'
                 $result.Detail = 'New output saved and verified.'
                 if ($didOverwrite) { $result.Result = 'Overwritten'; $result.Detail = 'Existing output replaced with verified output.' }
                 $script:Ok++; $script:SavedImages += $g64s.Count
                 Write-Log ('OK: saved {0} G64 image(s) to {1}' -f $g64s.Count, $destination)
-                if ($isMulti) {
-                    $script:Playlists++
-                    $result.Detail += ' M3U created; disk data in .hidden.'
-                    Write-Log ('PLAYLIST: ' + $playlistPath)
-                    Write-Event 'READY' ('M3U READY: {0} - {1} disk sides in .hidden.' -f $relativePlaylist, $g64s.Count)
-                }
                 if ($removeOriginals) {
                     # Release the read lease only when the verified output is held.
                     # Removal acquires its own handle and rechecks the initial hash.
@@ -986,9 +898,8 @@ try {
                 Write-Notice 'FAILED' ('{0} - {1}' -f $zip.Name, $_.Exception.Message)
             } finally {
                 if ($sourceLease) {$sourceLease.Dispose()}
-                if ($playlistCommit) { foreach ($lock in $playlistCommit.Locks) { $lock.Dispose() } }
+                if ($outputCommit) { foreach ($lock in $outputCommit.Locks) { $lock.Dispose() } }
                 $preserved=@($installItems | Where-Object {$_.PSObject.Properties['PreserveStaging'] -and $_.PreserveStaging} | ForEach-Object {$_.Staged})
-                if ($newM3u -notin $preserved) {Remove-C64WorkPath $newM3u $destinationRoot}
                 if ($newZip -notin $preserved) {Remove-C64WorkPath $newZip $destinationRoot}
                 if ($newFolder -notin $preserved) {Remove-C64WorkPath $newFolder $destinationRoot}
                 Remove-C64WorkPath $tempBase ([IO.Path]::GetTempPath())
@@ -1017,7 +928,6 @@ try {
         Write-C64Text ('  Total source ZIPs: {0:N0}' -f $script:Total) -ForegroundColor White
         Write-C64Text ('  Outputs written: {0:N0} (new: {1:N0}, overwritten: {2:N0})' -f $script:Ok, ($script:Ok - $script:Overwritten), $script:Overwritten) -ForegroundColor Cyan
         Write-C64Text ('  Skipped: {0:N0} (no disk images: {1:N0}; overwrite declined: {2:N0})' -f $script:Skipped, $script:NoImages, $script:Declined) -ForegroundColor Yellow
-        Write-C64Text ('  Multi-disk M3U playlists written: {0:N0}' -f $script:Playlists) -ForegroundColor Cyan
         Write-C64Text ('  Failed: {0:N0}' -f $script:Failed) -ForegroundColor Magenta
         Write-C64Text ('  Disk images saved: {0:N0}/{1:N0}   Elapsed: {2}' -f $script:SavedImages, $script:TotalImages, (Format-Duration $script:Clock.Elapsed.TotalSeconds)) -ForegroundColor Gray
         if (-not (Test-ApplicationWorker)) {

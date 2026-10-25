@@ -40,7 +40,7 @@
     ],
     "Zip": true,
     "Playlist": ".m3u",
-    "Note": "NIB/NBZ convert to G64. G64, TAP and T64 keep their bytes. Tape-side swapping is checked separately from disk playlists.",
+    "Note": "Disk and tape images keep their original formats and bytes. Use C separately for NIB/NBZ-to-G64 conversion. Tape-side swapping is checked separately from disk playlists.",
     "DefaultCore": "vice_x64_libretro.so",
     "DefaultSupported": true,
     "SupportedCores": [
@@ -193,6 +193,7 @@
     "Name": "ZX Spectrum",
     "Core": "Fuse",
     "Extensions": [
+      ".ipf",
       ".dsk",
       ".trd",
       ".scl"

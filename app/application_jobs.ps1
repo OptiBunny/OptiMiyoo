@@ -50,6 +50,7 @@ function Invoke-ApplicationNativeRequest {
     $brokerState=Get-ApplicationBrokerState $BrokerSession
     $batch=$brokerState.Batch
     if (-not $batch -or $batch.Completed -or [string]$Payload.BatchId -cne [string]$batch.BatchId) {throw 'Native request has no active batch.'}
+    if ($batch.Operation -notin 'C64','ZX') {throw 'Playlist batches cannot run native converters. Use C or Z for conversion.'}
     $work=[string]$brokerState.WorkRoot
     if ($Operation -ne 'Native.Start') {
         $id=[string]$Payload.TaskId
@@ -77,7 +78,7 @@ function Invoke-ApplicationNativeRequest {
                         $outputLease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($nativeOutput)
                         if ($outputLease.Stream.Length -gt 512MB) {throw 'Native output exceeds 512 MiB.'}
                         if ($job.ReceiptKind -eq 'Nib') {
-                            $validator=Get-ApplicationBrokerModule Playlist
+                            $validator=Get-ApplicationBrokerModule C64
                             & $validator {param($path) Assert-G64 $path} $nativeOutput
                         } else {
                             $validator=Get-ApplicationBrokerModule ZX
@@ -115,6 +116,7 @@ function Invoke-ApplicationNativeRequest {
     $kind=[string]$Payload.Kind;$mode=[string]$Payload.Mode
     if ($kind -notin @('Nib','HxcX64','HxcX86') -or $mode -notin @('Convert','Modules','Info') -or
         ($kind -eq 'Nib' -and $mode -ne 'Convert')) {throw 'Unknown native operation.'}
+    if (($batch.Operation -eq 'C64') -ne ($kind -eq 'Nib')) {throw 'Native converter does not match the active batch.'}
     $job=[pscustomobject]@{Id=[Guid]::NewGuid().ToString('N');BatchId=[string]$batch.BatchId;Native=$null;
         Out=$null;Err=$null;InputLease=$null;ParentLease=$null;InputHash=$null;Destination=$null;
         ReceiptKind=$(if($kind -eq 'Nib'){'Nib'}else{'HxC'});Timer=[Diagnostics.Stopwatch]::StartNew();

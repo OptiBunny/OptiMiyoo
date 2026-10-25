@@ -16,10 +16,11 @@ first. Keep alternate formats of the same disc in separate batches.
 Keep CUE tracks, SBI files, and other companion files with their media. CUE
 references must be relative, use forward slashes, and match filename case.
 
-Run the matching menu option, then copy `DST` contents—including `.hidden`—to
-its [Onion ROM folder](#systems-and-rom-folders) and refresh the game list.
-Multi-disc games get a visible playlist with media under `.hidden`; single-media
-games stay visible. `SRC` and `DST` are shared by all modes and are never emptied
+Run the matching menu option, then copy `DST` contents—including `.hidden` when
+present—to its [Onion ROM folder](#systems-and-rom-folders) and refresh the game list.
+Playlist modes give multi-disc games a visible playlist with media under `.hidden`;
+single-media games stay visible. The **C** and **Z** converters produce visible
+converted media. `SRC` and `DST` are shared by all modes and are never emptied
 automatically.
 
 ## Menu guide
@@ -31,8 +32,8 @@ as described below.
 | Main menu | Action |
 | --- | --- |
 | **1–10** | Create playlists for a [numbered system](#systems-and-rom-folders). Enter selects **1: Amiga**. |
-| **2** | Create C64 disk and TAP/T64 tape-side playlists from loose files or ZIPs. NIB/NBZ images convert to G64 automatically. |
-| **C** | Batch-convert C64 NIB/NBZ game ZIPs to G64; multi-disk ZIPs also get playlists. |
+| **2** | Create C64 disk and TAP/T64 tape-side playlists, keeping original formats including NIB/NBZ. |
+| **C** | Convert C64 NIB/NBZ game ZIPs to visible G64 ZIPs or folders. |
 | **Z** | Convert ZX Spectrum IPF → DSK. |
 | **S** | Check an SD card's selected cores and enable supported playlist extensions. |
 | **D** | Preview the workflow without changing game or SD files. |
@@ -44,8 +45,7 @@ as described below.
 After choosing a numbered system, select storage:
 
 - **1: Auto** (default) keeps supported Amiga/C64/VIC-20 ZIPs and links to their
-  contents. Other ZIPs are extracted; loose files stay loose. NIB/NBZ images
-  convert to G64 where needed.
+  contents. Other ZIPs are extracted; loose files stay loose. Media formats stay unchanged.
 - **2: Folders** extracts ZIPs. Use this for games that write to their disk images.
 
 Then select **1: Keep originals** (default) or **2: Remove originals** to start.
@@ -55,8 +55,9 @@ Unsupported or unverified cores show an explanation instead of creating playlist
 
 ### C64 converter: C
 
-Put one game's NIB/NBZ or G64 disk images in each ZIP. This option processes
-ZIPs; use main-menu **2** for loose files or other C64 disk and tape formats.
+Choose **C** separately if you need G64. Put one game's NIB/NBZ or G64 disk
+images in each ZIP; this option processes ZIPs only. Menu **2** creates playlists
+from the original disk and tape formats, including NIB/NBZ, without conversion.
 
 | Option | Output | Originals in `SRC` |
 | --- | --- | --- |
@@ -66,14 +67,25 @@ ZIPs; use main-menu **2** for loose files or other C64 disk and tape formats.
 | **4** | Folders | Remove |
 
 Each choice starts the batch. NIB/NBZ images convert to G64; existing G64 images
-keep their bytes. Games with multiple disk images also receive an `.m3u` playlist
-and media under `.hidden`, so they do not need a second pass through **2**.
+keep their bytes. All converted games stay visible in `DST`, including multi-disk
+games. This step creates no playlists or `.hidden` folders.
 
 ### ZX converter: Z
+
+Choose **Z** separately if you need IPF → DSK conversion; it creates no playlists.
+Menu **10** preserves original ZX formats such as IPF and DSK when the selected
+core supports playlists. Stock Onion Fuse does not support playlist loading.
 
 Choose **1: Loose DSK files** or **2: One ZIP per DSK** (default), then Keep or
 Remove originals. ZIP suits configurations that list ZIP but lack DSK support.
 Some IPF copy-protection details cannot be preserved in DSK.
+
+### Playlists after conversion
+
+If you choose **C** or **Z** first, create a separate batch folder with `SRC` and
+`DST`. Copy only the wanted converted files, ZIPs or folders into its `SRC`,
+leaving the original input batch intact. Drag the new batch folder onto
+`OptiMiyoo.bat`, then choose the numbered system. Its selected core must support playlists.
 
 ### Existing outputs and finishing a batch
 

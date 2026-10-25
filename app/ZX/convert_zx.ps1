@@ -1091,7 +1091,7 @@ function Show-Summary {
 function Main {
     Write-Banner
     if ($Storage) {Start-Log;return (Invoke-ZXExplicitOutputs $Root $Storage $SourcePolicy $Existing)}
-    if ($Format -eq 'Ask') {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, loose files or folders.'}
+    if ($Format -eq 'Ask') {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, folders or loose files.'}
     $script:OutputMode=$Format
     $script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
     $script:Clock.Restart()

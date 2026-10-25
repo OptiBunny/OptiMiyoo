@@ -1193,8 +1193,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             else {Write-MenuLine '  Convert IPF to DSK.'}
             Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
             Write-MenuLine '  1. ZIPs (default) / one per game'
-            Write-MenuLine ('  2. Loose '+$outputName+' files')
-            Write-MenuLine '  3. Folders / one per game'
+            Write-MenuLine '  2. Folders / one per game'
+            Write-MenuLine ('  3. Loose '+$outputName+' files')
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice 'Choose output [Enter = 1]'
             if ($answer -eq 'B') {$page='Main'; continue}
@@ -1202,7 +1202,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq '') {$answer='1'}
             if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
             $workerArgs=$common.Clone()
-            $workerArgs.Storage=@{'1'='Zip';'2'='Loose';'3'='Folders'}[$answer]
+            $workerArgs.Storage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
             if ($page -eq 'C64') {
                 $worker=Join-Path $ScriptDir 'C64/convert_c64.ps1'
                 $workerArgs.NoPause=$true;$workerArgs.OnionRoot=$menuOnionRoot
@@ -1228,8 +1228,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  Single media stays visible; playlists need 2+ images.'
             Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
             Write-MenuLine '  1. ZIPs (default) / one per game'
-            Write-MenuLine '  2. Loose files'
-            Write-MenuLine '  3. Folders / one per game'
+            Write-MenuLine '  2. Folders / one per game'
+            Write-MenuLine '  3. Loose files'
             if (-not $profile.Zip) {
                 Write-MenuLine '  ZIP playback is not supported by the default core.'
                 Write-MenuLine '  Unpack ZIP output before playing.'
@@ -1240,7 +1240,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer='1'}
             if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
-            $storageChoice=@{'1'='Zip';'2'='Loose';'3'='Folders'}[$answer]
+            $storageChoice=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
             $worker=Join-Path $ScriptDir 'make_playlists.ps1'
             $workerArgs=$common.Clone(); $workerArgs.System=$profile.Folder
             $workerArgs.Storage=$storageChoice; $workerArgs.NoPause=$true

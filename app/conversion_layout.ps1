@@ -70,7 +70,7 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
 }
 
 function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
-    if ($Storage -notin 'Zip','Loose','Folders') {throw 'Choose ZIPs, loose files or a folder per game.'}
+    if ($Storage -notin 'Zip','Loose','Folders') {throw 'Choose ZIPs, a folder per game or loose files.'}
     if ($Items.Count -gt 100000) {throw 'Conversion batch exceeds the output member limit.'}
     $prefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+'\';$groups=@{}
     foreach ($item in $Items) {

@@ -30,8 +30,8 @@ After choosing a numbered system, **C**, or **Z**, pick an output type:
 | Choice | Files in `DST` |
 | --- | --- |
 | **1: ZIPs** (default) | One ZIP per game. |
-| **2: Loose files** | Individual files, without adding a folder for each game. |
-| **3: Folders** | One folder per game, including single-disc games. |
+| **2: Folders** | One folder per game, including single-disc games. |
+| **3: Loose files** | Individual files, without adding a folder for each game. |
 
 Then [choose what happens to originals](#originals-and-existing-files) to start.
 

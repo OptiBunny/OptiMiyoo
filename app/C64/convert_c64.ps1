@@ -709,7 +709,7 @@ try {
         if (-not $SourcePolicy) {$SourcePolicy='Keep';if ($Mode -eq 'Remove') {$SourcePolicy='Remove'}}
         exit (Invoke-C64ExplicitOutputs $Root $Storage $SourcePolicy $Existing)
     }
-    if ([string]::IsNullOrWhiteSpace($Mode)) {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, loose files or folders.'}
+    if ([string]::IsNullOrWhiteSpace($Mode)) {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, folders or loose files.'}
     if (-not $SourcePolicy) {$SourcePolicy='Keep'; if ($Mode -eq 'Remove') {$SourcePolicy='Remove'}}
     $removeOriginals=($SourcePolicy -eq 'Remove')
     if (Test-ApplicationWorker) {Write-C64Text '  Working on staged copies. Originals are handled after verification.' -ForegroundColor Cyan}

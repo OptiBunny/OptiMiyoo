@@ -30,7 +30,7 @@ function Get-ApplicationSelection {
     $operation=[string]$Payload.Operation;$system=[string]$Payload.System
     $storage=[string]$Payload.Storage;$format=[string]$Payload.Format
     if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Auto','Zip','Loose','Folders','LegacyFolders' -or $format -notin 'LooseDSK','ZipDSK') {throw 'Unknown application selection.'}
-    if ($operation -eq 'Playlist' -and $system -notin 'AMIGA','COMMODORE','PS','SEGACD','CPC','MSX','VIC20','PCECD','DOS','ZXS') {throw 'Unknown playlist system.'}
+    if ($operation -eq 'Playlist' -and $system -notin 'AMIGA','COMMODORE','PS','SEGACD','CPC','MSX','VIC20','DOS','ZXS') {throw 'Unknown playlist system.'}
     if ($operation -eq 'C64') {$system='COMMODORE'}
     if ($operation -eq 'ZX') {$system='ZXS'}
     $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $storage -Format $format

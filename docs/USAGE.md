@@ -7,7 +7,7 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 
 | Choose | Task |
 | --- | --- |
-| **1–10** | [Create playlists](#create-playlists) without changing file formats. |
+| **1–9** | [Create playlists](#create-playlists) without changing file formats. |
 | **C** | [Convert C64 NIB/NBZ to G64](#c64-converter-c). |
 | **Z** | [Convert ZX Spectrum IPF to DSK](#zx-converter-z). |
 | **S** | [Make supported playlists appear in Onion's game list](#sd-setup). |
@@ -108,9 +108,8 @@ system's ROM folder on your SD card, then refresh the game list.
 | **5** | Amstrad CPC | `Roms/CPC` |
 | **6** | MSX / MSX2 | `Roms/MSX` |
 | **7** | VIC-20 | `Roms/VIC20` |
-| **8** | PC Engine CD | `Roms/PCECD` |
-| **9** | MS-DOS | `Roms/DOS` |
-| **10** | ZX Spectrum | `Roms/ZXS` |
+| **8** | MS-DOS | `Roms/DOS` |
+| **9** | ZX Spectrum | `Roms/ZXS` |
 
 ### SD setup
 

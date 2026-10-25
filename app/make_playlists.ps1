@@ -1141,7 +1141,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 $support=Get-PlaylistSupport $Profiles[$i] $menuOnionRoot
                 $label=Get-PlaylistFeatureLabel $Profiles[$i] $support
                 if ($label) {$label=' '+$label}
-                $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; PCECD='PC Engine CD'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
+                $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
                 $shortLabel=$label
                 $compact=('{0,2}. {1,-9} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$shortNames[$Profiles[$i].Folder],$shortLabel)
                 Write-MenuLine ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
@@ -1237,7 +1237,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             }
             Write-MenuLine '  Single media stays visible; playlists need 2+ images.'
             Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
-            $defaultOutput='1'; if ($profile.Folder -in 'MSX','PCECD') {$defaultOutput='2'}
+            $defaultOutput='1'; if ($profile.Folder -eq 'MSX') {$defaultOutput='2'}
             $zipNotice=Get-ZipOutputNotice $profile $support
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $zipDefault=' (default)'; $folderDefault=''

@@ -274,9 +274,6 @@ function Get-PlaylistFeatureLabel($Profile,$Support) {
     if ($Support.CanBuild) {return ''}
     if ($Support.Status -eq 'NOT INSTALLED') {return '[not installed]'}
     if ($Support.Status -eq 'UNVERIFIED') {return '[playlists unverified]'}
-    if ($Profile.Folder -eq 'PCECD' -and $Support.Core -eq $Profile.DefaultCore) {
-        return '[disc swapping unsupported]'
-    }
     return '[playlists unsupported]'
 }
 

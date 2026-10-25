@@ -8,7 +8,7 @@ function Get-ApplicationPromptTitle {
           [string]$System,[ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK')
     $systems=@{AMIGA='Amiga';COMMODORE='Commodore 64';PS='PlayStation';SEGACD='Sega CD';
-        CPC='Amstrad CPC';MSX='MSX';VIC20='VIC-20';PCECD='PC Engine CD';DOS='MS-DOS';ZXS='ZX Spectrum'}
+        CPC='Amstrad CPC';MSX='MSX';VIC20='VIC-20';DOS='MS-DOS';ZXS='ZX Spectrum'}
     if($Storage -eq 'LegacyFolders' -and $Operation -ne 'C64'){throw 'Legacy folder storage is only valid for C64.'}
     $storageName=@{Zip='ZIP output';Loose='Loose files';Folders='Folder per game';LegacyFolders='Folder output';Auto='Auto storage'}[$Storage]
     switch($Operation) {

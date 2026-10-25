@@ -158,24 +158,6 @@
     "EmuFolder": "VIC20"
   },
   {
-    "Folder": "PCECD",
-    "Name": "PC Engine CD / TurboGrafx-CD",
-    "Core": "Beetle PCE Fast",
-    "Extensions": [
-      ".chd",
-      ".cue"
-    ],
-    "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Unsupported",
-    "Playlist": ".m3u",
-    "Note": "Playlist unsupported with Beetle PCE Fast: M3U loading exists, but in-game Disk Control is unavailable.",
-    "DefaultCore": "mednafen_pce_fast_libretro.so",
-    "DefaultSupported": false,
-    "SupportedCores": [],
-    "DefaultReason": "Playlist unsupported with Beetle PCE Fast: M3U loading exists, but in-game Disk Control is unavailable.",
-    "EmuFolder": "PCECD"
-  },
-  {
     "Folder": "DOS",
     "Name": "MS-DOS",
     "Core": "DOSBox Pure",

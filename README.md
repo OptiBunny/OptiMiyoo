@@ -1,7 +1,6 @@
 # OptiMiyoo
 
-Prepare disk images and multi-disc playlists for **Onion OS on Miyoo Mini Plus**,
-including C64 NIB/NBZ → G64 and ZX Spectrum IPF → DSK conversion.
+Create multi-disc playlists or convert disk images for **Onion OS on Miyoo Mini Plus**.
 
 [**Download ZIP for Windows**](https://github.com/OptiBunny/OptiMiyoo/archive/refs/heads/main.zip)
 · [**User guide**](docs/USAGE.md)
@@ -17,11 +16,13 @@ including C64 NIB/NBZ → G64 and ZX Spectrum IPF → DSK conversion.
    game. Keep each game's discs, tape sides, and companion files together.
 3. Run **`OptiMiyoo.bat`**. Choose a **numbered system** to create playlists, or
    **C/Z** for conversion only, then follow the prompts.
-4. Copy the resulting `DST` contents—including `.hidden` when present—to the matching
+4. Copy `DST` contents—including `.hidden` when present—to the matching
    [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders), then refresh the game list.
 
-Originals are kept by default. **D** opens a demo showcasing the menus, animations,
-and processing workflow without changing game files.
+Originals are kept by default.
+
+Choose **D** for a demo showcasing menus, animations, and workflows without changing game files.
+
 Converter tools are included; ROMs, BIOS files, and Onion cores are not.
 
 AI disclosure: OptiMiyoo is almost entirely vibe-coded. Most of the project’s own code, tests, and documentation were generated and revised by AI. Use it at your own risk.

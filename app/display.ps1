@@ -778,11 +778,14 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $channel='SRC -> DST / LOCAL DISK LINK'
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // READY' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
+    $hasDefaultChoice=@($Rows -match '^\d+\..*\(default\)').Count -gt 0
     for ($i=0;$i -lt $bodyRows;$i++) {
         $text=''; if ($i -lt $Rows.Count) {$text=$Rows[$i]}
         $right=' '*22; if ($i -lt $mio.Count) {$right=$mio[$i]}
         $rgb='218;224;244'
-        if ($text -match '\[[^\]]*(?:unsupported|unverified|not installed|unpack)[^\]]*\]') {$rgb='255;221;144'}
+        if ($text -match '^\d+\..*\(default\)') {$rgb='255;221;144'}
+        elseif ($text -match '\[[^\]]*(?:unsupported|unverified|not installed|unpack)[^\]]*\]' -and
+            -not ($hasDefaultChoice -and $text -match '^\d+\.')) {$rgb='255;221;144'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
     }
@@ -1195,7 +1198,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         @{Group='C64';Mood='check';Stage='Preserving an existing G64';System='COMMODORE 64';Game='Demo disk set / Side B.g64';Detail='Existing G64 bytes are copied and verified.';Progress=$true},
         @{Group='C64';Mood='check';Stage='Verifying the converted images';System='COMMODORE 64';Game='Demo disk set';Detail='G64 structure, image hashes and ZIP contents.';Progress=$true;CompleteSet=$true},
         @{Group='C64';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo game.zip','Folders: DST/Demo game/','Loose: DST/Demo game (Side A).g64','Converted G64 images stay visible.','No playlists are created.');Detail='Finished G64 output is ready in DST.'},
-        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','Convert IPF to DSK.','1. ZIPs (default) [unpack before playing]','2. Folders / one per game','3. Loose DSK files','Next: Keep / Remove originals.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
+        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','Convert IPF to DSK.','1. ZIPs [unsupported by default Onion OS core]','2. Folders (default) / one per game','3. Loose DSK files','Next: Keep / Remove originals.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
         @{Group='ZX';Mood='scan';Stage='Reading an IPF image';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='HxC and CAPSIMG decode the preservation image.'},
         @{Group='ZX';Mood='work';Stage='Converting IPF to DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='Engine activity is shown without a guessed percentage.'},
         @{Group='ZX';Mood='check';Stage='Verifying DSK and ZIP output';System='ZX SPECTRUM';Game='Demo Spectrum.zip';Detail='Check DSK structure, archive contents and source policy.';Progress=$true;CompleteSet=$true},

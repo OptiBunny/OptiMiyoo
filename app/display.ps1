@@ -478,7 +478,7 @@ function Get-MioSweepLevels([int]$Phase) {
                 if ($region -eq 'Logo') {$count=10; $offset=2*($geometry.LogoRow-1)}
                 $levels=New-Object 'int[]' $count
                 for ($row=0;$row -lt $count;$row++) {
-                    $base=100; if (($row%2) -eq 1) {$base=84}
+                    $base=100; if (($row%2) -eq 1) {$base=84; if ($region -eq 'Bunny') {$base=88}}
                     $distance=$offset+$row-$center; $gain=1.0
                     # A soft leading edge, one dim sweep row, then a faint
                     # phosphor recovery. Keep the footprint to three pixels
@@ -566,7 +566,7 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
         } else {
             # A visible scanline texture costs only the first render of a pose.
             # Sparse gestures reuse it without starting a CRT redraw clock.
-            $rowLevels=@(for ($row=0;$row -lt 24;$row++) {if (($row%2) -eq 0) {100} else {84}})
+            $rowLevels=@(for ($row=0;$row -lt 24;$row++) {if (($row%2) -eq 0) {100} else {88}})
         }
     }
     $result=[System.Collections.Generic.List[string]]::new()

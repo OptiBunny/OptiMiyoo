@@ -280,10 +280,10 @@ function Get-PlaylistFeatureLabel($Profile,$Support) {
     return '[playlists: unsupported]'
 }
 
-function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
+function Get-ZipOutputNotice($Profile,$Support) {
     # ZipMemberPlaylist describes OptiMiyoo's archive#member playlist layout,
     # not general ZIP loading. DefaultZipSupport follows Onion's core docs.
-    $notice=[pscustomobject]@{Label='';Hint='';PlaylistOnly=$false}
+    $notice=[pscustomobject]@{Label='';Hint=''}
     $knownMemberCore=($Profile.ZipMemberPlaylist -and $Support.Core -in @($Profile.SupportedCores))
     if ($Support.Status -in 'UNVERIFIED','NOT INSTALLED' -or
         ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore)) {
@@ -295,10 +295,6 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
     } elseif ($Profile.DefaultZipSupport -eq 'Unlisted') {
         $notice.Label='[ZIP playback: unverified]'
         $notice.Hint='Unpack ZIP output before playing.'
-    } elseif (-not $Conversion -and -not $Profile.ZipMemberPlaylist) {
-        $notice.Label='[ZIP playlists: unpack first]'
-        $notice.Hint='Unpack ZIP output before using its playlist.'
-        $notice.PlaylistOnly=$true
     }
     return $notice
 }

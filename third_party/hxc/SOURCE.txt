@@ -1,0 +1,45 @@
+HxC Floppy Emulator 2.16.13.1
+
+Author: Jean-Francois Del Nero / HxC2001 and contributors.
+Purpose: ZX Spectrum IPF-to-DSK conversion on Windows.
+Project: https://github.com/jfdelnero/HxCFloppyEmulator
+Release: https://github.com/jfdelnero/HxCFloppyEmulator/releases/tag/HxCFloppyEmulator_V2_16_13_1
+
+The x64 hxcfe.exe, x64/x86 libhxcfe.dll and libusbhxcfe.dll, and config.script
+are unmodified files from the official Windows release archive:
+https://github.com/jfdelnero/HxCFloppyEmulator/releases/download/HxCFloppyEmulator_V2_16_13_1/HxCFloppyEmulator_soft.zip
+Archive SHA-256: e83e361407893dcdab10cc2e169bf0504dfe3802360a902b01269b4585778091
+
+The x86 hxcfe.exe is rebuilt by OptiMiyoo from the unchanged release source.
+The official x86 executable has no relocation table and Windows rejects it
+inside AppContainer. This build supplies relocations; conversion still uses
+the unchanged official x86 DLLs. It is not an upstream-provided executable.
+
+Source: https://github.com/jfdelnero/HxCFloppyEmulator/tree/0a8f492d9b96e7c35283cf4ddf629c802f63fcf1
+The complete source archive is included as HxCFloppyEmulator-source-2.16.13.1.zip:
+https://github.com/jfdelnero/HxCFloppyEmulator/archive/0a8f492d9b96e7c35283cf4ddf629c802f63fcf1.zip
+Source archive SHA-256: ae75804a55635677eaf0754fc772bdeeaa5703acd0b7c2c04149f6a2c193364f
+
+Reproduce the x86 executable on Windows with the official portable Zig 0.17.0:
+https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip
+Compiler archive SHA-256: b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428
+
+Extract the source to a short path. In its root, set SOURCE_DATE_EPOCH=1743897600
+(2025-04-06 UTC). Set HXC_RUNTIME to OptiMiyoo's app/ZX/tools/hxc/x86 folder.
+Run this command with zig.exe on PATH (shown wrapped; join into one line):
+
+zig cc -target x86-windows-gnu -O2 -s -Wno-error=date-time
+  -I libhxcfe/sources -I libusbhxcfe/sources -I libhxcadaptor/sources -I build
+  -o hxcfe.exe HxCFloppyEmulator_cmdline/sources/hxcfe.c
+  HxCFloppyEmulator_cmdline/sources/utils.c libhxcadaptor/sources/libhxcadaptor.c
+  libhxcadaptor/sources/fs.c libhxcadaptor/sources/network.c
+  libhxcadaptor/sources/cache.c "%HXC_RUNTIME%/libhxcfe.dll"
+  "%HXC_RUNTIME%/libusbhxcfe.dll" -lws2_32 -lwinmm
+
+Rebuilt x86 hxcfe.exe SHA-256: 5eb18ce04c9d3d3723bf8177e89d12705bce24e1f17141eb5509c1be4952643e
+Two independent source/temp/cache builds produced this same binary.
+
+COPYING and COPYING_FULL retain upstream license and embedded-library notices.
+Compiler/runtime notices for this rebuild are in ../nibtools/COPYING.ZIG and
+../nibtools/COPYING.MINGW. CAPSIMG and its runtime DLLs are documented separately
+in ../capsimg and ../runtime.

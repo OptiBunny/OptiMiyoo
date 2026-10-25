@@ -1,0 +1,17 @@
+[
+  {
+    "architecture": "x86",
+    "url": "https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libstdc%2B%2B-16.2.0-6-any.pkg.tar.zst",
+    "sha256": "f04dfa26fe948b9a2166cfb39d5128c6a1fc48a10aba36ebf83b7f784c7b9b21"
+  },
+  {
+    "architecture": "x86",
+    "url": "https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libgcc-16.2.0-6-any.pkg.tar.zst",
+    "sha256": "7b89855e761f98b16608160771976f12e4075b28224ff9405fcf09ed37ddec44"
+  },
+  {
+    "architecture": "x86",
+    "url": "https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-libwinpthread-14.0.0.r495.g63ebe6cdb-2-any.pkg.tar.zst",
+    "sha256": "ab46e79edef722b296fd63f5373260b3a338985f2da6842d777ff886f081b689"
+  }
+]

@@ -1,0 +1,211 @@
+[
+  {
+    "Folder": "AMIGA",
+    "Name": "Commodore Amiga",
+    "Core": "PUAE2021",
+    "Extensions": [
+      ".ipf",
+      ".adf",
+      ".adz",
+      ".dms",
+      ".fdi",
+      ".raw"
+    ],
+    "Zip": true,
+    "Playlist": ".m3u",
+    "Note": "IPF playback needs a compatible CAPSIMG library and Kickstart BIOS.",
+    "DefaultCore": "puae2021_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "puae2021_libretro.so",
+      "puae_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "AMIGA"
+  },
+  {
+    "Folder": "COMMODORE",
+    "Name": "Commodore 64",
+    "Core": "VICE x64",
+    "Extensions": [
+      ".d64",
+      ".d71",
+      ".d81",
+      ".g64",
+      ".x64",
+      ".nib",
+      ".nbz",
+      ".tap",
+      ".t64"
+    ],
+    "Zip": true,
+    "Playlist": ".m3u",
+    "Note": "NIB/NBZ convert to G64. G64, TAP and T64 keep their bytes. Tape-side swapping is checked separately from disk playlists.",
+    "DefaultCore": "vice_x64_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "vice_x64_libretro.so",
+      "vice_x64sc_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "COMMODORE"
+  },
+  {
+    "Folder": "PS",
+    "Name": "Sony PlayStation",
+    "Core": "PCSX ReARMed",
+    "Extensions": [
+      ".chd",
+      ".cue"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u",
+    "Note": "CHDs stay loose. CUE files keep their referenced tracks and matching SBI files.",
+    "DefaultCore": "pcsx_rearmed_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "pcsx_rearmed_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "PSX"
+  },
+  {
+    "Folder": "SEGACD",
+    "Name": "Sega CD / Mega-CD",
+    "Core": "PicoDrive",
+    "Extensions": [
+      ".chd",
+      ".cue",
+      ".iso"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u",
+    "Note": "The current Onion PicoDrive build supports relative-path M3U playlists and disk swapping. CUE/ISO/CHD media are kept loose in .hidden.",
+    "DefaultCore": "picodrive_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "picodrive_libretro.so",
+      "genesis_plus_gx_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "SEGACD"
+  },
+  {
+    "Folder": "CPC",
+    "Name": "Amstrad CPC",
+    "Core": "CrocoDS",
+    "Extensions": [
+      ".dsk"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u",
+    "Note": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
+    "DefaultCore": "crocods_libretro.so",
+    "DefaultSupported": false,
+    "SupportedCores": [
+      "cap32_libretro.so"
+    ],
+    "DefaultReason": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
+    "EmuFolder": "CPC"
+  },
+  {
+    "Folder": "MSX",
+    "Name": "MSX / MSX2",
+    "Core": "blueMSX",
+    "Extensions": [
+      ".dsk"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u",
+    "Note": "The default blueMSX core supports disk playlists; its Databases and Machines BIOS folders are required.",
+    "DefaultCore": "bluemsx_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "bluemsx_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "MSX"
+  },
+  {
+    "Folder": "VIC20",
+    "Name": "Commodore VIC-20",
+    "Core": "VICE xvic",
+    "Extensions": [
+      ".d64",
+      ".d71",
+      ".d81",
+      ".g64",
+      ".x64",
+      ".nib",
+      ".nbz"
+    ],
+    "Zip": true,
+    "Playlist": ".m3u",
+    "Note": "For actual disk images. Cartridge and PRG files are not grouped as disks.",
+    "DefaultCore": "vice_xvic_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "vice_xvic_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "VIC20"
+  },
+  {
+    "Folder": "PCECD",
+    "Name": "PC Engine CD / TurboGrafx-CD",
+    "Core": "Beetle PCE Fast",
+    "Extensions": [
+      ".chd",
+      ".cue"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u",
+    "Note": "Playlist unsupported with Beetle PCE Fast: M3U loading exists, but in-game Disk Control is unavailable.",
+    "DefaultCore": "mednafen_pce_fast_libretro.so",
+    "DefaultSupported": false,
+    "SupportedCores": [],
+    "DefaultReason": "Playlist unsupported with Beetle PCE Fast: M3U loading exists, but in-game Disk Control is unavailable.",
+    "EmuFolder": "PCECD"
+  },
+  {
+    "Folder": "DOS",
+    "Name": "MS-DOS",
+    "Core": "DOSBox Pure",
+    "Extensions": [
+      ".iso",
+      ".cue",
+      ".img",
+      ".ima"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u8",
+    "Note": "Disk-image sets only. Installation and game startup may still be required inside DOSBox.",
+    "DefaultCore": "dosbox_pure_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "dosbox_pure_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "DOS"
+  },
+  {
+    "Folder": "ZXS",
+    "Name": "ZX Spectrum",
+    "Core": "Fuse",
+    "Extensions": [
+      ".dsk",
+      ".trd",
+      ".scl"
+    ],
+    "Zip": false,
+    "Playlist": ".m3u",
+    "Note": "Playlist unsupported with the inspected default Onion Fuse build: M3U loading is unavailable. ZX IPF-to-DSK conversion remains available in menu Z.",
+    "DefaultCore": "fuse_libretro.so",
+    "DefaultSupported": false,
+    "SupportedCores": [
+      "fuse_libretro.so"
+    ],
+    "DefaultReason": "Playlist unsupported with the inspected default Onion Fuse build: M3U loading is unavailable. ZX IPF-to-DSK conversion remains available in menu Z.",
+    "EmuFolder": "ZXS"
+  }
+]

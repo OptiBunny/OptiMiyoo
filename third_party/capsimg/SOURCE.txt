@@ -1,0 +1,25 @@
+CAPSIMG - FS-UAE Windows builds
+
+Purpose: IPF decoding for OptiMiyoo's HxC converter on Windows.
+Project: SPS Decoder Library, with build adaptations by Frode Solheim for FS-UAE.
+Source repository: https://github.com/FrodeSolheim/capsimg
+Published plugins: https://fs-uae.net/plugins/
+
+Windows x64: 5.1.3
+Download: https://fs-uae.net/files/CAPSImg/Stable/5.1.3/CAPSImg_5.1.3_Windows_x86-64.zip
+DLL SHA-256: bac2d4507cd8cae40acaed0d83a566310df721c734b081f59633f32aba2be189
+Source: CAPSIMG-source-5.1.3.zip
+Revision: https://github.com/FrodeSolheim/capsimg/tree/457d420848145de6541e47296405b1938830900a
+Source archive SHA-256: f47c9f74591daa73772fb31b5a27b6fced48d1c9787ac3949e76c90142c22658
+
+Windows x86 fallback: 5.1fs3 (newest published FS-UAE x86 build)
+Download: https://fs-uae.net/files/stable/plugins/CAPSImg/CAPSImg_5.1fs3_Windows_x86.zip
+DLL SHA-256: 579db482ee32ecc61a24b110bd97f4b0591395651d19510f86fff80d7fd33e14
+Source: CAPSIMG-source-5.1fs3.zip
+Revision: https://github.com/FrodeSolheim/capsimg/tree/067db4cc6bfdcd1ab684b812da6fedbb8f96e04a
+Source archive SHA-256: 89e605305852cff27b7c96667f6d22bde060144887d6e7abcac566dada6a8582
+
+Both DLLs are byte-for-byte identical to the original FS-UAE downloads.
+Source archives contain the corresponding versioned upstream revisions and
+original notices. The binaries have not been independently rebuilt from source.
+LICENSE.txt applies to both builds. README-upstream.txt is from the 5.1.3 source.

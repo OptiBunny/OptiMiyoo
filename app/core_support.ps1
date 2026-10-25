@@ -272,32 +272,33 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
 
 function Get-PlaylistFeatureLabel($Profile,$Support) {
     if ($Support.CanBuild) {return ''}
-    if ($Support.Status -eq 'NOT INSTALLED') {return '[not installed]'}
-    if ($Support.Status -eq 'UNVERIFIED') {return '[playlists unverified]'}
+    if ($Support.Status -eq 'NOT INSTALLED') {return '[core: not installed]'}
+    if ($Support.Status -eq 'UNVERIFIED') {return '[playlists: unverified]'}
     if ($Profile.Folder -eq 'PCECD' -and $Support.Core -eq $Profile.DefaultCore) {
-        return '[disc swapping unsupported]'
+        return '[disc swapping: unsupported]'
     }
-    return '[playlists unsupported]'
+    return '[playlists: unsupported]'
 }
 
 function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
     # ZipMemberPlaylist describes OptiMiyoo's archive#member playlist layout,
     # not general ZIP loading. DefaultZipSupport follows Onion's core docs.
-    $notice=[pscustomobject]@{Label='';Hint=''}
+    $notice=[pscustomobject]@{Label='';Hint='';PlaylistOnly=$false}
     $knownMemberCore=($Profile.ZipMemberPlaylist -and $Support.Core -in @($Profile.SupportedCores))
     if ($Support.Status -in 'UNVERIFIED','NOT INSTALLED' -or
         ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore)) {
-        $notice.Label='[ZIP playback unverified]'
+        $notice.Label='[ZIP playback: unverified]'
         $notice.Hint='Unpack ZIP output before playing.'
     } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
-        $notice.Label='[ZIP playback unsupported]'
+        $notice.Label='[ZIP playback: unsupported]'
         $notice.Hint='Unpack ZIP output before playing.'
     } elseif ($Profile.DefaultZipSupport -eq 'Unlisted') {
-        $notice.Label='[unpack before playing]'
-        $notice.Hint='ZIP loading is not listed in Onion docs for this core.'
+        $notice.Label='[ZIP playback: unverified]'
+        $notice.Hint='Unpack ZIP output before playing.'
     } elseif (-not $Conversion -and -not $Profile.ZipMemberPlaylist) {
-        $notice.Label='[unpack for playlists]'
-        $notice.Hint='The core loads ZIPs; unpack OptiMiyoo playlist ZIPs.'
+        $notice.Label='[ZIP playlists: unpack first]'
+        $notice.Hint='Unpack ZIP output before using its playlist.'
+        $notice.PlaylistOnly=$true
     }
     return $notice
 }

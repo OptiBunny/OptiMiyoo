@@ -1617,7 +1617,7 @@ try {
                 if ($plan.InternalPlaylistName) {
                     $result.Detail='ZIP playlist package verified [unpack before playing].'
                     $script:UiSay='ZIP playlist ready [unpack before playing].'
-                } elseif ($job.ZipOutputNotice.Label -and $job.ZipOutputNotice.Label -ne '[unpack for playlists]') {
+                } elseif ($job.ZipOutputNotice.Label -and -not $job.ZipOutputNotice.PlaylistOnly) {
                     $result.Detail='ZIP game verified '+$job.ZipOutputNotice.Label+'. Unpack before playing.'
                     $script:UiSay='ZIP game ready [unpack before playing].'
                 }

@@ -58,7 +58,7 @@ function Get-ApplicationPromptModel {
     }
     if($Kind -eq 'C64Mode') {
         $lines=@('Convert NIB/NBZ game ZIPs to G64.',
-            'Visible output; use menu 2 for playlists.',
+            'Conversion only: visible output, no playlists.',
             '1. ZIP output / KEEP originals (default)','2. ZIP output / REMOVE after verified success',
             '3. Folder output / KEEP originals','4. Folder output / REMOVE after verified success',
             'B. Back to main menu     Q. Exit')

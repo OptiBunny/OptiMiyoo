@@ -1040,7 +1040,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $pageName='Commodore 64'
             Show-MenuTitle $pageName
             Write-MenuLine '  Convert NIB/NBZ ZIPs to G64. Existing G64 images keep their bytes.'
-            Write-MenuLine '  Conversion only; use menu 2 afterward to build playlists.'
+            Write-MenuLine '  Conversion only: visible ZIPs or folders. No playlists.'
             Write-MenuLine '  1. ZIP output / KEEP originals in SRC'
             Write-MenuLine '  2. ZIP output / REMOVE originals only after verified success'
             Write-MenuLine '  3. Folder output / KEEP originals in SRC'

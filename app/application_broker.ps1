@@ -409,12 +409,21 @@ function Start-ApplicationBrokerBatch {
         foreach($job in $jobs){if($job.SourceJob.Error){$job.BlockedReason=$job.SourceJob.Error}}
     } elseif($Operation -eq 'C64'){
         $System='COMMODORE';$raw=New-Object 'System.Collections.Generic.List[object]'
-        $sourceZips=@(& $module {param($src)Get-C64SourceZips $src} $src)
-        if($sourceZips.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
-        foreach($zip in $sourceZips){
-            $sourceJob=[pscustomobject]@{Zip=$zip;Images=0;NibImages=0;ScanError='';Plan=$null;Files=@{}}
-            try {$sourceJob.Files=Get-ApplicationBrokerArchive $module $zip.FullName;$sourceJob.Images=@($sourceJob.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz','.g64'}).Count;$sourceJob.NibImages=@($sourceJob.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count}
-            catch {$sourceJob.ScanError=$_.Exception.Message}
+        $sourceInputs=@(& $module {param($src)Get-C64SourceInputs $src} $src)
+        if($sourceInputs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
+        foreach($inputFile in $sourceInputs){
+            $sourceJob=[pscustomobject]@{Zip=$inputFile;IsArchive=($inputFile.Extension -ieq '.zip');Images=0;NibImages=0;ScanError='';Plan=$null;Files=@{}}
+            try {
+                if($sourceJob.IsArchive){$sourceJob.Files=Get-ApplicationBrokerArchive $module $inputFile.FullName}
+                else {
+                    $key=Get-ApplicationBrokerRelative $inputFile.FullName $src
+                    if(-not $state.SourceSnapshot.Files.ContainsKey($key)){throw 'C64 input was not present in the frozen source manifest.'}
+                    if($state.SourceSnapshot.Files[$key].Length -gt 512MB){throw 'Disk image exceeds the 512 MiB input limit; original kept.'}
+                    $sourceJob.Files[$inputFile.Name]=$state.SourceSnapshot.Files[$key]
+                }
+                $sourceJob.Images=@($sourceJob.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz','.g64'}).Count
+                $sourceJob.NibImages=@($sourceJob.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count
+            } catch {$sourceJob.ScanError=$_.Exception.Message}
             $raw.Add($sourceJob)
         }
         & $module {param($raw,$src,$dst,$storage)Set-C64OutputConflicts $raw ($src.TrimEnd('\','/')+'\') $dst $storage} $raw.ToArray() $src $dst $Storage
@@ -430,7 +439,7 @@ function Start-ApplicationBrokerBatch {
                 }
                 $job.DiskNames=@(& $module {param($names)$names | Where-Object {[IO.Path]::GetExtension($_) -eq '.g64'} | Sort-Object} @($job.Files.Keys))
                 $job.Writes=@([pscustomobject]@{Destination=$plan.Destination;Folder=$plan.Folder})
-                $job.Retired=@($plan.Retired);$job.DataKind='Zip';if($plan.Folder){$job.DataKind='Folder'}
+                $job.Retired=@($plan.Retired);$job.DataKind='Zip';if($plan.Loose){$job.DataKind='File'}elseif($plan.Folder){$job.DataKind='Folder'}
                 $job.Conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
             } catch {$job.BlockedReason=$_.Exception.Message}
             $jobs.Add($job)

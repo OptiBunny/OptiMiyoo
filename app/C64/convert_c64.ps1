@@ -61,20 +61,20 @@ function Write-C64Text {
     Write-Host @PSBoundParameters
 }
 
-function Get-C64SourceZips([string]$Directory) {
+function Get-C64SourceInputs([string]$Directory) {
     $pending=New-Object 'System.Collections.Generic.Stack[string]'
     $pending.Push($Directory); [long]$found=0
     while ($pending.Count -gt 0) {
         $directoryPath=$pending.Pop()
-        Show-PreparationProgress 'Scanning SRC' $directoryPath $found -1 'ZIPs'
+        Show-PreparationProgress 'Scanning SRC' $directoryPath $found -1 'inputs'
         foreach ($item in @(Get-ChildItem -LiteralPath $directoryPath -Force | Sort-Object Name)) {
-            Show-PreparationProgress 'Scanning SRC' $item.Name $found -1 'ZIPs'
+            Show-PreparationProgress 'Scanning SRC' $item.Name $found -1 'inputs'
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
                 Write-Event 'WARNING' ('IGNORED LINK: '+$item.FullName)
                 continue
             }
             if ($item.PSIsContainer) {$pending.Push($item.FullName)}
-            elseif ($item.Extension -ieq '.zip') {$found++; $item}
+            elseif ($item.Extension -in '.zip','.nib','.nbz','.g64') {$found++; $item}
         }
     }
 }
@@ -82,23 +82,26 @@ function Get-C64SourceZips([string]$Directory) {
 function Get-C64OutputPlan([string]$RelativeZip,[string]$Storage,[string]$DestinationRoot) {
     $relative=$RelativeZip.Replace('\','/')
     $stem=$relative.Substring(0,$relative.Length-[IO.Path]::GetExtension($relative).Length)
-    $folder=$Storage -eq 'Folders'
+    $loose=[IO.Path]::GetExtension($relative) -ine '.zip'
+    $looseOutput=$loose -and $Storage -eq 'Folders'
+    $folder=$Storage -eq 'Folders' -and -not $loose
     $relativeData=$stem
-    if (-not $folder) {$relativeData+='.zip'}
+    if ($looseOutput) {$relativeData+='.g64'}
+    elseif (-not $folder) {$relativeData+='.zip'}
     $target=[pscustomobject]@{Name=$relativeData;Folder=$folder;Role='Visible';
         Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData.Replace('/',[IO.Path]::DirectorySeparatorChar)))}
     return [pscustomobject]@{Stem=$stem;Destination=$target.Destination;RelativeData=$relativeData;
-        Targets=@($target);Retired=@();Folder=$folder}
+        Targets=@($target);Retired=@();Folder=$folder;Loose=$looseOutput}
 }
 
 function Set-C64OutputConflicts([object[]]$Jobs,[string]$SourcePrefix,[string]$DestinationRoot,[string]$Storage) {
     # Reserve actual conversion destinations before processing any source.
     $owners=@{}; $planned=0
-    Show-PreparationProgress 'Planning game outputs' 'Collecting conversion destinations.' 0 $Jobs.Count 'ZIPs'
+    Show-PreparationProgress 'Planning game outputs' 'Collecting conversion destinations.' 0 $Jobs.Count 'inputs'
     foreach ($job in $Jobs) {
         $relative=$job.Zip.FullName.Substring($SourcePrefix.Length).Replace('\','/')
         $job.Plan=Get-C64OutputPlan $relative $Storage $DestinationRoot
-        $planned++; Show-PreparationProgress 'Planning game outputs' $relative $planned $Jobs.Count 'ZIPs'
+        $planned++; Show-PreparationProgress 'Planning game outputs' $relative $planned $Jobs.Count 'inputs'
         if ($job.Images -eq 0 -and -not $job.ScanError) {continue}
         foreach ($part in $job.Plan.Stem.Split('/')) {
             if ($part.StartsWith('.')) {$job.ScanError='A game or collection name starts with a dot and would be hidden. Rename that input folder/file.'}
@@ -115,7 +118,7 @@ function Set-C64OutputConflicts([object[]]$Jobs,[string]$SourcePrefix,[string]$D
     foreach ($key in $keys) {
         $participants=$owners[$key]
         if ($participants.Count -gt 1) {
-            foreach ($job in $participants) {$job.ScanError='Source ZIPs share an output path. Rename the conflicting game or collection; no conflicting outputs were written.'}
+            foreach ($job in $participants) {$job.ScanError='Source inputs share an output path. Rename the conflicting game or collection; no conflicting outputs were written.'}
         }
         $parent=$key
         while ($parent.Contains('/')) {
@@ -194,6 +197,8 @@ function Get-C64ExistingMedia($Target,[string[]]$ExpectedFiles=@()) {
                 if ($entry.Extension -in '.g64','.nib','.nbz') {$names.Add($name)}
             }
         }
+    } elseif ([IO.Path]::GetExtension($Target.Destination) -ieq '.g64') {
+        $names.Add([IO.Path]::GetFileName($Target.Destination))
     } else {
         $archive=(Open-ArchiveWithBudget -Path $Target.Destination -Profile Floppy)
         try {
@@ -262,13 +267,9 @@ function Assert-C64CollectionOutput([string]$CollectionPath,[string]$OutputPath,
             if (Test-Path -LiteralPath $parentPlaylist -PathType Leaf) {
                 throw ('This collection is already used by another game playlist. Rename the game or collection; existing files were left alone: '+$parentPlaylist)
             }
-            if (Test-Path -LiteralPath $parent -PathType Container) {
-                foreach ($entry in @(Get-ChildItem -LiteralPath $parent -Force)) {
-                    if (-not $entry.PSIsContainer -and $entry.Extension -in '.g64','.nib','.nbz') {
-                        throw ('This collection already contains a parent game disk. Rename the game or collection; existing files were left alone: '+$entry.FullName)
-                    }
-                }
-            }
+            # Sibling disk files are not part of this replacement. Mixed loose
+            # and ZIP inputs may safely share a collection directory; only the
+            # exact approved target is installed or replaced.
             $parent=[IO.Path]::GetDirectoryName($parent)
         }
     }
@@ -537,7 +538,7 @@ function Remove-VerifiedSource([string]$SourcePath, [string]$ExpectedHash, [stri
             Show-SourceCleanupProgress $stage $detail $done $total
         }
         $script:Removed++
-        Write-Log ('REMOVED: original ZIP from SRC after verified destination: ' + $SourcePath)
+        Write-Log ('REMOVED: original input from SRC after verified destination: ' + $SourcePath)
     } catch {
         $script:RemoveFailed++
         Write-Log ('DESTINATION VERIFIED, BUT ORIGINAL KEPT: ' + $_.Exception.Message)
@@ -682,18 +683,22 @@ try {
     Write-Event 'OUTPUT' $destinationRoot
     if ([string]::IsNullOrWhiteSpace($Mode)) {
         do {
-            $choice=Read-DisplayInput 'Choose 1, 2, 3 or 4 [Enter = 1]' 'Commodore 64' @(
-                '1. ZIP output / KEEP originals in SRC',
-                '2. ZIP output / REMOVE originals only after verified success',
-                '3. Folder output / KEEP originals in SRC',
-                '4. Folder output / REMOVE originals after verified success',
+            $choice=Read-DisplayInput 'Choose 1 or 2 [Enter = 2]' 'Commodore 64 / output format' @(
+                'Input: loose NIB/NBZ/G64 files or ZIPs.',
+                '1. Loose files',
+                '2. ZIP files (default)',
                 'B. Back (return to caller)     Q. Exit')
             if ($choice -in 'B','Q') {exit 0}
-            if ($choice -in '','1') {$Mode='Keep'}
-            elseif ($choice -eq '2') {$Mode='Remove'}
-            elseif ($choice -eq '3') {$Mode='Folders'}
-            elseif ($choice -eq '4') {$Mode='Folders'; $SourcePolicy='Remove'}
-            else {Write-C64Text '  Choose 1, 2, 3, 4, B or Q.'}
+            if ($choice -in '','2') {$selectedMode='Keep'}
+            elseif ($choice -eq '1') {$selectedMode='Folders'}
+            else {Write-C64Text '  Choose 1, 2, B or Q.';continue}
+            if (-not $SourcePolicy) {
+                $policyChoice=Read-SourcePolicy 'Commodore 64'
+                if ($policyChoice -eq 'Exit') {exit 0}
+                if ($policyChoice -eq 'Back') {continue}
+                $SourcePolicy=$policyChoice
+            }
+            $Mode=$selectedMode
         } while ([string]::IsNullOrWhiteSpace($Mode))
     }
     if (-not $SourcePolicy) {$SourcePolicy='Keep'; if ($Mode -eq 'Remove') {$SourcePolicy='Remove'}}
@@ -704,44 +709,51 @@ try {
         if ($removeOriginals) {Write-C64Text '  Originals are removed only after ALL their outputs are verified in DST.' -ForegroundColor Magenta}
         else {Write-C64Text '  Originals stay in SRC.' -ForegroundColor Cyan}
     }
-    Write-C64Text '  Converted disks are saved in Game.zip (or Game/ in folder mode).' -ForegroundColor Cyan
-    Write-C64Text '  Already-converted G64 ZIPs are supported; nibconv is needed only for NIB/NBZ.'
+    Write-C64Text '  Loose inputs become G64 files or one ZIP each; game ZIPs keep their layout.' -ForegroundColor Cyan
+    Write-C64Text '  Already-converted G64 images are supported; nibconv is needed only for NIB/NBZ.'
     Write-C64Text '  Existing outputs: Yes / No / Yes to all / No to all (all modes).'
     Write-C64Text '  No / No to all always keeps the original in SRC; no conversion or comparison.'
-    Write-C64Text '  Queue progress counts completed ZIPs. Copy/verify progress measures bytes.'
+    Write-C64Text '  Queue progress counts completed inputs. Copy/verify progress measures bytes.'
     Write-C64Text '  NIB conversion shows current phase/track activity while the engine runs.'
     Write-C64Text '  Ctrl+C stops the run. All completed outputs remain in DST.'
     Write-C64Text ''
     $script:Clock = [Diagnostics.Stopwatch]::StartNew()
     Show-ConversionStart 'Commodore 64 / NIB -> G64'
     $zips = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
-    Get-C64SourceZips $sourceRoot | ForEach-Object {$zips.Add($_)}
-    Show-PreparationProgress 'Scanning SRC' 'Source ZIP list collected.' $zips.Count $zips.Count 'ZIPs' -Force
+    Get-C64SourceInputs $sourceRoot | ForEach-Object {$zips.Add($_)}
+    Show-PreparationProgress 'Scanning SRC' 'Source input list collected.' $zips.Count $zips.Count 'inputs' -Force
     $script:Total = $zips.Count; $script:TotalImages = 0
     $jobs = New-Object 'System.Collections.Generic.List[object]'
-    Show-PreparationProgress 'Counting disk images inside ZIPs' 'Reading archive directories.' 0 $zips.Count 'ZIPs'
+    Show-PreparationProgress 'Counting disk images' 'Checking loose files and ZIP directories.' 0 $zips.Count 'inputs'
     for ($i = 0; $i -lt $zips.Count; $i++) {
-        Show-PreparationProgress 'Counting disk images inside ZIPs' $zips[$i].Name $i $zips.Count 'ZIPs'
+        Show-PreparationProgress 'Counting disk images' $zips[$i].Name $i $zips.Count 'inputs'
         $archive = $null; $count = 0; $nibCount = 0; $scanError = $null
+        $isArchive=$zips[$i].Extension -ieq '.zip'
         try {
-            $archive = (Open-ArchiveWithBudget -Path $zips[$i].FullName -Profile Floppy)
-            foreach ($entry in $archive.Entries) {
-                if (-not ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\'))) {
-                    $extension = [IO.Path]::GetExtension($entry.FullName)
-                    if ($extension -in '.nib', '.nbz', '.g64') { $count++ }
-                    if ($extension -in '.nib', '.nbz') { $nibCount++ }
-                } elseif ($entry.Length -ne 0) {throw ('ZIP directory entry contains data: '+$entry.FullName)}
+            if ($isArchive) {
+                $archive = (Open-ArchiveWithBudget -Path $zips[$i].FullName -Profile Floppy)
+                foreach ($entry in $archive.Entries) {
+                    if (-not ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\'))) {
+                        $extension = [IO.Path]::GetExtension($entry.FullName)
+                        if ($extension -in '.nib', '.nbz', '.g64') { $count++ }
+                        if ($extension -in '.nib', '.nbz') { $nibCount++ }
+                    } elseif ($entry.Length -ne 0) {throw ('ZIP directory entry contains data: '+$entry.FullName)}
+                }
+            } else {
+                if ($zips[$i].Length -gt 512MB) {throw 'Disk image exceeds the 512 MiB input limit; original kept.'}
+                $count=1
+                if ($zips[$i].Extension -in '.nib','.nbz') {$nibCount=1}
             }
         } catch { $scanError = $_.Exception.Message }
         finally { if ($archive) { $archive.Dispose() } }
         $script:TotalImages += $count
-        $jobs.Add([pscustomobject]@{ Zip = $zips[$i]; Images = $count; NibImages = $nibCount; ScanError = $scanError; Plan = $null })
-        Show-PreparationProgress 'Counting disk images inside ZIPs' $zips[$i].Name ($i+1) $zips.Count 'ZIPs'
+        $jobs.Add([pscustomobject]@{ Zip = $zips[$i]; IsArchive = $isArchive; Images = $count; NibImages = $nibCount; ScanError = $scanError; Plan = $null })
+        Show-PreparationProgress 'Counting disk images' $zips[$i].Name ($i+1) $zips.Count 'inputs'
     }
 
     Set-C64OutputConflicts $jobs.ToArray() $sourcePrefix $destinationRoot $Mode
     Complete-PreparationProgress
-    Write-Event 'FOUND' ('{0:N0} ZIP files and {1:N0} NIB/NBZ/G64 disk images.' -f $script:Total, $script:TotalImages)
+    Write-Event 'FOUND' ('{0:N0} inputs and {1:N0} NIB/NBZ/G64 disk images.' -f $script:Total, $script:TotalImages)
     if ($script:Total -gt 0) {
         $logName = 'OptiMiyoo_C64_{0}_{1}.log' -f (Get-Date -Format 'yyyyMMdd_HHmmss_fff'), $PID
         try { $logPath = Join-Path $Root $logName; $logStream=[IO.File]::Open($logPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read); $script:Log=New-Object IO.StreamWriter($logStream,[Text.Encoding]::UTF8) }
@@ -775,8 +787,8 @@ try {
                 Result = 'Failed'; Original = 'Kept in SRC'; Detail = ''
             }
             try {
-                Show-Progress 0 'Opening ZIP' $zip.FullName -1 -Force
-                Write-Log ('ZIP: ' + $zip.FullName)
+                Show-Progress 0 'Opening input' $zip.FullName -1 -Force
+                Write-Log ('INPUT: ' + $zip.FullName)
                 if (-not $destination.StartsWith($destinationPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Destination leaves DST.' }
                 if ($job.ScanError) { throw $job.ScanError }
                 if ($job.Images -eq 0) {
@@ -790,7 +802,7 @@ try {
                 $conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination} | ForEach-Object {$_.Destination})
                 $existingOutput = $conflicts.Count -gt 0
                 if ($existingOutput) {
-                    $overwrite = Confirm-Overwrite ($conflicts -join "`n                  ") ($Mode -eq 'Folders')
+                    $overwrite = Confirm-Overwrite ($conflicts -join "`n                  ") $plan.Folder
                     Write-Log ('EXISTING OUTPUT: overwrite={0}; policy={1}; path={2}' -f $overwrite, $script:ExistingPolicy, $destination)
                     if (-not $overwrite) {
                         $script:Skipped++
@@ -802,25 +814,35 @@ try {
                     }
                 }
                 if ($job.NibImages -gt 0 -and -not (Test-ApplicationWorker) -and -not (Test-Path -LiteralPath $NibConv -PathType Leaf)) {
-                    throw 'This ZIP contains NIB/NBZ images. Restore app/tools/nibconv.exe, then retry. Original kept.'
+                    throw 'This input contains NIB/NBZ images. Restore app/tools/nibconv.exe, then retry. Original kept.'
                 }
                 $zip.Refresh(); $sourceLength = $zip.Length; $sourceTime = $zip.LastWriteTimeUtc
                 $sourceHash = $null
-                if ($removeOriginals) {
+                if ($removeOriginals -or -not $job.IsArchive) {
                     $sourceLease=Open-SourcePolicyReadLease $zip.FullName $sourceRoot
+                    $zip.Refresh()
+                    if ($zip.Length -ne $sourceLength -or $zip.LastWriteTimeUtc -ne $sourceTime) {throw 'Source input changed before staging; original kept.'}
+                    if (-not $job.IsArchive -and $zip.Length -gt 512MB) {throw 'Disk image exceeds the 512 MiB input limit; original kept.'}
                     $sourceHash = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash
                 }
                 $tempBase = Join-Path ([IO.Path]::GetTempPath()) ('ppg_' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
                 $extractDir = Join-Path $tempBase 'extract'
                 [void][IO.Directory]::CreateDirectory($extractDir)
-                Expand-ZipWithProgress $zip.FullName $extractDir
+                if ($job.IsArchive) {
+                    Expand-ZipWithProgress $zip.FullName $extractDir
+                } else {
+                    if ($sourceLength -gt 512MB) {throw 'Disk image exceeds the 512 MiB input limit; original kept.'}
+                    $stagedInput=Join-Path $extractDir $zip.Name
+                    [IO.File]::Copy($zip.FullName,$stagedInput)
+                    if ((Get-FileHash -LiteralPath $stagedInput -Algorithm SHA256).Hash -ne $sourceHash) {throw 'Staged disk image differs from source; original kept.'}
+                }
                 $nibs = @(Get-ChildItem -LiteralPath $extractDir -Recurse -File -Force |
                     Where-Object { $_.Extension -in '.nib', '.nbz' } | Sort-Object FullName)
-                if ($nibs.Count -ne $job.NibImages) { throw 'ZIP changed since scanning; run again.' }
+                if ($nibs.Count -ne $job.NibImages) { throw 'Input changed since scanning; run again.' }
                 $outputs = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
                 foreach ($nib in $nibs) {
                     $g64 = [IO.Path]::ChangeExtension($nib.FullName, '.g64')
-                    if ((Test-Path -LiteralPath $g64) -or -not $outputs.Add($g64)) { throw "Conflicting G64 filename: $($nib.Name). Source ZIP preserved." }
+                    if ((Test-Path -LiteralPath $g64) -or -not $outputs.Add($g64)) { throw "Conflicting G64 filename: $($nib.Name). Original preserved." }
                 }
                 for ($i = 0; $i -lt $nibs.Count; $i++) {
                     $nib = $nibs[$i]
@@ -849,10 +871,15 @@ try {
                 $expectedFiles=@(Get-ChildItem -LiteralPath $extractDir -Recurse -File -Force | ForEach-Object {$_.FullName.Substring($extractPrefix.Length).Replace('\','/')})
                 Assert-C64OwnedOutputs $plan $expectedMedia $destinationRoot $expectedFiles
                 $zip.Refresh()
-                if ($zip.Length -ne $sourceLength -or $zip.LastWriteTimeUtc -ne $sourceTime) { throw 'Source ZIP changed during processing; save cancelled.' }
+                if ($zip.Length -ne $sourceLength -or $zip.LastWriteTimeUtc -ne $sourceTime) { throw 'Source input changed during processing; save cancelled.' }
                 $destinationDirectory = [IO.Path]::GetDirectoryName($destination)
                 [void][IO.Directory]::CreateDirectory($destinationDirectory)
-                if ($Mode -eq 'Folders') {
+                if ($plan.Loose) {
+                    $newZip = Join-Path $destinationDirectory ('.ppg_' + [Guid]::NewGuid().ToString('N') + '.tmp')
+                    [IO.File]::Copy($g64s[0].FullName,$newZip)
+                    $newZipHash = (Get-FileHash -LiteralPath $newZip -Algorithm SHA256).Hash
+                    if ($newZipHash -ne (Get-FileHash -LiteralPath $g64s[0].FullName -Algorithm SHA256).Hash) {throw 'Staged G64 differs from converted disk; original kept.'}
+                } elseif ($plan.Folder) {
                     $newFolder = Join-Path $destinationDirectory ('.ppg_' + [Guid]::NewGuid().ToString('N') + '.tmp')
                     $folderManifest=New-FolderWithProgress $extractDir $newFolder
                 } else {
@@ -861,15 +888,15 @@ try {
                     $newZipHash = (Get-FileHash -LiteralPath $newZip -Algorithm SHA256).Hash
                 }
                 $zip.Refresh()
-                if ($zip.Length -ne $sourceLength -or $zip.LastWriteTimeUtc -ne $sourceTime) { throw 'Source ZIP changed during processing; save cancelled.' }
-                if ($Mode -eq 'Folders') {
+                if ($zip.Length -ne $sourceLength -or $zip.LastWriteTimeUtc -ne $sourceTime) { throw 'Source input changed during processing; save cancelled.' }
+                if ($plan.Folder) {
                     Show-Progress 0.99 'Saving verified folder to DST' $relativeOutput -1 -Force
                     $folderItem=[pscustomobject]@{Staged=$newFolder;Destination=$destination;Folder=$true;Manifest=$folderManifest}
                     Assert-C64OwnedOutputs $plan $expectedMedia $destinationRoot $expectedFiles
                     $installItems=@($folderItem)
                     $outputCommit=Install-PlaylistSet $installItems $null $false $overwrite
                 } else {
-                    Show-Progress 0.99 'Saving verified ZIP to DST' $relativeOutput -1 -Force
+                    Show-Progress 0.99 'Saving verified file to DST' $relativeOutput -1 -Force
                     $fileItem=[pscustomobject]@{Staged=$newZip;Destination=$destination;Folder=$false;Hash=$newZipHash}
                     Assert-C64OwnedOutputs $plan $expectedMedia $destinationRoot $expectedFiles
                     $installItems=@($fileItem)
@@ -889,7 +916,7 @@ try {
                     $sourceLease.Dispose(); $sourceLease=$null
                     $removeError = Remove-VerifiedSource $zip.FullName $sourceHash $relativeZip
                     if ($removeError) { $result.Detail += ' Original not removed: ' + $removeError }
-                } else { Write-Log 'KEPT: original ZIP in SRC' }
+                } else { Write-Log 'KEPT: original input in SRC' }
                 Show-Progress 1 'Complete - saved to DST' $relativeOutput 100 -Force
             } catch {
                 $script:Failed++
@@ -924,8 +951,8 @@ try {
         foreach ($id in 2, 1, 0) { Write-Progress -Id $id -Activity 'Complete' -Completed }
         Write-C64Text ''
         Write-RetroStripe
-        Write-C64Text '  FINISHED - 100% of ZIPs processed' -ForegroundColor Cyan
-        Write-C64Text ('  Total source ZIPs: {0:N0}' -f $script:Total) -ForegroundColor White
+        Write-C64Text '  FINISHED - 100% of inputs processed' -ForegroundColor Cyan
+        Write-C64Text ('  Total source inputs: {0:N0}' -f $script:Total) -ForegroundColor White
         Write-C64Text ('  Outputs written: {0:N0} (new: {1:N0}, overwritten: {2:N0})' -f $script:Ok, ($script:Ok - $script:Overwritten), $script:Overwritten) -ForegroundColor Cyan
         Write-C64Text ('  Skipped: {0:N0} (no disk images: {1:N0}; overwrite declined: {2:N0})' -f $script:Skipped, $script:NoImages, $script:Declined) -ForegroundColor Yellow
         Write-C64Text ('  Failed: {0:N0}' -f $script:Failed) -ForegroundColor Magenta
@@ -945,15 +972,15 @@ try {
             }
             if ($attention.Count -gt 25) { Write-C64Text ('  ...and {0:N0} more; see the CSV report.' -f ($attention.Count - 25)) }
         }
-        if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-C64Text "`n  Results for EVERY source ZIP: $reportPath" -ForegroundColor Cyan}
+        if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-C64Text "`n  Results for EVERY source input: $reportPath" -ForegroundColor Cyan}
         if ($script:ReportProblem) {Write-C64Text '  Reporting failed. Conversion results above may be incomplete in the log or CSV.' -ForegroundColor Yellow}
         Write-C64Text "  Output: $destinationRoot"
         if (-not (Test-ApplicationWorker)) {Write-C64Text "  Log: $logPath"} else {Write-C64Text '  Waiting for independent verification and publication.'}
-        if ($script:Failed -gt 0) { $exitCode = 1; Write-C64Text '  Failed conversions keep their original ZIPs. See the report for details.' -ForegroundColor Magenta }
+        if ($script:Failed -gt 0) { $exitCode = 1; Write-C64Text '  Failed conversions keep their original inputs. See the report for details.' -ForegroundColor Magenta }
         if ($script:RemoveFailed -gt 0 -or $script:ReportProblem) { $exitCode = 1 }
     } else {
         Show-ClosingPanel -RemovalFailures $script:RemoveFailed
-        Write-Event 'EMPTY' ("No ZIP files found in SRC. Put your ZIPs in: $sourceRoot")
+        Write-Event 'EMPTY' ("No NIB/NBZ/G64 files or ZIPs found in SRC. Put your inputs in: $sourceRoot")
     }
 } catch {
     $exitCode = 1

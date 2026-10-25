@@ -48,13 +48,6 @@ function Invoke-ApplicationHostRequest {
             if ($choice.SourcePolicy) {$selection.SourcePolicy=$choice.SourcePolicy;$State.Grant=$selection}
             return @{Choice=$choice.Choice}
         }
-        'Policy.C64' {
-            if ($State.Broker.ActiveBatch -or $State.Completed) {throw 'A batch is already active.'}
-            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind C64Mode -Operation C64 -System COMMODORE -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
-            $State.Grant=$null
-            if ($choice.SourcePolicy) {$State.Grant=@{Operation='C64';System='COMMODORE';Storage=$choice.Storage;Format='LooseDSK';SourcePolicy=$choice.SourcePolicy}}
-            return @{Choice=$choice.Choice;Answer=$choice.Answer}
-        }
         'Batch.Begin' {
             if (-not $State.Grant -or $State.Completed) {throw 'Select the batch policy in the trusted prompt first.'}
             $selection=Get-ApplicationSelection $payload
@@ -261,7 +254,7 @@ function Invoke-ApplicationHost {
                 $worker=@{OnionRoot=$sd.StagedRoot;NoPause=$true}
             }
             Write-ApplicationBootstrap $session $Entry $worker $batch
-            $operations=[string[]]@('Policy.Source','Policy.C64','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
+            $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
             if ($Arguments.Preview) {$operations=[string[]]@('Display.Preference')}
             $session.Start('boot.ps1',[string[]]$staged.Assemblies,$operations)
             $exitCode=Invoke-ApplicationHostLoop $state

@@ -17,7 +17,8 @@ function Get-ApplicationPromptTitle {
         }
         'C64' {
             if($System -and $System -cne 'COMMODORE'){throw 'Invalid C64 prompt system.'}
-            return 'Commodore 64 / NIB to G64'
+            $formatName='ZIP output';if($Storage -eq 'Folders'){$formatName='Loose G64 output'}
+            return ('Commodore 64 / '+$formatName)
         }
         'ZX' {
             if($System -and $System -cne 'ZXS'){throw 'Invalid ZX prompt system.'}
@@ -41,13 +42,12 @@ function ConvertTo-ApplicationPromptPath([string]$Path) {
 }
 
 function Get-ApplicationPromptModel {
-    param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','C64Mode','Overwrite')][string]$Kind,
+    param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Auto','Folders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage $Format
-    if($Kind -eq 'C64Mode' -and $Operation -ne 'C64'){throw 'C64 mode prompt requires the C64 operation.'}
     if($Kind -eq 'SourcePolicy' -and $Operation -eq 'SD'){throw 'SD setup cannot remove source media.'}
     if($Kind -ne 'Overwrite' -and $ConflictPaths.Count){throw 'Unexpected conflict paths in a policy prompt.'}
     if($Kind -eq 'SourcePolicy') {
@@ -55,15 +55,6 @@ function Get-ApplicationPromptModel {
             'Skipped or failed items keep their originals.','B. Back to output settings     Q. Exit')
         if($Invalid){$lines+='Choose 1, 2, B or Q.'}
         return [pscustomobject]@{Title=($title+' / originals');Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
-    }
-    if($Kind -eq 'C64Mode') {
-        $lines=@('Convert NIB/NBZ game ZIPs to G64.',
-            'Conversion only: visible output, no playlists.',
-            '1. ZIP output / KEEP originals (default)','2. ZIP output / REMOVE after verified success',
-            '3. Folder output / KEEP originals','4. Folder output / REMOVE after verified success',
-            'B. Back to main menu     Q. Exit')
-        if($Invalid){$lines+='Choose 1 to 4, B or Q.'}
-        return [pscustomobject]@{Title=$title;Lines=$lines;Prompt='Choose mode [Enter = 1]';Page=0;Pages=1}
     }
     if($Operation -eq 'SD'){throw 'SD setup does not use output overwrite authority.'}
     if(-not $ConflictPaths.Count -or $ConflictPaths.Count -gt 20000){throw 'A bounded parent conflict list is required.'}
@@ -138,7 +129,7 @@ function Read-ApplicationConsoleChoice($Model) {
 
 function Invoke-ApplicationPolicyPrompt {
     param([Parameter(Mandatory=$true)]$Session,
-          [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','C64Mode','Overwrite')][string]$Kind,
+          [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Auto','Folders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
@@ -167,13 +158,6 @@ function Invoke-ApplicationPolicyPrompt {
             $choice=$null;$policy=$null;$navigation=$null;$selectedStorage=$Storage
             if($Kind -eq 'SourcePolicy') {
                 switch($answer){''{$choice='Keep';$policy='Keep'}'1'{$choice='Keep';$policy='Keep'}'2'{$choice='Remove';$policy='Remove'}'B'{$choice='Back';$navigation='Back'}'Q'{$choice='Exit';$navigation='Exit'}}
-            } elseif($Kind -eq 'C64Mode') {
-                if($answer -eq ''){$answer='1'}
-                if($answer -in '1','2','3','4') {
-                    $choice=$answer;$policy='Keep';$selectedStorage='Auto'
-                    if($answer -in '2','4'){$policy='Remove'}
-                    if($answer -in '3','4'){$selectedStorage='Folders'}
-                } elseif($answer -eq 'B'){$choice='Back';$navigation='Back'}elseif($answer -eq 'Q'){$choice='Exit';$navigation='Exit'}
             } else {
                 $choice=ConvertFrom-OverwriteAnswer $answer
             }

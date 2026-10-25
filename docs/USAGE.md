@@ -43,20 +43,15 @@ Use `Game (Side A).tap` and `Game (Side B).tap` for tape sides. Extract separate
 disc or side ZIPs first, then name the files or combine the images into one game ZIP.
 Keep alternate releases and formats of the same disc in separate batches.
 
-### C: C64 conversion
+### C and Z: conversion
 
-Put each game's NIB/NBZ images in a ZIP, then copy the ZIPs into `SRC`. Existing
-G64 images can be included and are kept unchanged. **C reads ZIPs only**; loose
-NIB/NBZ files must be zipped first.
+Both accept loose images or ZIPs in `SRC`, including subfolders. Disc or side
+numbering is not required for conversion.
 
-Name each ZIP after its game: `Game.zip` produces `Game.zip` or `Game/` in `DST`.
-The images inside do not need disc or side numbering for conversion.
-
-### Z: ZX conversion
-
-Copy loose `.ipf` files or ZIPs containing IPF images into `SRC`. ZIPs can contain
-one or several images; **each IPF is converted separately**. Disc or side
-numbering is not required. Files and ZIPs can also be in subfolders.
+- **C:** NIB/NBZ images become G64. Existing G64 images are kept unchanged.
+  Use one ZIP per game to keep its images together.
+- **Z:** IPF images become DSK. Each IPF is converted separately, including
+  images inside a ZIP.
 
 ## Create playlists
 
@@ -97,28 +92,23 @@ the cores on your SD card. C64 tape-side support is shown in its playlist menu.
 
 **C** and **Z** save converted media in `DST` without creating playlists.
 
+Choose **C** or **Z**, then the output format:
+
+- **1: Loose files**
+- **2: ZIP files** (default)
+
+Then choose **1: Keep originals** (default) or **2: Remove originals** to start.
+**B** at this second screen returns to the output choice.
+
 ### C64 converter: C
 
-After [preparing the C64 ZIPs](#c-c64-conversion), choose **C** and a mode:
-
-| Choose | Output | Originals |
-| --- | --- | --- |
-| **1** (default) | ZIP per game | Keep |
-| **2** | ZIP per game | Remove |
-| **3** | Folder per game | Keep |
-| **4** | Folder per game | Remove |
-
-Selecting a mode starts the batch.
+Loose NIB/NBZ inputs produce a G64 file or a ZIP containing it. An input game
+ZIP produces a game folder or ZIP, keeping its images and companion files together.
 
 ### ZX converter: Z
 
-After [preparing the IPF inputs](#z-zx-conversion), choose **Z** and an output format:
-
-- **1: Loose DSK files**
-- **2: One ZIP per DSK** (default)
-
-Choose **1: Keep originals** (default) or **2: Remove originals** to start.
-Some IPF copy-protection details cannot be preserved in DSK.
+Each IPF produces a DSK file or a ZIP containing it. Some IPF copy-protection
+details cannot be preserved in DSK.
 
 ## Existing outputs and finishing a batch
 

@@ -983,7 +983,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  S. Onion SD setup: playlist visibility / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
             Write-MenuLine ('  F. Display effect: '+$script:DisplayEffect+' / toggle')
-            Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK (loose files or ZIPs)' 'Z. ZX Spectrum / IPF -> DSK'
+            Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
             Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB -> G64'
             Write-MenuLine '  Q. Exit'
             if ($menuOnionRoot) {Write-MenuLine ('  Support: selected cores on '+$menuOnionRoot) 'Support: selected cores on your SD'}
@@ -1036,41 +1036,30 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $common.DisplayEffect=$script:DisplayEffect
             continue
         }
-        if ($page -eq 'C64') {
-            $pageName='Commodore 64'
+        if ($page -in 'C64','ZX') {
+            $pageName='Commodore 64';$outputName='G64'
+            if ($page -eq 'ZX') {$pageName='ZX Spectrum';$outputName='DSK'}
             Show-MenuTitle $pageName
-            Write-MenuLine '  Convert NIB/NBZ ZIPs to G64. Existing G64 images keep their bytes.'
-            Write-MenuLine '  Conversion only: visible ZIPs or folders. No playlists.'
-            Write-MenuLine '  1. ZIP output / KEEP originals in SRC'
-            Write-MenuLine '  2. ZIP output / REMOVE originals only after verified success'
-            Write-MenuLine '  3. Folder output / KEEP originals in SRC'
-            Write-MenuLine '  4. Folder output / REMOVE originals after verified success'
-            Write-MenuLine '  B. Back to main menu     Q. Exit'
-            if (Test-ApplicationWorker) {$answer=[string](Invoke-ApplicationRpc -Operation Policy.C64 -Payload @{}).Answer}
-            else {$answer=Read-MenuChoice 'Choose mode [Enter = 1]'}
-            if ($answer -eq 'B') {$page='Main'; continue}
-            if ($answer -eq 'Q') {return $lastCode}
-            if ($answer -eq '') {$answer='1'}
-            if ($answer -notin '1','2','3','4') {Write-MenuLine '  Choose 1, 2, 3, 4, B or Q.'; continue}
-            $mode=@{'1'='Keep';'2'='Remove';'3'='Folders';'4'='Folders'}[$answer]
-            $worker=Join-Path $ScriptDir 'C64/convert_c64.ps1'
-            $workerArgs=$common.Clone(); $workerArgs.Mode=$mode; $workerArgs.NoPause=$true; $workerArgs.OnionRoot=$menuOnionRoot
-            $workerArgs.SourcePolicy='Keep'; if ($answer -in '2','4') {$workerArgs.SourcePolicy='Remove'}
-        } elseif ($page -eq 'ZX') {
-            $pageName='ZX Spectrum'
-            Show-MenuTitle $pageName
-            Write-MenuLine '  Convert IPF to DSK. Choose Keep or Remove on the next screen.'
-            Write-MenuLine '  1. Loose DSK files'
-            Write-MenuLine '  2. One ZIP per DSK'
+            if ($page -eq 'C64') {Write-MenuLine '  Convert NIB/NBZ to G64. Input: loose files or ZIPs.'}
+            else {Write-MenuLine '  Convert IPF to DSK. Input: loose files or ZIPs.'}
+            Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
+            Write-MenuLine ('  1. Loose '+$outputName+' files')
+            Write-MenuLine '  2. ZIP files (default)'
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice 'Choose output [Enter = 2]'
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer='2'}
             if ($answer -notin '1','2') {Write-MenuLine '  Choose 1, 2, B or Q.'; continue}
-            $format='ZipDSK'; if ($answer -eq '1') {$format='LooseDSK'}
-            $worker=Join-Path $ScriptDir 'ZX/convert_zx.ps1'
-            $workerArgs=$common.Clone(); $workerArgs.Format=$format
+            $workerArgs=$common.Clone()
+            if ($page -eq 'C64') {
+                $worker=Join-Path $ScriptDir 'C64/convert_c64.ps1'
+                $workerArgs.Mode='Keep';if ($answer -eq '1') {$workerArgs.Mode='Folders'}
+                $workerArgs.NoPause=$true;$workerArgs.OnionRoot=$menuOnionRoot
+            } else {
+                $worker=Join-Path $ScriptDir 'ZX/convert_zx.ps1'
+                $workerArgs.Format='ZipDSK';if ($answer -eq '1') {$workerArgs.Format='LooseDSK'}
+            }
         } elseif ($page -eq 'Storage') {
             $pageName=$profile.Name+' / playlist storage'
             Show-MenuTitle $pageName
@@ -1130,10 +1119,11 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $workerArgs=@{OnionRoot=$answer.Trim('"');NoPause=$true}
             if (Test-Path -LiteralPath (Join-Path $workerArgs.OnionRoot 'RetroArch/.retroarch/cores') -PathType Container) {$menuOnionRoot=$workerArgs.OnionRoot}
         }
-        if ($page -in 'Storage','ZX') {
+        if ($page -in 'Storage','C64','ZX') {
             if (Test-ApplicationWorker) {
                 $operation='Playlist';$chosenFormat='LooseDSK';$chosenStorage='Auto'
                 if ($page -eq 'ZX') {$operation='ZX';$chosenFormat=$workerArgs.Format}
+                elseif ($page -eq 'C64') {$operation='C64';if ($workerArgs.Mode -eq 'Folders') {$chosenStorage='Folders'}}
                 else {$chosenStorage=$workerArgs.Storage}
                 $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage $chosenFormat
             } else {$policyChoice=Read-SourcePolicy $pageName}

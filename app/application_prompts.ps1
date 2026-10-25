@@ -95,7 +95,7 @@ function Read-ApplicationConsoleChoice($Model) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
     $text='';$caret=0;$dirty=$true;$watch=[Diagnostics.Stopwatch]::StartNew()
-    $sparseIdle=([bool](Get-Variable IdleAnimations -ValueOnly -ErrorAction SilentlyContinue) -and $script:UiVT -and -not $script:UiLive)
+    $sparseIdle=(-not $NoAnimation -and $script:UiVT -and -not $script:UiLive)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
@@ -143,7 +143,7 @@ function Invoke-ApplicationPolicyPrompt {
           [ValidateSet('Auto','Folders')][string]$Storage='Auto',
           [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
-          [switch]$NoAnimation,[switch]$IdleAnimations,[switch]$NoColor,
+          [switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     # Validate before taking terminal ownership. Callers must resolve conflict
     # capabilities through the host broker; never pass child-supplied filenames.

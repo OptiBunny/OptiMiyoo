@@ -103,7 +103,8 @@ namespace OptiMiyoo {
         $script:UiColumns=[Console]::WindowWidth; $script:UiHeight=[Console]::WindowHeight
     }
     $script:UiPanel=($script:UiVT -and $script:UiWidth -ge 72 -and $script:UiHeight -ge 19)
-    $script:UiLive=($script:UiPanel -and -not $NoAnimation)
+    # Menus use brief idle gestures and cached sweeps, never continuous redraws.
+    $script:UiLive=$false
     Sync-TerminalDisplayEffect
     if ($script:UiVT) {Initialize-FrameTimer}
     if ($script:UiAnsi -and (Get-Variable PSStyle -ErrorAction SilentlyContinue)) {
@@ -182,7 +183,7 @@ function Update-DisplaySize([switch]$Throttled) {
     $script:MioSparseCrtGeometry=$null; $script:MioSparseCrtGeometryKey=''
     $script:UiWidth=[Math]::Min(92,[Math]::Max(50,$columns-4))
     $script:UiPanel=($script:UiWidth -ge 72 -and $height -ge 19)
-    $script:UiLive=($script:UiPanel -and -not $NoAnimation)
+    $script:UiLive=$false
     return $true
 }
 
@@ -194,7 +195,7 @@ function Sync-TerminalDisplayEffect {
     $script:UiFullScreenCrt=$false
     if (-not $script:UiInteractive -or -not $script:UiVT) {return}
     $mode='Smooth'
-    if ($script:DisplayEffect -eq 'CRT' -and -not $NoAnimation -and -not $NoColor) {
+    if ($script:UiLive -and $script:DisplayEffect -eq 'CRT' -and -not $NoAnimation -and -not $NoColor) {
         $mode='CRT'
         if ($script:UiDemoPaused) {$mode='Paused'}
     }
@@ -451,7 +452,7 @@ function Reset-MioSparseCrt([switch]$KeepIntro) {
     }
 }
 function Update-MioSparseCrt([double]$ElapsedMs,[bool]$HasText=$false,[bool]$VisibleBunny=$true) {
-    $eligible=($IdleAnimations -and -not $NoColor -and $script:UiAnsi -and
+    $eligible=(-not $NoAnimation -and -not $NoColor -and $script:UiAnsi -and
         $script:UiVT -and $script:UiPanel -and $VisibleBunny -and -not $script:UiLive -and
         -not $script:UiDemo -and $script:DisplayEffect -eq 'CRT')
     if (-not $eligible -or $ElapsedMs -lt 0 -or [double]::IsNaN($ElapsedMs) -or [double]::IsInfinity($ElapsedMs)) {
@@ -979,7 +980,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
     $script:UiCaretDrawn=$null
     $watch=[Diagnostics.Stopwatch]::StartNew()
     $idleWatch=[Diagnostics.Stopwatch]::StartNew()
-    $sparseIdle=([bool](Get-Variable IdleAnimations -ValueOnly -ErrorAction SilentlyContinue) -and $Mood -eq 'idle' -and -not $script:UiDemo -and -not $script:UiLive)
+    $sparseIdle=(-not $NoAnimation -and $Mood -eq 'idle' -and -not $script:UiDemo -and -not $script:UiLive)
     $script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if ($sparseIdle) {Reset-MioIdleInput}
@@ -1391,7 +1392,7 @@ function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[
     $script:UiDetail=$Scene.Detail; $script:UiGame=$Scene.Game
     if ($Scene.IdleGesture) {
         $script:UiPoseOverride='idle'
-        if ($script:UiLive -or $IdleAnimations) {$script:UiPoseOverride=Get-MioIdleGesturePose $Scene.IdleGesture ($elapsed-400)}
+        if (-not $NoAnimation) {$script:UiPoseOverride=Get-MioIdleGesturePose $Scene.IdleGesture ($elapsed-400)}
     }
     $script:Total=4
     if ($Scene.ContainsKey('Total')) {$script:Total=[int]$Scene.Total}
@@ -1442,7 +1443,7 @@ function Show-MioPreview([string]$Section='Tour') {
                 elseif ($scene.Status -or $scene.Complete) {$frameInterval=1000}
                 if ($scene.IdleGesture) {
                     $periodic=$false
-                    if ($script:UiLive -or $IdleAnimations) {
+                    if (-not $NoAnimation) {
                         $pose=Get-MioIdleGesturePose $scene.IdleGesture ($timer.ElapsedMilliseconds-400)
                         if ($pose -cne $script:UiPoseOverride) {$dirty=$true; $refreshMio=$true}
                     }

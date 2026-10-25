@@ -95,10 +95,6 @@ During playback, keys work without Enter: **Space** pauses/resumes; **N / Right 
 go forward; **P / Left** go back; **R** restarts; **F** switches CRT/Smooth.
 **B / Q / Esc** returns to demo selection.
 
-The normal launcher enables occasional bunny animations and scanline sweeps
-by default; no extra options are needed.
-**F** switches the bunny and logo to Smooth.
-
 ## Systems and ROM folders
 
 **S** checks the cores selected on your SD card. The standard profiles are:
@@ -141,11 +137,11 @@ Run from the application folder in PowerShell:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
-  -System AMIGA -Storage Folders -NoAnimation
+  -System AMIGA -Storage Folders
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
-  -C64Convert -C64Mode Keep -NoAnimation
+  -C64Convert -C64Mode Keep
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1 `
-  -ZXConvert -ZXFormat ZipDSK -NoAnimation
+  -ZXConvert -ZXFormat ZipDSK
 ```
 
 | Option | Purpose |
@@ -154,6 +150,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\make_playlists.ps1
 | `-OnionRoot E:\` | Check the installed core on that SD card. |
 | `-SourcePolicy Keep` / `Remove` | Keep originals by default, or remove them after verification. |
 | `-Existing Ask` / `Overwrite` / `Skip` | Choose how to handle existing outputs. |
-| `-NoAnimation` | Stop decorative animation when running the script directly. |
+| `-NoAnimation` | Disable decorative animations. |
 | `-NoColor` | Use monochrome output. |
 | `-DisplayEffect Smooth` | Disable CRT styling. |

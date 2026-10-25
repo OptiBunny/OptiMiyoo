@@ -9,7 +9,6 @@ param(
     [switch]$PrepareOnion,
     [switch]$NoPause,
     [switch]$NoAnimation,
-    [switch]$IdleAnimations,
     [switch]$NoColor,
     [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT',
     [switch]$Preview,
@@ -1239,7 +1238,7 @@ function Read-RunNavigation([string]$Page,[int]$Code) {
 function Invoke-OptiMenu([object[]]$Profiles) {
     $page=$StartPage; $profile=$null; $lastCode=0
     $menuOnionRoot=$OnionRoot
-    $common=@{Root=$Root; Existing=$Existing; NoAnimation=$NoAnimation; IdleAnimations=$IdleAnimations; NoColor=$NoColor; DisplayEffect=$DisplayEffect}
+    $common=@{Root=$Root; Existing=$Existing; NoAnimation=$NoAnimation; NoColor=$NoColor; DisplayEffect=$DisplayEffect}
     while ($true) {
         $worker=$null; $workerArgs=$null; $pageName=$page
         if ($page -eq 'Main') {
@@ -1432,13 +1431,13 @@ try {
     if ($C64Convert) {
         Restore-Display
         $policyArgs=@{}; if ($PSBoundParameters.ContainsKey('SourcePolicy')) {$policyArgs.SourcePolicy=$SourcePolicy}
-        & (Join-Path $ScriptDir 'C64/convert_c64.ps1') @policyArgs -Root $Root -Mode $C64Mode -OnionRoot $OnionRoot -Existing $Existing -NoPause:$NoPause -NoAnimation:$NoAnimation -IdleAnimations:$IdleAnimations -NoColor:$NoColor -DisplayEffect $DisplayEffect
+        & (Join-Path $ScriptDir 'C64/convert_c64.ps1') @policyArgs -Root $Root -Mode $C64Mode -OnionRoot $OnionRoot -Existing $Existing -NoPause:$NoPause -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
         exit $LASTEXITCODE
     }
     if ($ZXConvert) {
         Restore-Display
         $policyArgs=@{}; if ($PSBoundParameters.ContainsKey('SourcePolicy')) {$policyArgs.SourcePolicy=$SourcePolicy}
-        & (Join-Path $ScriptDir 'ZX/convert_zx.ps1') @policyArgs -Root $Root -Format $ZXFormat -Existing $Existing -NoAnimation:$NoAnimation -IdleAnimations:$IdleAnimations -NoColor:$NoColor -DisplayEffect $DisplayEffect
+        & (Join-Path $ScriptDir 'ZX/convert_zx.ps1') @policyArgs -Root $Root -Format $ZXFormat -Existing $Existing -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
         $resultCode=$LASTEXITCODE
         if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
         exit $resultCode

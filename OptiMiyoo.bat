@@ -8,7 +8,9 @@ if not exist "%OPTIMIYOO_SCRIPT%" (
     pause
     exit /b 1
 )
-if "%~1"=="" (
+if /I "%~1"=="-NoAnimation" (
+    "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%OPTIMIYOO_SCRIPT%" -NoAnimation
+) else if "%~1"=="" (
     "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%OPTIMIYOO_SCRIPT%"
 ) else (
     "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%OPTIMIYOO_SCRIPT%" -Root "%~1"

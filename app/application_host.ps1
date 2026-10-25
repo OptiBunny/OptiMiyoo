@@ -44,14 +44,14 @@ function Invoke-ApplicationHostRequest {
         'Policy.Source' {
             if ($State.Broker.ActiveBatch -or $State.Completed) {throw 'A batch is already active.'}
             $selection=Get-ApplicationSelection $payload
-            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind SourcePolicy @selection -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -IdleAnimations:([bool]$State.IdleAnimations) -NoColor:([bool]$State.NoColor)
+            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind SourcePolicy @selection -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             $State.Grant=$null
             if ($choice.SourcePolicy) {$selection.SourcePolicy=$choice.SourcePolicy;$State.Grant=$selection}
             return @{Choice=$choice.Choice}
         }
         'Policy.C64' {
             if ($State.Broker.ActiveBatch -or $State.Completed) {throw 'A batch is already active.'}
-            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind C64Mode -Operation C64 -System COMMODORE -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -IdleAnimations:([bool]$State.IdleAnimations) -NoColor:([bool]$State.NoColor)
+            $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind C64Mode -Operation C64 -System COMMODORE -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             $State.Grant=$null
             if ($choice.SourcePolicy) {$State.Grant=@{Operation='C64';System='COMMODORE';Storage=$choice.Storage;Format='LooseDSK';SourcePolicy=$choice.SourcePolicy}}
             return @{Choice=$choice.Choice;Answer=$choice.Answer}
@@ -85,7 +85,7 @@ function Invoke-ApplicationHostRequest {
             $conflict=Get-ApplicationBrokerConflict $State.Broker $batch.BatchId ([string]$payload.ConflictId)
             $choice=$conflict.Decision
             if ($choice -eq 'Pending') {
-                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -Format $batch.Format -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -IdleAnimations:([bool]$State.IdleAnimations) -NoColor:([bool]$State.NoColor)
+                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -Format $batch.Format -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
                 $choice=$prompt.Choice
                 Set-ApplicationBrokerOverwrite $State.Broker $batch.BatchId $conflict.ConflictId $choice
             }
@@ -104,7 +104,7 @@ function Invoke-ApplicationHostRequest {
         }
         'SD.Select' {
             if ($State.Broker.ActiveBatch) {throw 'Finish the active batch first.'}
-            $root=Invoke-ApplicationSdFolderPrompt -Session $State.Session -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -IdleAnimations:([bool]$State.IdleAnimations) -NoColor:([bool]$State.NoColor)
+            $root=Invoke-ApplicationSdFolderPrompt -Session $State.Session -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             if (-not $root) {return @{Cancelled=$true}}
             $State.NextOnionRoot=$root;$State.StopRequested=$true
             return @{Accepted=$true}
@@ -244,9 +244,9 @@ function Invoke-ApplicationHost {
                 $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
             }
             $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
-            $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;IdleAnimations=[bool]$Arguments.IdleAnimations;NoColor=[bool]$Arguments.NoColor}
+            $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
             $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
-            foreach ($key in 'NoAnimation','IdleAnimations','NoColor','NoPause','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
+            foreach ($key in 'NoAnimation','NoColor','NoPause','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
             if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
             if ($menu) {$worker.StartPage=$startPage}
             if ($sd) {$worker.OnionRoot=$sd.StagedRoot}

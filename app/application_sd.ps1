@@ -200,7 +200,7 @@ function Close-ApplicationSdSession {
 function Read-ApplicationSdConsolePath {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
     $title='Onion SD setup';$prompt='SD card root (for example E:\)';$rows=@('Choose the SD card root folder.','Setup adds supported file-list extensions.','Selected emulator cores stay unchanged.','Escape cancels.');$text='';$dirty=$true;$clock=[Diagnostics.Stopwatch]::StartNew()
-    $sparseIdle=([bool](Get-Variable IdleAnimations -ValueOnly -ErrorAction SilentlyContinue) -and $script:UiVT -and -not $script:UiLive)
+    $sparseIdle=(-not $NoAnimation -and $script:UiVT -and -not $script:UiLive)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
@@ -230,7 +230,7 @@ function Read-ApplicationSdConsolePath {
 }
 
 function Invoke-ApplicationSdFolderPrompt {
-    param([Parameter(Mandatory=$true)]$Session,[switch]$NoAnimation,[switch]$IdleAnimations,[switch]$NoColor,
+    param([Parameter(Mandatory=$true)]$Session,[switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     $paused=$false;$display=$false;$selected=$null;$previousEffect=$script:DisplayEffect
     try {

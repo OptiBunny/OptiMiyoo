@@ -6,7 +6,6 @@ param(
     [ValidateSet('Ask', 'Overwrite', 'Skip')][string]$Existing = 'Ask',
     [switch]$NoPause,
     [switch]$NoAnimation,
-    [switch]$IdleAnimations,
     [string]$OnionRoot,
     [switch]$NoColor,
     [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT'

@@ -2,7 +2,7 @@
 param([string]$Root,[ValidateSet('Ask','LooseDSK','ZipDSK')][string]$Format='Ask',
       [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
       [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
-      [switch]$NoAnimation,[switch]$IdleAnimations,[switch]$NoColor,
+      [switch]$NoAnimation,[switch]$NoColor,
       [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
 # Based on ZX converter v2.3; OptiMiyoo integration keeps its conversion engine.
 # ZX IPF / ZIP -> DSK Converter v2.3 - console edition

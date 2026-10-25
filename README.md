@@ -20,7 +20,8 @@ including C64 NIB/NBZ → G64 and ZX Spectrum IPF → DSK conversion.
 4. Copy the resulting `DST` contents—including `.hidden` when present—to the matching
    [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders), then refresh the game list.
 
-Originals are kept by default. **D** previews the workflow without changing game files.
+Originals are kept by default. **D** opens a demo showcasing the menus, animations,
+and processing workflow without changing game files.
 Converter tools are included; ROMs, BIOS files, and Onion cores are not.
 
 AI disclosure: OptiMiyoo is almost entirely vibe-coded. Most of the project’s own code, tests, and documentation were generated and revised by AI. Use it at your own risk.

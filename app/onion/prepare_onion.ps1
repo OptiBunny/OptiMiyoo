@@ -1,16 +1,16 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param([string]$OnionRoot)
-. (Join-Path $PSScriptRoot 'application_entry.ps1')
+. (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
-    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent $PSScriptRoot) -Entry SD -Arguments $PSBoundParameters)
+    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry SD -Arguments $PSBoundParameters)
 }
 $ErrorActionPreference='Stop'
 $exitCode=0
-$ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $ScriptDir 'core_support.ps1')
-. (Join-Path $ScriptDir 'compile_support.ps1')
-. (Join-Path $ScriptDir 'output_safety.ps1')
+$ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+. (Join-Path $ScriptDir 'onion/core_support.ps1')
+. (Join-Path $ScriptDir 'shared/compile_support.ps1')
+. (Join-Path $ScriptDir 'shared/output_safety.ps1')
 function Write-OnionText([string]$Text) {Write-Host (ConvertTo-SafeExternalText $Text)}
 function Initialize-OnionPathLease {
     if ('OptiMiyoo.OnionPathLease' -as [type]) {return}

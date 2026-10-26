@@ -1,8 +1,8 @@
 ﻿# Parent archive service and confined-client adapter. The wire protocol carries
 # bounded data and scoped relative paths, never executable names or commands.
-. (Join-Path $PSScriptRoot 'source_policy.ps1')
+. (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
 if(-not (Get-Variable ApplicationArchiveTasks -Scope Script -ErrorAction SilentlyContinue)){$script:ApplicationArchiveTasks=@{}}
-$script:ApplicationArchiveCodeRoot=$PSScriptRoot
+$script:ApplicationArchiveCodeRoot=Split-Path -Parent $PSScriptRoot
 
 function Assert-ApplicationArchiveFields($Payload,[string[]]$Allowed,[string[]]$Required) {
     if($Payload -is [Collections.IDictionary]){$names=@($Payload.Keys)}
@@ -134,12 +134,12 @@ function Invoke-ApplicationArchiveRequest {
             $script=@'
 param($CodeRoot,$InputPath,$InputLease,$Profile,$Operation,$EntryIndex,$Destination,$MaximumBytes,$ProgressQueue,[byte[]]$TrustedWorkerBytes)
 $ErrorActionPreference='Stop'
-foreach($helper in 'compile_support.ps1','source_policy.ps1','archive_limits.ps1','zip_integrity.ps1','native_process.ps1','archive_sandbox.ps1'){. (Join-Path $CodeRoot $helper)}
+foreach($helper in 'shared/compile_support.ps1','shared/source_policy.ps1','shared/archive_limits.ps1','shared/zip_integrity.ps1','shared/native_process.ps1','shared/archive_sandbox.ps1'){. (Join-Path $CodeRoot $helper)}
 $script:ArchiveSandboxExecutableBytes=[byte[]]$TrustedWorkerBytes.Clone()
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $tokens=$null;$errors=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $CodeRoot 'make_playlists.ps1'),[ref]$tokens,[ref]$errors)
+$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $CodeRoot 'playlists/make_playlists.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Installed archive helpers failed syntax validation.'}
 foreach($name in 'Assert-PlainOutputParents') {
     $definitions=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq $name})

@@ -144,19 +144,19 @@ function Invoke-ApplicationHostLoop($State) {
 
 function Write-ApplicationBootstrap {
     param($Session,[string]$Entry,[hashtable]$Arguments,$Batch)
-    $scriptName=@{Playlist='app/make_playlists.ps1';C64='app/C64/convert_c64.ps1';ZX='app/ZX/convert_zx.ps1';SD='app/prepare_onion.ps1'}[$Entry]
+    $scriptName=@{Playlist='app/playlists/make_playlists.ps1';C64='app/C64/convert_c64.ps1';ZX='app/ZX/convert_zx.ps1';SD='app/onion/prepare_onion.ps1'}[$Entry]
     $config=@{Entry=$scriptName;Arguments=$Arguments;Batch=$Batch}
     $encoding=New-Object Text.UTF8Encoding($true)
     [IO.File]::WriteAllText((Join-Path $Session.CodePath 'launch.json'),(ConvertTo-Json -InputObject $config -Depth 16 -Compress),$encoding)
     $boot=@'
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot 'app/application_session.ps1')
-. (Join-Path $PSScriptRoot 'app/application_entry.ps1')
+. (Join-Path $PSScriptRoot 'app/runtime/application_session.ps1')
+. (Join-Path $PSScriptRoot 'app/runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {throw 'The application did not start inside its required boundary.'}
 $config=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'launch.json') -Raw | ConvertFrom-Json
-if ($config.Entry -ne 'app/prepare_onion.ps1') {
-    . (Join-Path $PSScriptRoot 'app/application_jobs.ps1')
-    . (Join-Path $PSScriptRoot 'app/application_archive.ps1')
+if ($config.Entry -ne 'app/onion/prepare_onion.ps1') {
+    . (Join-Path $PSScriptRoot 'app/runtime/application_jobs.ps1')
+    . (Join-Path $PSScriptRoot 'app/runtime/application_archive.ps1')
 }
 $parameters=@{}
 foreach ($property in $config.Arguments.PSObject.Properties) {$parameters[$property.Name]=$property.Value}

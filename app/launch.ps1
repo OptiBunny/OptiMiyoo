@@ -5,7 +5,7 @@ $env:PSModuleAnalysisCachePath='NUL'
 
 function New-OptiTerminalCommand([string]$EntryPoint,[string]$Root,[switch]$NoAnimation) {
     # Keep paths out of Windows Terminal's semicolon-delimited command syntax.
-    $application=Split-Path -Parent (Split-Path -Parent $EntryPoint)
+    $application=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $EntryPoint))
     $command="`$env:PSModuleAnalysisCachePath='NUL'; Set-Location -LiteralPath '"+$application.Replace("'","''")+"'; & '"+$EntryPoint.Replace("'","''")+"' -DisplayEffect CRT"
     if ($NoAnimation) {$command+=' -NoAnimation'}
     if ($Root) {$command+=" -Root '"+$Root.Replace("'","''")+"'"}
@@ -34,7 +34,7 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root,[switch]$NoA
     }
 }
 
-$entryPoint=Join-Path $PSScriptRoot 'make_playlists.ps1'
+$entryPoint=Join-Path $PSScriptRoot 'playlists/make_playlists.ps1'
 $interactive=($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
 if ($interactive -and -not $CurrentTerminal -and (Start-OptiTerminalWindow $entryPoint $Root -NoAnimation:$NoAnimation)) {exit 0}
 $parameters=@{DisplayEffect='CRT';NoAnimation=[bool]$NoAnimation}

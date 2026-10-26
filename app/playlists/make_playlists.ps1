@@ -18,19 +18,19 @@ param(
     [switch]$C64Convert,
     [ValidateSet('Main','C64','ZX')][string]$StartPage='Main'
 )
-. (Join-Path $PSScriptRoot 'application_entry.ps1')
+. (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
-    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent $PSScriptRoot) -Entry Playlist -Arguments $PSBoundParameters)
+    exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry Playlist -Arguments $PSBoundParameters)
 }
 $script:AppVersion='0.0.9'
 $ErrorActionPreference='Stop'
-$ScriptDir=Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $ScriptDir 'source_policy.ps1')
-. (Join-Path $ScriptDir 'archive_limits.ps1')
-. (Join-Path $ScriptDir 'zip_integrity.ps1')
-. (Join-Path $ScriptDir 'archive_sandbox.ps1')
-. (Join-Path $ScriptDir 'overwrite_prompt.ps1')
-. (Join-Path $ScriptDir 'core_support.ps1')
+$ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+. (Join-Path $ScriptDir 'shared/source_policy.ps1')
+. (Join-Path $ScriptDir 'shared/archive_limits.ps1')
+. (Join-Path $ScriptDir 'shared/zip_integrity.ps1')
+. (Join-Path $ScriptDir 'shared/archive_sandbox.ps1')
+. (Join-Path $ScriptDir 'shared/overwrite_prompt.ps1')
+. (Join-Path $ScriptDir 'onion/core_support.ps1')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
@@ -1011,7 +1011,7 @@ function Assert-NoMediaNesting($Job,[string]$DestinationRoot,[bool]$ZipMode) {
 }
 
 # All workers share the same display and cleanup reporting.
-. (Join-Path $ScriptDir 'display.ps1')
+. (Join-Path $ScriptDir 'ui/display.ps1')
 
 # The launcher owns navigation; workers run in a fresh script scope for each batch.
 # Back never starts a worker or touches SRC/DST.
@@ -1184,7 +1184,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq '') {$answer=$defaultOutput}
             if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
             $storageChoice=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
-            $worker=Join-Path $ScriptDir 'make_playlists.ps1'
+            $worker=Join-Path $ScriptDir 'playlists/make_playlists.ps1'
             $workerArgs=$common.Clone(); $workerArgs.System=$profile.Folder
             $workerArgs.Storage=$storageChoice
             $workerArgs.OnionRoot=$menuOnionRoot

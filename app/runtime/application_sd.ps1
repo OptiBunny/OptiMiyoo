@@ -1,20 +1,20 @@
 ﻿# The SD root comes from the original command line or the parent's own console.
 # Child output can only request the exact extension patch computed here from
 # frozen original bytes; it cannot supply a host path, replacement, or backup.
-. (Join-Path $PSScriptRoot 'compile_support.ps1')
-. (Join-Path $PSScriptRoot 'core_support.ps1')
+. (Join-Path $PSScriptRoot '../shared/compile_support.ps1')
+. (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 . (Join-Path $PSScriptRoot 'application_prompts.ps1')
 if(-not (Get-Variable ApplicationSdStates -Scope Script -ErrorAction SilentlyContinue)){$script:ApplicationSdStates=@{}}
-$script:ApplicationSdCodeRoot=$PSScriptRoot
+$script:ApplicationSdCodeRoot=Split-Path -Parent $PSScriptRoot
 
 function Initialize-ApplicationSdSupport {
     if(Get-Variable ApplicationSdModule -Scope Script -ErrorAction SilentlyContinue){return}
     $script:ApplicationSdModule=New-Module -Name OptiMiyooSdBroker -ArgumentList $script:ApplicationSdCodeRoot -ScriptBlock {
         param($codeRoot)
-        . (Join-Path $codeRoot 'compile_support.ps1')
-        . (Join-Path $codeRoot 'core_support.ps1')
+        . (Join-Path $codeRoot 'shared/compile_support.ps1')
+        . (Join-Path $codeRoot 'onion/core_support.ps1')
         $tokens=$null;$errors=$null
-        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $codeRoot 'prepare_onion.ps1'),[ref]$tokens,[ref]$errors)
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $codeRoot 'onion/prepare_onion.ps1'),[ref]$tokens,[ref]$errors)
         if($errors.Count){throw 'Installed SD helpers failed syntax validation.'}
         foreach($name in 'Initialize-OnionPathLease','Write-OnionBytesVerified') {
             $definitions=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq $name})

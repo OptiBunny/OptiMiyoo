@@ -35,7 +35,7 @@ namespace OptiMiyoo {
 
 function Initialize-ApplicationSession {
     if ('OptiMiyoo.ApplicationSession' -as [type]) {return}
-    . (Join-Path $PSScriptRoot 'source_policy.ps1')
+    . (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
     Initialize-SourcePolicyNative
     Add-OptiMiyooType -TypeDefinition @'
 using System;

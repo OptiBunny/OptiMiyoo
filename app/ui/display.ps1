@@ -1,6 +1,6 @@
-﻿. (Join-Path $PSScriptRoot 'compile_support.ps1')
+﻿. (Join-Path $PSScriptRoot '../shared/compile_support.ps1')
 # OptiMiyoo's display is deliberately separate from file processing.
-. (Join-Path $PSScriptRoot 'output_safety.ps1')
+. (Join-Path $PSScriptRoot '../shared/output_safety.ps1')
 . (Join-Path $PSScriptRoot 'mio_idle_library.ps1')
 . (Join-Path $PSScriptRoot 'mio_idle_scheduler.ps1')
 # Percentages use completed preparation items, completed jobs or measured bytes.

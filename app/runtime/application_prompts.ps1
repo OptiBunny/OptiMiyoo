@@ -1,7 +1,7 @@
 ﻿# These prompts run only in the trusted parent. The confined application can
 # request a known prompt, but cannot supply its text, defaults or answer.
-. (Join-Path $PSScriptRoot 'display.ps1')
-. (Join-Path $PSScriptRoot 'overwrite_prompt.ps1')
+. (Join-Path $PSScriptRoot '../ui/display.ps1')
+. (Join-Path $PSScriptRoot '../shared/overwrite_prompt.ps1')
 
 function Get-ApplicationPromptTitle {
     param([Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,

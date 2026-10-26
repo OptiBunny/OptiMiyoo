@@ -178,7 +178,7 @@ function Open-OptiInputLease([string]$Path,[string]$Root) {
     if (Get-Command Open-SourcePolicyReadLease -ErrorAction SilentlyContinue) {return Open-SourcePolicyReadLease $Path $Root}
     if ('OptiMiyoo.OnionPathLease' -as [type]) {return [OptiMiyoo.OnionPathLease]::Open($Path,$Root,$false,$false,$false)}
     # Standalone SD assessment uses the same native path pinning as workers.
-    . (Join-Path $PSScriptRoot 'source_policy.ps1')
+    . (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
     Assert-PlainOnionPath $Path $Root
     Initialize-SourcePolicyNative
     return [OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($Path)
@@ -298,7 +298,7 @@ function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions) {
     return ,$utf8.GetBytes($updated)
 }
 
-function Get-OnionSetupProfiles([string]$CodeRoot=$PSScriptRoot) {
+function Get-OnionSetupProfiles([string]$CodeRoot=(Split-Path -Parent $PSScriptRoot)) {
     $profileData=Get-Content -LiteralPath (Join-Path $CodeRoot 'systems.json') -Raw | ConvertFrom-Json
     @($profileData)
     # Lynx is a file-list addition only, not a numbered playlist system.

@@ -45,12 +45,12 @@ function New-ApplicationStagedCode {
     $code=[IO.Path]::GetFullPath($Session.CodePath)
     $work=[IO.Path]::GetFullPath($Session.WorkPath).TrimEnd('\','/')
     $files=@(
-        'app/make_playlists.ps1','app/C64/convert_c64.ps1','app/ZX/convert_zx.ps1','app/prepare_onion.ps1',
-        'app/display.ps1','app/compile_support.ps1','app/core_support.ps1','app/overwrite_prompt.ps1',
-        'app/mio_idle_library.ps1','app/mio_idle_scheduler.ps1',
-        'app/output_safety.ps1','app/source_policy.ps1','app/archive_limits.ps1','app/zip_integrity.ps1','app/media_validation.ps1',
-        'app/native_process.ps1','app/native_sandbox.ps1','app/archive_sandbox.ps1','app/conversion_layout.ps1',
-        'app/application_session.ps1','app/application_entry.ps1','app/application_jobs.ps1','app/application_archive.ps1',
+        'app/playlists/make_playlists.ps1','app/C64/convert_c64.ps1','app/ZX/convert_zx.ps1','app/onion/prepare_onion.ps1',
+        'app/ui/display.ps1','app/shared/compile_support.ps1','app/onion/core_support.ps1','app/shared/overwrite_prompt.ps1',
+        'app/ui/mio_idle_library.ps1','app/ui/mio_idle_scheduler.ps1',
+        'app/shared/output_safety.ps1','app/shared/source_policy.ps1','app/shared/archive_limits.ps1','app/shared/zip_integrity.ps1','app/shared/media_validation.ps1',
+        'app/shared/native_process.ps1','app/shared/native_sandbox.ps1','app/shared/archive_sandbox.ps1','app/shared/conversion_layout.ps1',
+        'app/runtime/application_session.ps1','app/runtime/application_entry.ps1','app/runtime/application_jobs.ps1','app/runtime/application_archive.ps1',
         'app/systems.json')
     $texts=@{};$encoding=New-Object Text.UTF8Encoding($true)
     foreach ($relative in $files) {
@@ -68,19 +68,19 @@ function New-ApplicationStagedCode {
     }
     $sources=New-Object Collections.Generic.List[string]
     foreach ($pair in @(
-        @('app/display.ps1','Initialize-Display'),@('app/display.ps1','Initialize-FrameTimer'),
-        @('app/archive_limits.ps1','Initialize-ArchiveLimits'),@('app/media_validation.ps1','Initialize-NibValidation'),
-        @('app/native_process.ps1','Initialize-NativeTextCapture'))) {
+        @('app/ui/display.ps1','Initialize-Display'),@('app/ui/display.ps1','Initialize-FrameTimer'),
+        @('app/shared/archive_limits.ps1','Initialize-ArchiveLimits'),@('app/shared/media_validation.ps1','Initialize-NibValidation'),
+        @('app/shared/native_process.ps1','Initialize-NativeTextCapture'))) {
         $sources.Add((Get-ApplicationLiteralHelper $texts[$pair[0]] $pair[1]))
     }
-    $sourceLease=Get-ApplicationLiteralHelper $texts['app/source_policy.ps1'] 'Initialize-SourcePolicyNative'
+    $sourceLease=Get-ApplicationLiteralHelper $texts['app/shared/source_policy.ps1'] 'Initialize-SourcePolicyNative'
     $sources.Add((ConvertTo-ApplicationWorkLease $sourceLease $work))
-    $sources.Add((Get-ApplicationLiteralHelper $texts['app/zip_integrity.ps1'] 'Initialize-ZipIntegrity'))
-    $onion=Get-ApplicationLiteralHelper $texts['app/prepare_onion.ps1'] 'Initialize-OnionPathLease'
+    $sources.Add((Get-ApplicationLiteralHelper $texts['app/shared/zip_integrity.ps1'] 'Initialize-ZipIntegrity'))
+    $onion=Get-ApplicationLiteralHelper $texts['app/onion/prepare_onion.ps1'] 'Initialize-OnionPathLease'
     $sources.Add((ConvertTo-ApplicationWorkLease $onion $work))
     $sources.Add((Get-ApplicationRpcClientSource))
     # The generated assembly is loaded before any app script; attempted new compilation is an error.
-    [IO.File]::WriteAllText((Join-Path $code 'app/compile_support.ps1'),"function Add-OptiMiyooType {param([string]`$TypeDefinition) throw 'The isolated application cannot compile additional code.'}`r`n",$encoding)
+    [IO.File]::WriteAllText((Join-Path $code 'app/shared/compile_support.ps1'),"function Add-OptiMiyooType {param([string]`$TypeDefinition) throw 'The isolated application cannot compile additional code.'}`r`n",$encoding)
     $build=Join-Path $Session.RootPath 'b'
     $helpers=Join-Path $code 'helpers';[void][IO.Directory]::CreateDirectory($build);[void][IO.Directory]::CreateDirectory($helpers)
     $compiler=Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'

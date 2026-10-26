@@ -1,5 +1,5 @@
-﻿. (Join-Path $PSScriptRoot 'source_policy.ps1')
-. (Join-Path $PSScriptRoot 'native_process.ps1')
+﻿. (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
+. (Join-Path $PSScriptRoot '../shared/native_process.ps1')
 # Fixed native-converter requests for the application AppContainer. This module
 # runs in the trusted parent; paths and receipts are never authority from a child.
 function Resolve-ApplicationJobPath {
@@ -19,8 +19,8 @@ function Resolve-ApplicationJobPath {
 
 function New-ApplicationJobBroker {
     param([Parameter(Mandatory=$true)][string]$ApplicationRoot,[Parameter(Mandatory=$true)]$ReceiptStore)
-    . (Join-Path $ApplicationRoot 'app/source_policy.ps1')
-    . (Join-Path $ApplicationRoot 'app/native_process.ps1')
+    . (Join-Path $ApplicationRoot 'app/shared/source_policy.ps1')
+    . (Join-Path $ApplicationRoot 'app/shared/native_process.ps1')
     Initialize-SourcePolicyNative
     Initialize-NativeSandbox
     Initialize-NativeTextCapture

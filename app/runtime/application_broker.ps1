@@ -1,15 +1,15 @@
 ﻿# The host keeps publication authority. No function in this file is an RPC verb
 # accepting an arbitrary host pathname, script, command, or deletion request.
 # Installed planning/ownership helpers remain trusted, bounded parsing code.
-. (Join-Path $PSScriptRoot 'source_policy.ps1')
-. (Join-Path $PSScriptRoot 'core_support.ps1')
-. (Join-Path $PSScriptRoot 'archive_limits.ps1')
-. (Join-Path $PSScriptRoot 'native_process.ps1')
-. (Join-Path $PSScriptRoot 'archive_sandbox.ps1')
+. (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
+. (Join-Path $PSScriptRoot '../onion/core_support.ps1')
+. (Join-Path $PSScriptRoot '../shared/archive_limits.ps1')
+. (Join-Path $PSScriptRoot '../shared/native_process.ps1')
+. (Join-Path $PSScriptRoot '../shared/archive_sandbox.ps1')
 
 if (-not (Get-Variable ApplicationBrokerStates -Scope Script -ErrorAction SilentlyContinue)) {$script:ApplicationBrokerStates=@{}}
 if (-not (Get-Variable ApplicationBrokerModules -Scope Script -ErrorAction SilentlyContinue)) {$script:ApplicationBrokerModules=@{}}
-$script:ApplicationBrokerCodeRoot=$PSScriptRoot
+$script:ApplicationBrokerCodeRoot=Split-Path -Parent $PSScriptRoot
 
 function Assert-PlainOutputParents([string]$Path,[string]$Root) {
     $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
@@ -224,10 +224,10 @@ function Get-ApplicationBrokerState($Session) {
 
 function Get-ApplicationBrokerModule([ValidateSet('Playlist','C64','ZX')][string]$Operation) {
     if($script:ApplicationBrokerModules.ContainsKey($Operation)){return $script:ApplicationBrokerModules[$Operation]}
-    $relative=@{Playlist='make_playlists.ps1';C64='C64/convert_c64.ps1';ZX='ZX/convert_zx.ps1'}[$Operation]
+    $relative=@{Playlist='playlists/make_playlists.ps1';C64='C64/convert_c64.ps1';ZX='ZX/convert_zx.ps1'}[$Operation]
     $module=New-Module -Name ('OptiMiyooBroker'+$Operation) -ArgumentList @($script:ApplicationBrokerCodeRoot,$relative) -ScriptBlock {
         param($codeRoot,$relative)
-        foreach($helper in 'compile_support.ps1','source_policy.ps1','core_support.ps1','archive_limits.ps1','zip_integrity.ps1','native_process.ps1','archive_sandbox.ps1','media_validation.ps1','conversion_layout.ps1'){. (Join-Path $codeRoot $helper)}
+        foreach($helper in 'shared/compile_support.ps1','shared/source_policy.ps1','onion/core_support.ps1','shared/archive_limits.ps1','shared/zip_integrity.ps1','shared/native_process.ps1','shared/archive_sandbox.ps1','shared/media_validation.ps1','shared/conversion_layout.ps1'){. (Join-Path $codeRoot $helper)}
         Add-Type -AssemblyName System.IO.Compression
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $tokens=$null;$errors=$null

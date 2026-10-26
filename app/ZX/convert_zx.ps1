@@ -9,7 +9,7 @@ param([string]$Root,
 # ZX conversion uses the shared output layouts and source policy.
 # Windows PowerShell 5.1 compatible. No GUI. Keep originals is the default.
 
-. (Join-Path (Split-Path -Parent $PSScriptRoot) 'application_entry.ps1')
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry ZX -Arguments $PSBoundParameters)
 }
@@ -35,14 +35,14 @@ $script:ReportProblem=$false
 $script:AppVersion='0.0.9'
 $script:Processed=0; $script:Ok=0
 $script:Clock=[Diagnostics.Stopwatch]::StartNew()
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'display.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'source_policy.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'archive_limits.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'zip_integrity.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'native_process.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'archive_sandbox.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'overwrite_prompt.ps1')
-. (Join-Path (Split-Path -Parent $script:AppRoot) 'conversion_layout.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'ui/display.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/source_policy.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/archive_limits.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/zip_integrity.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/native_process.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/archive_sandbox.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/overwrite_prompt.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/conversion_layout.ps1')
 Initialize-Display
 $script:UiSystem='ZXS / IPF -> DSK'
 function Write-Log([string]$Message) {Write-LogFile $Message}

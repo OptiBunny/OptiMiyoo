@@ -10,7 +10,7 @@ param(
     [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT'
 )
 
-. (Join-Path (Split-Path -Parent $PSScriptRoot) 'application_entry.ps1')
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry C64 -Arguments $PSBoundParameters)
 }
@@ -19,17 +19,17 @@ $script:AppVersion = '0.0.9'
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $NibConv = Join-Path $ScriptDir 'C64/tools/nibconv.exe'
-. (Join-Path $ScriptDir 'source_policy.ps1')
-. (Join-Path $ScriptDir 'overwrite_prompt.ps1')
-. (Join-Path $ScriptDir 'media_validation.ps1')
+. (Join-Path $ScriptDir 'shared/source_policy.ps1')
+. (Join-Path $ScriptDir 'shared/overwrite_prompt.ps1')
+. (Join-Path $ScriptDir 'shared/media_validation.ps1')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-. (Join-Path $ScriptDir 'archive_limits.ps1')
-. (Join-Path $ScriptDir 'zip_integrity.ps1')
-. (Join-Path $ScriptDir 'native_process.ps1')
-. (Join-Path $ScriptDir 'archive_sandbox.ps1')
-. (Join-Path $ScriptDir 'conversion_layout.ps1')
+. (Join-Path $ScriptDir 'shared/archive_limits.ps1')
+. (Join-Path $ScriptDir 'shared/zip_integrity.ps1')
+. (Join-Path $ScriptDir 'shared/native_process.ps1')
+. (Join-Path $ScriptDir 'shared/archive_sandbox.ps1')
+. (Join-Path $ScriptDir 'shared/conversion_layout.ps1')
 Initialize-NativeTextCapture
 
 function Invoke-C64ExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
@@ -164,7 +164,7 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
 $script:Log=$null; $script:ReportProblem=$false; $exitCode=0
 $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 $script:Total=0; $script:Processed=0; $script:Ok=0; $script:Skipped=0; $script:Failed=0
-. (Join-Path $ScriptDir 'display.ps1')
+. (Join-Path $ScriptDir 'ui/display.ps1')
 try {
     if (-not $Storage) {throw 'Output choice is missing. Choose ZIPs, folders or loose files.'}
     if ([string]::IsNullOrWhiteSpace($Root)) {$Root=Split-Path -Parent $ScriptDir}

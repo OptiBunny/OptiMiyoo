@@ -16,11 +16,11 @@ function Get-ApplicationValidationRoot([string]$Path,[string]$Root) {
 
 function Enter-ApplicationHost {
     param([string]$ApplicationRoot,[ValidateSet('Playlist','C64','ZX','SD')][string]$Entry,[hashtable]$Arguments)
-    . (Join-Path $ApplicationRoot 'app/portable_storage.ps1')
+    . (Join-Path $ApplicationRoot 'app/shared/portable_storage.ps1')
     $temporary=$null
     try {
         $temporary=Open-OptiPortableTempScope $ApplicationRoot
-        . (Join-Path $ApplicationRoot 'app/application_host.ps1')
+        . (Join-Path $ApplicationRoot 'app/runtime/application_host.ps1')
         return (Invoke-ApplicationHost -ApplicationRoot $ApplicationRoot -Entry $Entry -Arguments $Arguments)
     } finally {if ($temporary) {Close-OptiPortableTempScope $temporary}}
 }

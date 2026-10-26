@@ -1,5 +1,5 @@
 ﻿# Shared explicit ZIP, loose-file and per-game-folder layouts for C64 and ZX.
-. (Join-Path $PSScriptRoot 'core_support.ps1')
+. (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 
 function Assert-ConversionRelativeName([string]$Name) {
     if ([string]::IsNullOrWhiteSpace($Name) -or [IO.Path]::IsPathRooted($Name) -or $Name.Contains('\') -or $Name.IndexOfAny([char[]]":`r`n") -ge 0) {throw 'Unsafe conversion output name.'}

@@ -1177,7 +1177,9 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
             Write-MenuLine '  3. Loose files'
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
-            if (-not $profile.ZipMemberPlaylist -and $zipNotice.Hint -notlike 'Choose Folders*') {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
+            if ($profile.Folder -in 'CPC','ZXS' -and $support.Core -eq $profile.DefaultCore -and $support.Status -eq 'UNSUPPORTED') {
+                Write-MenuLine '  Playlists are also unsupported by the default core.'
+            } elseif (-not $profile.ZipMemberPlaylist -and $zipNotice.Hint -notlike 'Choose Folders*') {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
             if ($answer -eq 'B') {$page='Main'; continue}

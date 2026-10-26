@@ -374,7 +374,7 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
     } elseif ($Profile.DefaultZipSupport -eq 'Unlisted') {
         $notice.Label='[unpack before playing]'
         if ($Profile.Folder -in 'CPC','ZXS') {$notice.Label='[unsupported by default Onion OS core]'}
-        $notice.Hint='ZIP loading is not listed in Onion docs for this core.'
+        $notice.Hint='ZIP loading is not listed in Onion docs for the default core.'
     } elseif (-not $Conversion -and -not $Profile.ZipMemberPlaylist) {
         $notice.Label='[ZIP playlists unsupported]'
         $notice.Hint='The core loads ZIPs, but not ZIP playlists.'

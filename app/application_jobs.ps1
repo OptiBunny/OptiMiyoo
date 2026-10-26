@@ -142,7 +142,7 @@ function Invoke-ApplicationNativeRequest {
             $directory=Join-Path $State.ApplicationRoot ('app/ZX/tools/hxc/'+$arch)
             $exe=Join-Path $directory 'hxcfe.exe';$lpac=($arch -eq 'x64')
             foreach ($name in @('libhxcfe.dll','libusbhxcfe.dll','CAPSImg.dll','config.script',
-                'libgcc_s_dw2-1.dll','libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
+                'libgcc_s_dw2-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
                 $file=Join-Path $directory $name;if ([IO.File]::Exists($file)) {$runtime.Add($file)}
             }
         }

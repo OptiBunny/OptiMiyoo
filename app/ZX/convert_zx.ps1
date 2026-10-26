@@ -155,7 +155,7 @@ function Test-BundledEngine([string]$EnginePath) {
     if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return $true}
     if (-not (Test-Path -LiteralPath $EnginePath -PathType Leaf)) { return $false }
     $dir = Split-Path -Parent $EnginePath
-    foreach ($name in @('libhxcfe.dll','config.script','CAPSImg.dll')) {
+    foreach ($name in @('libhxcfe.dll','libusbhxcfe.dll','config.script','CAPSImg.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $dir $name) -PathType Leaf)) { return $false }
     }
     return $true
@@ -185,7 +185,7 @@ function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$Timeou
     # read access to these copies, never to the installed application or PATH.
     $runtimeFiles=New-Object 'System.Collections.Generic.List[string]'
     foreach ($name in @('libhxcfe.dll','libusbhxcfe.dll','CAPSImg.dll','config.script',
-                       'libgcc_s_dw2-1.dll','libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
+                       'libgcc_s_dw2-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
         $candidate=Join-Path $engineDirectory $name
         if (-not [IO.File]::Exists($candidate) -and $script:EngineRuntimeDirs.ContainsKey($EnginePath)) {
             $candidate=Join-Path ([string]$script:EngineRuntimeDirs[$EnginePath]) $name
@@ -298,7 +298,7 @@ function Test-PeArchitecture([string]$FilePath, [string]$Architecture) {
 
 function Get-CapsRuntimeRequirements([string]$EnginePath) {
     $arch = Get-EngineArchitecture $EnginePath
-    if ($arch -eq 'x86') { return @('libstdc++-6.dll', 'libgcc_s_dw2-1.dll') }
+    if ($arch -eq 'x86') { return @('libstdc++-6.dll', 'libgcc_s_dw2-1.dll', 'libwinpthread-1.dll') }
     return @()
 }
 
@@ -440,7 +440,7 @@ function Ensure-CapsIPFReady($ProbeItem) {
         }
 
         if ($working.Count -eq 0 -and $capsRuntimeProblem) {
-            Write-Status 'WARN' 'CAPSImg was found, but Windows could not load its MinGW runtime dependency.'
+            Write-Status 'WARN' 'CAPSImg.dll or one of its dependencies could not load.'
             Write-Status 'WARN' 'Restore the complete bundled converter files, then retry.'
         }
 
@@ -704,7 +704,7 @@ function Invoke-HxCConversion([string]$InputPath, [string]$OutputPath) {
 function Get-UsefulFailureSummary([string]$Detail) {
     if ([string]::IsNullOrWhiteSpace($Detail)) { return 'HxC returned no diagnostic text. See the log.' }
     if ($Detail -match "(?i)Can't load CAPSImg\.dll|No Caps lib available|Failed to load CAPS library") {
-        return 'CAPSImg.dll could not load its MinGW runtime dependency. See the CAPS preflight section in the log.'
+        return 'CAPSImg.dll or one of its dependencies could not load. See the CAPS preflight section in the log.'
     }
     $lines = @($Detail -split '[\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object {
         $_ -and

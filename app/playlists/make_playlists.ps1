@@ -1060,13 +1060,12 @@ function Invoke-OptiMenu([object[]]$Profiles) {
         $worker=$null; $workerArgs=$null; $pageName=$page
         if ($page -eq 'Main') {
             Show-MenuTitle 'Main menu'
-            Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
             $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
             Write-MenuLine ('  F. CRT effect: '+$crtState+' / turn on or off')
+            Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
             Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
-            Write-MenuLine '  Q. Exit'
             if ($menuOnionRoot) {Write-MenuLine ('  Support: selected cores on '+$menuOnionRoot) 'Support: selected cores on your SD'}
             else {Write-MenuLine '  Support: standard Onion cores. S checks a connected SD card.' 'Support: standard Onion cores'}
             for ($i=0;$i -lt $Profiles.Count;$i++) {
@@ -1078,6 +1077,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 $compact=('{0,2}. {1,-9} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$shortNames[$Profiles[$i].Folder],$shortLabel)
                 Write-MenuLine ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
             }
+            Write-MenuLine '  Q. Exit'
             $answer=Read-MenuChoice 'Choose a system number or letter [Enter = 1, Amiga]'
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq 'C') {$page='C64'; continue}

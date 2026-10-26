@@ -1064,8 +1064,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
             $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
             Write-MenuLine ('  F. CRT effect: '+$crtState+' / turn on or off')
-            Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
             Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
+            Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
             Write-MenuLine '  Q. Exit'
             if ($menuOnionRoot) {Write-MenuLine ('  Support: selected cores on '+$menuOnionRoot) 'Support: selected cores on your SD'}
             else {Write-MenuLine '  Support: standard Onion cores. S checks a connected SD card.' 'Support: standard Onion cores'}

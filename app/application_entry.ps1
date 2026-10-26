@@ -74,7 +74,7 @@ function Set-ApplicationBatchContext($Batch) {
         if ($index.ContainsKey($key)) {$index[$key]=$null} else {$index.Add($key,$job)}
     }
     $global:OptiMiyooApplicationContext=[pscustomobject]@{BatchId=$Batch.BatchId;WorkRoot=$Batch.WorkRoot;
-        Operation=$Batch.Operation;Jobs=@($Batch.Jobs);JobIndex=$index;CurrentJob=$null;
+        JobIndex=$index;CurrentJob=$null;
         Completed=(New-Object 'System.Collections.Generic.List[string]');CompletedSet=(New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal))}
 }
 

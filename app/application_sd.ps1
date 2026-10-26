@@ -74,7 +74,7 @@ function New-ApplicationSdSession {
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'
     if($originalPrefix.Equals($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $originalPrefix.StartsWith($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $workPrefix.StartsWith($originalPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'SD staging must be separate from the selected SD root.'}
     if(-not [IO.Directory]::Exists($work)){throw 'SD staging must already exist and belong to the application session.'}
-    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};Profiles=@();TotalBytes=0L;Closed=$false;Completed=$false;BackupRoot=$null}
+    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;BackupRoot=$null}
     $workLease=$null
     try {
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
@@ -83,8 +83,8 @@ function New-ApplicationSdSession {
         $workLease=[OptiMiyoo.OnionPathLease]::Open($work,$work,$true,$false,$false)
         if(Test-Path -LiteralPath $state.StagedRoot){throw 'SD snapshot needs a fresh Onion staging folder.'}
         [void][IO.Directory]::CreateDirectory((Join-Path $state.StagedRoot 'RetroArch/.retroarch/cores'))
-        $state.Profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
-        foreach($profile in $state.Profiles) {
+        $profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
+        foreach($profile in $profiles) {
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             if($folder -notmatch '^[A-Z0-9]+$'){throw 'Invalid installed SD profile.'}
             $config='Emu/'+$folder+'/config.json';$launch='Emu/'+$folder+'/launch.sh'
@@ -97,7 +97,7 @@ function New-ApplicationSdSession {
                 if($selected -and $selected -in @($profile.SupportedCores)) {Add-ApplicationSdSnapshotFile $state ('RetroArch/.retroarch/cores/'+$selected) 536870912}
             }
         }
-        foreach($profile in $state.Profiles) {
+        foreach($profile in $profiles) {
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder

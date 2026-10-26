@@ -1,4 +1,6 @@
 ﻿# Shared explicit ZIP, loose-file and per-game-folder layouts for C64 and ZX.
+. (Join-Path $PSScriptRoot 'core_support.ps1')
+
 function Assert-ConversionRelativeName([string]$Name) {
     if ([string]::IsNullOrWhiteSpace($Name) -or [IO.Path]::IsPathRooted($Name) -or $Name.Contains('\') -or $Name.IndexOfAny([char[]]":`r`n") -ge 0) {throw 'Unsafe conversion output name.'}
     foreach ($part in $Name.Split('/')) {
@@ -38,7 +40,7 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
         if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {continue}
         if ($file.PSIsContainer) {$pending.Push($file.FullName);continue}
         if ($file.Extension -notin @('.zip')+$extensions) {continue}
-        $entries=New-Object 'System.Collections.Generic.List[object]';$errorText='';$block='';$archive=$null
+        $entries=New-Object 'System.Collections.Generic.List[object]';$errorText='';$archive=$null
         try {
             if ($file.Extension -ieq '.zip') {
                 $archive=Open-ArchiveWithBudget -Path $file.FullName -Profile Floppy
@@ -54,9 +56,9 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
             }
             if (@($entries | Where-Object {$_.Media}).Count -eq 0) {$errorText='No supported disk images in this input.'}
         } catch {$errorText=$_.Exception.Message} finally {if ($archive) {$archive.Dispose()}}
-        if ($entries.Count -eq 0) {$entries.Add([pscustomobject]@{InputPath=$file.FullName;Type=$(if ($file.Extension -ieq '.zip') {'Zip'} else {'Loose'});EntryName=$null;InputName=$file.Name;Name=$file.Name;Converter='';Media=$false;Error=$errorText;SourceBlockReason=$block})}
+        if ($entries.Count -eq 0) {$entries.Add([pscustomobject]@{InputPath=$file.FullName;Type=$(if ($file.Extension -ieq '.zip') {'Zip'} else {'Loose'});EntryName=$null;InputName=$file.Name;Name=$file.Name;Converter='';Media=$false;Error=$errorText;SourceBlockReason=''})}
         foreach ($item in $entries) {
-            $item.Error=$errorText;$item.SourceBlockReason=$block
+            $item.Error=$errorText
             if ($item.Media) {
                 if ($Kind -eq 'ZX' -and [IO.Path]::GetExtension($item.Name) -ieq '.ipf') {$item.Name=[IO.Path]::ChangeExtension($item.Name,'.dsk').Replace('\','/');$item.Converter='HxC'}
                 elseif ([IO.Path]::GetExtension($item.Name) -in '.nib','.nbz') {$item.Name=[IO.Path]::ChangeExtension($item.Name,'.g64').Replace('\','/');$item.Converter='Nib'}
@@ -113,7 +115,7 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
             }
             if ($writes.Count) {$relativeData=$writes[0].Name}
         } else {$writes.Add([pscustomobject]@{Name=$relativeData;Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData));Folder=$folder;Role='Data';MemberName=$null})}
-        $group.Plan=[pscustomobject]@{Stem=$group.Stem;Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData));RelativeData=$relativeData;Folder=$folder;Loose=$loose;LooseFiles=$loose;Targets=$writes.ToArray();DataWrites=$writes.ToArray();Retired=@()}
+        $group.Plan=[pscustomobject]@{Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData));RelativeData=$relativeData;LooseFiles=$loose;DataWrites=$writes.ToArray()}
     }
     $owners=@{}
     foreach ($group in $result) {
@@ -272,7 +274,7 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
     }
 }
 
-function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Kind,[string]$Root,[string]$SourcePolicy,[string]$Existing,[scriptblock]$Convert) {
+function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$SourcePolicy,[string]$Existing,[scriptblock]$Convert) {
     $sourceRoot=Join-Path $Root 'SRC';$destinationRoot=Join-Path $Root 'DST';$policy=$Existing
     $sourcePlan=New-SourcePolicyPlan $sourceRoot $SourcePolicy
     foreach ($group in $Groups) {Add-SourcePolicyJob $sourcePlan $group.SourceKey $group.Paths $group.SourceBlockReason}

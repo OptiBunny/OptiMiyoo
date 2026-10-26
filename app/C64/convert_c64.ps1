@@ -39,7 +39,7 @@ function Get-C64ConversionGroups([string]$SourceRoot,[string]$DestinationRoot,[s
 function Invoke-C64ExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
     $groups=@(Get-C64ConversionGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage)
     Show-ConversionStart 'Commodore 64 / NIB -> G64'
-    Invoke-ConversionGroupBatch $groups 'C64' $Root $SourcePolicy $Existing {
+    Invoke-ConversionGroupBatch $groups $Root $SourcePolicy $Existing {
         param($item,$source,$target,$temp,$index,$count)
         if ($item.Converter -eq 'Nib') {
             Assert-NibSource $source

@@ -103,5 +103,5 @@ function New-ApplicationStagedCode {
         if ($process) {try {if($started -and -not $process.HasExited){$process.Kill();[void]$process.WaitForExit(5000)}}finally{$process.Dispose()}}
         if ([IO.Directory]::Exists($build)) {[OptiMiyoo.SourceRemovalLeaseV128]::DeleteOwned($build,$Session.RootPath)}
     }
-    return [pscustomobject]@{Assemblies=[string[]]@('helpers/application.dll');Entry='app/make_playlists.ps1';HelperCount=$sources.Count}
+    return [pscustomobject]@{Assemblies=[string[]]@('helpers/application.dll');HelperCount=$sources.Count}
 }

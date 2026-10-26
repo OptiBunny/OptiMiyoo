@@ -352,7 +352,7 @@ function Get-OnionSetupMenuRows {
     )
 }
 
-function Get-PlaylistFeatureLabel($Profile,$Support) {
+function Get-PlaylistFeatureLabel($Support) {
     if ($Support.CanBuild) {return ''}
     if ($Support.Status -eq 'NOT INSTALLED') {return '[not installed]'}
     if ($Support.Status -eq 'UNVERIFIED') {return '[playlists unverified]'}

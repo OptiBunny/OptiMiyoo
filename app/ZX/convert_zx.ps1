@@ -61,7 +61,7 @@ function Invoke-ZXExplicitOutputs([string]$Root,[string]$Storage,[string]$Source
     $groups=@(Get-ZXConversionGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage)
     $script:ExplicitEngineReady=$false
     Show-ConversionStart 'ZX Spectrum / IPF -> DSK'
-    Invoke-ConversionGroupBatch $groups 'ZX' $Root $SourcePolicy $Existing {
+    Invoke-ConversionGroupBatch $groups $Root $SourcePolicy $Existing {
         param($item,$source,$target,$temp,$index,$count)
         if ($item.Converter -eq 'HxC') {
             if (-not $script:ExplicitEngineReady) {
@@ -223,7 +223,6 @@ function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$Timeou
             while ($null -ne $stdoutCapture.NextLine()) {}
             while ($null -ne $stderrCapture.NextLine()) {}
             $detail=Get-EngineLabel $EnginePath
-            if ($script:CurrentZXItem) {$detail=$script:CurrentZXItem}
             Show-Stage 'Running isolated HxC / waiting for engine output' $detail
         } while (-not $finished -and $timer.ElapsedMilliseconds -lt $TimeoutMs -and -not $stdoutCapture.LimitExceeded -and -not $stderrCapture.LimitExceeded)
         if (-not $finished) {$process.Kill();[void]$process.WaitForExit(5000)}
@@ -419,7 +418,6 @@ function Test-CapsIPFEngine([string]$EnginePath, [string]$InputPath) {
 }
 
 function Ensure-CapsIPFReady($ProbeItem) {
-    $probePath = [string]$ProbeItem.InputPath
     $probeTempRoot = $null
     try {
         Write-Status 'INFO' ('CAPS preflight using staged copy: ' + $ProbeItem.DisplayName)
@@ -670,10 +668,10 @@ function Invoke-HxCOnce([string]$EnginePath, [string]$InputPath, [string]$Output
     Write-Diagnostic '===== END CONVERSION ATTEMPT ====='
 
     if ($run.TimedOut) {
-        return [PSCustomObject]@{ Success=$false; Detail='HxC timed out after 120 seconds.'; Engine=$label; NonZeroExit=$false }
+        return [PSCustomObject]@{ Success=$false; Detail='HxC timed out after 120 seconds.'; Engine=$label }
     }
     if ($valid) {
-        return [PSCustomObject]@{ Success=$true; Detail=''; Engine=$label; NonZeroExit=($run.ExitCode -ne 0) }
+        return [PSCustomObject]@{ Success=$true; Detail=''; Engine=$label }
     }
 
     $infoArguments = ('-verbose -finput:"{0}" -infos' -f $InputPath)
@@ -684,7 +682,7 @@ function Invoke-HxCOnce([string]$EnginePath, [string]$InputPath, [string]$Output
     Write-Diagnostic $info.Output
     Write-Diagnostic '===== END INPUT INFO ====='
     if (-not [string]::IsNullOrWhiteSpace($info.Output)) { $detail += "`r`n--- input-info ---`r`n" + $info.Output }
-    return [PSCustomObject]@{ Success=$false; Detail=$detail; Engine=$label; NonZeroExit=$false }
+    return [PSCustomObject]@{ Success=$false; Detail=$detail; Engine=$label }
 }
 
 function Invoke-HxCAttempt([string]$EnginePath,[string]$InputPath,[string]$OutputPath) {
@@ -692,7 +690,7 @@ function Invoke-HxCAttempt([string]$EnginePath,[string]$InputPath,[string]$Outpu
     catch {
         $detail='Engine execution failed: '+$_.Exception.Message
         Write-Diagnostic ((Get-EngineLabel $EnginePath)+' | '+$detail)
-        return [pscustomobject]@{Success=$false;Detail=$detail;Engine=(Get-EngineLabel $EnginePath);NonZeroExit=$false}
+        return [pscustomobject]@{Success=$false;Detail=$detail;Engine=(Get-EngineLabel $EnginePath)}
     }
 }
 
@@ -703,14 +701,12 @@ function Invoke-HxCConversion([string]$InputPath, [string]$OutputPath) {
         Write-Status 'WARN' ('Primary engine failed; retrying with ' + (Get-EngineLabel $script:HxCFallback) + '.')
         $second = Invoke-HxCAttempt $script:HxCFallback $InputPath $OutputPath
         if ($second.Success) {
-            $second | Add-Member -NotePropertyName UsedFallback -NotePropertyValue $true -Force
             return $second
         }
         return [PSCustomObject]@{
             Success=$false
             Detail=("PRIMARY ({0}):`r`n{1}`r`n`r`nFALLBACK ({2}):`r`n{3}" -f $first.Engine, $first.Detail, $second.Engine, $second.Detail)
             Engine=($first.Engine + ' + ' + $second.Engine)
-            NonZeroExit=$false
         }
     }
     return $first

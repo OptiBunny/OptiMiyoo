@@ -424,7 +424,7 @@ function Start-ApplicationBrokerBatch {
                 $job.DiskNames=@($group.Items | Where-Object {$_.Media} | ForEach-Object {$_.Name} | Sort-Object)
                 $job.Writes=@($plan.DataWrites);$job.Retired=@()
                 $job.DataKind='Zip';if($Storage -eq 'Folders'){$job.DataKind='Folder'}elseif($Storage -eq 'Loose'){$job.DataKind='Files'}
-                $job.Conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
+                $job.Conflicts=@($plan.DataWrites | Where-Object {Test-Path -LiteralPath $_.Destination})
             } catch {$job.BlockedReason=$_.Exception.Message}
             $jobs.Add($job)
         }

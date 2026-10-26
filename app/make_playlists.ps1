@@ -628,7 +628,6 @@ function Get-GameMediaNames($Job,[ValidateSet('Zip','Loose','Folders')][string]$
         $diskNames=@($Job.Disks | ForEach-Object {$_.Name})
         $contentNames=@($diskNames)
         foreach ($disk in $Job.Disks) {
-            $parent=[IO.Path]::GetDirectoryName($disk.Path)
             if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
             $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {$_.Name})
         }
@@ -1071,7 +1070,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             else {Write-MenuLine '  Support: standard Onion cores. S checks a connected SD card.' 'Support: standard Onion cores'}
             for ($i=0;$i -lt $Profiles.Count;$i++) {
                 $support=Get-PlaylistSupport $Profiles[$i] $menuOnionRoot
-                $label=Get-PlaylistFeatureLabel $Profiles[$i] $support
+                $label=Get-PlaylistFeatureLabel $support
                 if ($label) {$label=' '+$label}
                 $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
                 $shortLabel=$label
@@ -1156,7 +1155,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $support=Get-PlaylistSupport $profile $menuOnionRoot
             $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
             Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
-            $playlistLabel=Get-PlaylistFeatureLabel $profile $support
+            $playlistLabel=Get-PlaylistFeatureLabel $support
             if ($playlistLabel) {Write-MenuLine ('  '+$playlistLabel)}
             if ($profile.Folder -eq 'COMMODORE') {
                 $tapeSupport=Get-TapeSwapSupport $profile $menuOnionRoot $support
@@ -1249,8 +1248,7 @@ try {
     Write-Event 'OUTPUT' (Join-Path $Root 'DST')
     Write-Host '  Existing outputs: Y / N / A / S. Skipping keeps the original.'
     Write-Host '  Single media stays visible in DST. Playlists require 2+ images.'
-    if (Test-ApplicationWorker) {Write-Host '  Working on staged copies. Originals are handled after verification.'}
-    else {Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant()+' originals. Skipped/failed inputs stay in SRC.')}
+    Write-Host '  Working on staged copies. Originals are handled after verification.'
     Write-Host ('  Output: '+$Storage+'.')
     Write-Host '  Support follows Onion defaults or the selected core on the supplied SD card.' -ForegroundColor Yellow
     Show-ConversionStart $System
@@ -1259,7 +1257,7 @@ try {
         Show-PreparationProgress 'Checking selected core' $profile.Folder 0 -1 'profiles' -Force
         $support=Get-PlaylistSupport $profile $OnionRoot
         Write-Event 'CORE' ($support.Basis+' / '+$support.Core+' / '+$support.Status)
-        if (-not $support.CanBuild) {Write-Event 'PLAYBACK NOTE' ((Get-PlaylistFeatureLabel $profile $support)+' '+$support.Reason)}
+        if (-not $support.CanBuild) {Write-Event 'PLAYBACK NOTE' ((Get-PlaylistFeatureLabel $support)+' '+$support.Reason)}
         $tapeSupport=$null
         if ($profile.Folder -eq 'COMMODORE') {
             $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $support
@@ -1371,13 +1369,9 @@ try {
                 $diskNames=@(Get-ZipDisks $archive $job.Zip)
                 $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
             } else {
-                $diskNames=@($job.Disks | ForEach-Object {$_.Name})
-                $contentNames=@($diskNames)
-                foreach ($disk in $job.Disks) {
-                    $parent=[IO.Path]::GetDirectoryName($disk.Path)
-                    if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
-                    $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {$_.Name})
-                }
+                $media=Get-GameMediaNames $job $Storage
+                $diskNames=@($media.DiskNames)
+                $contentNames=@($media.ContentNames)
             }
             $result.DiskImages=$diskNames.Count
             if ($diskNames.Count -eq 0) {
@@ -1532,14 +1526,12 @@ try {
             if ($reasons.Count -gt 0) {$results[$i].Detail+=' Originals kept: '+($reasons -join ' | ')}
         }
     }
-    $reportSaved=$false
     if ($results.Count -gt 0) {
         $reportPath=[IO.Path]::ChangeExtension($logPath,'.csv')
         $reportParentLease=$null
         try {
             $reportParentLease=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($reportPath))
             $results | ConvertTo-SafeReportRow | Export-Csv -LiteralPath $reportPath -NoClobber -NoTypeInformation -Encoding UTF8
-            $reportSaved=$true
         } catch {$script:ReportProblem=$true; Write-Event 'WARNING' ('Report could not be saved: '+$_.Exception.Message)}
         finally {if ($reportParentLease) {$reportParentLease.Dispose()}}
     }
@@ -1549,14 +1541,9 @@ try {
     Write-RetroStripe
     Write-Event 'DONE' ('{0} written | {1} skipped/unsupported | {2} failed' -f $script:Ok,$script:Skipped,$script:Failed)
     if ($script:Failed -eq 0 -and $sourceSummary.Failed -eq 0 -and -not $script:ReportProblem -and $script:Ok -gt 0) {Write-Host ('  '+(Color-Text 'MIO > Processing complete. All queued sets were handled.' '249;172;204'))}
-    if (-not (Test-ApplicationWorker)) {
-        Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
-        Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
-    }
     Write-Host ('  Elapsed: '+(Format-Duration $script:Clock.Elapsed.TotalSeconds))
     if ($jobs.Count -eq 0) {Write-Host '  No matching input images/ZIPs found in the selected SRC folders.' -ForegroundColor Yellow}
-    if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-Host ('  Report: '+$reportPath)}
-    if (-not (Test-ApplicationWorker)) {Write-Host ('  Log: '+$logPath)} else {Write-Host '  Waiting for independent verification and publication.'}
+    Write-Host '  Waiting for independent verification and publication.'
     Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'
     if ($script:Failed -gt 0 -or $script:ReportProblem -or $sourceSummary.Failed -gt 0) {$exitCode=1}

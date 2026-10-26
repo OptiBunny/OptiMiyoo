@@ -107,7 +107,7 @@ ROM folder on your SD card. Then refresh Onion's game list.
 
 Choose **S** and enter your SD drive, such as `E:\`. This enables supported
 playlists, C64 tape files, and Atari Lynx `.lyx` files in Onion's game list.
-It does not install or switch emulator cores. **B + Enter** or **Esc** goes back.
+It does not install or switch emulator cores. **Esc** goes back.
 
 To undo setup, copy each saved `config.json` from `OptiMiyoo_Backup_<ID>` on the
 SD card to its matching folder under `Emu`.

@@ -323,11 +323,11 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
                 if ($item.Media) {$index++}
             }
             foreach ($path in $group.Paths) {if ((Get-SourcePolicyHash $path) -ne $hashes[[IO.Path]::GetFullPath($path)]) {throw 'Source changed during conversion; original kept.'}}
-            Show-Stage 'Verifying and saving outputs' $group.Source
+            Show-Stage 'Checking prepared output' $group.Source
             $commit=Save-ConversionGroup $group $convertedDir $destinationRoot $overwrite
             Complete-SourcePolicyJob $sourcePlan $group.SourceKey $hashes $commit.Outputs
             Complete-ApplicationCurrentJob
-            $script:Ok++;Write-Notice 'OK' ($group.Source+' -> '+$group.Plan.RelativeData)
+            $script:Ok++;Write-Notice 'READY' ($group.Source+' | prepared for final checks: '+$group.Plan.RelativeData)
         } catch {$script:Failed++;Write-Notice 'FAILED' ($group.Source+' | '+$_.Exception.Message);Write-Log ($_ | Out-String)}
         finally {
             foreach ($lease in $leases) {$lease.Dispose()}

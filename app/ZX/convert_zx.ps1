@@ -15,7 +15,6 @@ if (-not (Test-ApplicationWorker)) {
 }
 $ErrorActionPreference = 'Stop'
 
-$script:Version = '2.3'
 $script:AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $Root) {$Root=Split-Path -Parent (Split-Path -Parent $script:AppRoot)}
 $Root=(Resolve-Path -LiteralPath $Root).ProviderPath
@@ -99,7 +98,7 @@ New-Item -ItemType Directory -Path $script:SourceRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $script:DestinationRoot -Force | Out-Null
 
 function Write-Banner {
-    Write-Event 'MODE' 'OptiMiyoo / ZX IPF-to-DSK / engine workflow v2.3'
+    Write-Event 'MODE' 'OptiMiyoo / ZX Spectrum / IPF -> DSK'
     Write-Event 'SOURCE' $script:SourceRoot
     Write-Event 'OUTPUT' $script:DestinationRoot
     Write-Event 'ORIGINALS' 'Keep is the default. Remove requires every output from a source to verify successfully.'
@@ -112,7 +111,7 @@ function Start-Log {
     $logStream=[IO.File]::Open($script:LogPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
     $script:LogWriter=New-Object IO.StreamWriter($logStream,$utf8Bom)
     $script:LogWriter.AutoFlush=$true
-    Write-LogFile ('ZX IPF -> DSK Converter v' + $script:Version)
+    Write-LogFile ('OptiMiyoo v' + $script:AppVersion + ' / ZX Spectrum / IPF -> DSK')
     Write-LogFile ('Date: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
     Write-LogFile ('Source: ' + $script:SourceRoot)
     Write-LogFile ('Destination: ' + $script:DestinationRoot)

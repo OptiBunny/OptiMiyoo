@@ -1059,12 +1059,12 @@ function Invoke-OptiMenu([object[]]$Profiles) {
         $worker=$null; $workerArgs=$null; $pageName=$page
         if ($page -eq 'Main') {
             Show-MenuTitle 'Main menu'
-            Write-MenuLine '  S. Onion SD setup: playlist visibility / preserve selected cores' 'S. Onion SD setup / cores preserved'
+            Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
             $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
             Write-MenuLine ('  F. CRT effect: '+$crtState+' / turn on or off')
             Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
-            Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB -> G64'
+            Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
             Write-MenuLine '  Q. Exit'
             if ($menuOnionRoot) {Write-MenuLine ('  Support: selected cores on '+$menuOnionRoot) 'Support: selected cores on your SD'}
             else {Write-MenuLine '  Support: standard Onion cores. S checks a connected SD card.' 'Support: standard Onion cores'}
@@ -1474,19 +1474,19 @@ try {
             }
             # Recheck folder boundaries immediately before the transaction.
             Assert-PlaylistOutputOwnership $plan $expectedNames
-            Show-Stage 'Installing verified game output' $job.Source
+            Show-Stage 'Saving prepared game output' $job.Source
             $commit=Install-PlaylistSet $items $overwrite $retired
             Complete-SourcePolicyJob $sourcePlan $job.SourceId $sourceHashes $items
             Complete-ApplicationCurrentJob
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}
             $script:Ok++; $script:UiMood='happy'; $script:UiPercent=100
             if ($plan.HasPlaylist) {
-                $result.Detail='Playlist and hidden media verified.'
-                $script:UiSay='Playlist and disk images installed. Verification complete.'; $script:UiStage='Playlist ready'
+                $result.Detail='Playlist and hidden media prepared for final verification.'
+                $script:UiSay='Playlist and disk images prepared for final verification.'; $script:UiStage='Playlist prepared'
                 Write-Event 'READY' ('{0}/{1}{2} - {3} image(s)' -f $job.System,$job.Stem,$profile.Playlist,$diskNames.Count)
             } else {
-                $result.Detail='Single-media game verified and installed visibly in DST; no playlist.'
-                $script:UiSay='Single-media game installed. No playlist needed.'; $script:UiStage='Game ready'
+                $result.Detail='Single-media game prepared for final verification; no playlist.'
+                $script:UiSay='Game prepared for final verification. No playlist needed.'; $script:UiStage='Game prepared'
                 Write-Event 'READY' ($job.System+'/'+$relativeData+' - single-media game; no playlist')
             }
             Draw-DisplayPanel -Force
@@ -1539,12 +1539,12 @@ try {
     Show-ClosingPanel -RemovalFailures $sourceSummary.Failed
     foreach ($id in 1,0) {Write-Progress -Id $id -Activity 'Complete' -Completed}
     Write-RetroStripe
-    Write-Event 'DONE' ('{0} written | {1} skipped/unsupported | {2} failed' -f $script:Ok,$script:Skipped,$script:Failed)
-    if ($script:Failed -eq 0 -and $sourceSummary.Failed -eq 0 -and -not $script:ReportProblem -and $script:Ok -gt 0) {Write-Host ('  '+(Color-Text 'MIO > Processing complete. All queued sets were handled.' '249;172;204'))}
+    Write-Event 'DONE' ('{0} prepared | {1} skipped/unsupported | {2} failed' -f $script:Ok,$script:Skipped,$script:Failed)
+    if ($script:Failed -eq 0 -and $sourceSummary.Failed -eq 0 -and -not $script:ReportProblem -and $script:Ok -gt 0) {Write-Host ('  '+(Color-Text 'MIO > Preparation complete. Waiting for final verification.' '249;172;204'))}
     Write-Host ('  Elapsed: '+(Format-Duration $script:Clock.Elapsed.TotalSeconds))
     if ($jobs.Count -eq 0) {Write-Host '  No matching input images found in SRC for the selected system.' -ForegroundColor Yellow}
     Write-Host '  Waiting for independent verification and publication.'
-    Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
+    Write-Host ('  After final verification, copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'
     if ($script:Failed -gt 0 -or $script:ReportProblem -or $sourceSummary.Failed -gt 0) {$exitCode=1}
 } catch {

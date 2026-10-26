@@ -968,9 +968,10 @@ function Draw-DisplayPanel([switch]$Force) {
     $queuePct=('{0,3:N0}%' -f $queuePercent); $queueBar=''; $queueBarWidth=$left-19
     if ($showQueueBar) {$queueBar='Total '+(Get-ProgressBar $queuePercent $queueBarWidth $barTick)+' '+$queuePct}
     $setLine=('SET '+$count+' / '+$script:Total+'  '+$script:UiGame)
-    if ($script:Total -eq 0 -and $script:UiStage -ne 'Finished') {$queue='Queue: scanning source files'; $setLine=$script:UiGame}
+    if ($script:Total -eq 0 -and $script:UiStage -ne 'Preparation finished') {$queue='Queue: scanning source files'; $setLine=$script:UiGame}
     $eta='ETA: pending first completed set'
-    if ($script:Processed -ge 1 -and $script:Clock -and $script:Total -gt $script:Processed) {
+    if ($script:UiStage -eq 'Preparation finished') {$eta='Final verification pending'}
+    elseif ($script:Processed -ge 1 -and $script:Clock -and $script:Total -gt $script:Processed) {
         $eta='ETA ~'+(Format-Duration ($script:Clock.Elapsed.TotalSeconds/$script:Processed*($script:Total-$script:Processed)))+' (by completed sets)'
     }
     if ($script:UiPreparing) {
@@ -978,7 +979,7 @@ function Draw-DisplayPanel([switch]$Force) {
         if ($script:UiPreparationTotal -ge 0) {
             $queue=('{0:N0} / {1:N0} {2} checked' -f $script:UiPreparationCompleted,$script:UiPreparationTotal,$script:UiPreparationUnit)
         } else {$queue=('{0:N0} {1} found / scanning' -f $script:UiPreparationCompleted,$script:UiPreparationUnit)}
-        $eta='Conversion starts after these checks'
+        $eta='Processing starts after these checks'
     }
     if ($script:UiDemo) {
         $queue=$tour.Caption
@@ -1025,11 +1026,11 @@ function Show-Stage([string]$Stage,[string]$Detail,[double]$MeasuredPercent=-1) 
     Complete-PreparationProgress
     $script:UiStage=$Stage; $script:UiDetail=$Detail; $script:UiPercent=$MeasuredPercent
     $script:UiMood='work'; $script:UiSay='Processing the current disk set.'
-    if ($Stage -match 'Hash|Verif|Check') {$script:UiMood='check'; $script:UiSay='Verifying output integrity before installation.'}
+    if ($Stage -match 'Hash|Verif|Check') {$script:UiMood='check'; $script:UiSay='Checking file integrity.'}
     elseif ($Stage -match 'Scan|Prepar|Read') {$script:UiMood='scan'; $script:UiSay='Reading disk images and checking set order.'}
-    elseif ($Stage -match 'HxC|IPF.*DSK') {$script:UiSay='Converting IPF data to DSK.'}
+    elseif ($Stage -match 'HxC|IPF.*DSK') {$script:UiSay='Running the disk-image engine.'}
     elseif ($Stage -match 'Convert') {$script:UiSay='Converting disk images.'}
-    elseif ($Stage -match 'Playlist|Install') {$script:UiSay='Installing the playlist and disk images.'}
+    elseif ($Stage -match 'Playlist|Install') {$script:UiSay='Preparing the playlist and disk images.'}
     $changed=($script:UiLastStage -ne $Stage)
     if ($changed) {
         $script:UiLastStage=$Stage
@@ -1180,7 +1181,7 @@ function Get-MioPreviewTourBar([int]$Width) {
 function Get-MioPreviewScenes([string]$Section='Tour') {
     # Entirely synthetic data: never call workers, file scanners or log writers.
     $scenes=@(
-        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
+        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB/NBZ -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
         @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding disk sets, companion files and existing outputs.'},
         @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','ZX IPF-to-DSK conversion remains available.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
         @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Read launcher and core support. Keep selected cores.'},
@@ -1325,13 +1326,13 @@ function Show-MioPreview([string]$Section='Tour') {
 
 function Show-ClosingPanel([int]$RemovalFailures=0) {
     Complete-PreparationProgress
-    $script:UiSystem='SESSION COMPLETE'; $script:UiGame='All queued sets have been handled'
-    $script:UiStage='Finished'; $script:UiDetail='See the summary, log and CSV report below.'; $script:UiPercent=100
-    $script:UiMood='happy'; $script:UiSay='Processing complete. Review the results below.'
-    if ($script:Failed -gt 0) {$script:UiMood='oops'; $script:UiSay='Processing completed with errors. Review the report.'}
-    elseif ($RemovalFailures -gt 0) {$script:UiMood='oops'; $script:UiSay='Source cleanup needs attention. Review kept originals and log.'}
+    $script:UiSystem='PREPARATION COMPLETE'; $script:UiGame='Prepared outputs await final verification'
+    $script:UiStage='Preparation finished'; $script:UiDetail='Waiting for final verification and saving to DST.'; $script:UiPercent=100
+    $script:UiMood='happy'; $script:UiSay='Files prepared. Waiting for final verification.'
+    if ($script:Failed -gt 0) {$script:UiMood='oops'; $script:UiSay='Preparation finished with errors. Review the results.'}
+    elseif ($RemovalFailures -gt 0) {$script:UiMood='oops'; $script:UiSay='Source cleanup needs attention. Review the warnings.'}
     elseif ($script:ReportProblem) {$script:UiMood='oops'; $script:UiSay='A log or report could not be saved. Review the warnings.'}
-    elseif ($script:Ok -eq 0) {$script:UiMood='wait'; $script:UiSay='No new outputs were created. Source files are preserved.'}
+    elseif ($script:Ok -eq 0) {$script:UiMood='wait'; $script:UiSay='No files prepared. Source files are unchanged.'}
     Draw-DisplayPanel -Force
     # Leave the last panel visible above the summary instead of erasing it.
     $script:UiRows=0

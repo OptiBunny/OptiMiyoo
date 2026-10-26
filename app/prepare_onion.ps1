@@ -166,13 +166,13 @@ try {
             $writeStarted=$true
             Write-OnionBytesVerified $stream $newBytes 'Updated config'
             $changed++
-            Write-OnionText ('UPDATED: '+$folder+' / '+$support.Core+' / '+($extensions -join ', ')+' enabled')
+            Write-OnionText ('PREPARED: '+$folder+' / '+$support.Core+' / '+($extensions -join ', ')+' to enable')
         } catch {
             $exitCode=1
             if ($writeStarted -and $stream -and $null -ne $original) {
                 try {
                     Write-OnionBytesVerified $stream $original 'Restored config'
-                } catch {Write-OnionText ('RESTORE FAILED: restore config.json from '+$backupRoot+' / '+$_.Exception.Message)}
+                } catch {Write-OnionText ('RESTORE FAILED: temporary config copy could not be restored; SD changes will not be applied. '+$_.Exception.Message)}
             }
             Write-OnionText ('SKIPPED: '+$folder+' - '+$_.Exception.Message)
         } finally {
@@ -182,6 +182,8 @@ try {
             if ($launchLock) {$launchLock.Dispose()}
         }
     }
-    Write-OnionText ("$changed system setup(s) updated; $unsupported unsupported/unverified. Selected cores preserved.")
+    Write-OnionText ("$changed system setup change(s) prepared; $unsupported unsupported/unverified.")
+    if ($exitCode -eq 0) {Write-OnionText 'Waiting for verification before updating the SD card. Selected cores are preserved.'}
+    else {Write-OnionText 'SD changes will not be applied because setup failed.'}
 } catch {$exitCode=1; Write-OnionText ('ERROR: '+$_.Exception.Message)} finally {if ($rootLease) {$rootLease.Dispose()}}
 exit $exitCode

@@ -34,7 +34,7 @@ Initialize-NativeTextCapture
 
 function Invoke-C64ExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
     $groups=@(Get-ConversionSourceGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage 'C64')
-    Show-ConversionStart 'Commodore 64 / NIB -> G64'
+    Show-ConversionStart 'Commodore 64 / NIB/NBZ -> G64'
     Invoke-ConversionGroupBatch $groups $Root $SourcePolicy $Existing {
         param($item,$source,$target,$temp,$index,$count)
         if ($item.Converter -eq 'Nib') {
@@ -176,7 +176,7 @@ try {
     [void][IO.Directory]::CreateDirectory($sourceRoot)
     [void][IO.Directory]::CreateDirectory($destinationRoot)
     Initialize-Display
-    $script:UiSystem='Commodore 64 / NIB -> G64'
+    $script:UiSystem='Commodore 64 / NIB/NBZ -> G64'
     Write-Event 'MODE' 'OptiMiyoo / Commodore 64 / NIB/NBZ -> G64'
     Write-Event 'SOURCE' $sourceRoot
     Write-Event 'OUTPUT' $destinationRoot

@@ -338,7 +338,7 @@ function Get-OnionSetupMenuRows {
         'Refresh Onion''s game list after setup.',
         '1. Amiga: enables .m3u playlists / PUAE2021, PUAE',
         '2. C64: enables .m3u playlists + .tap/.t64 tapes',
-        '   VICE x64 / x64sc; supported file types only.',
+        '   VICE x64 / x64sc',
         '3. MS-DOS: enables .m3u8 playlists / DOSBox Pure',
         '4. MSX / MSX2: enables .m3u playlists / blueMSX',
         '5. PlayStation: enables .m3u playlists / PCSX ReARMed',

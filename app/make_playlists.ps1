@@ -302,7 +302,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
         $seen.Add($name,$directory)
         if (-not $directory -and [IO.Path]::GetExtension($name) -in $script:DiskExtensions) {
             Assert-PlaylistName $name
-            if ($entry.Length -eq 0) { throw "Empty disk image: $name" }
+            if ($entry.Length -eq 0) { throw "Empty media file: $name" }
             $disks.Add($name)
         }
     }
@@ -329,7 +329,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     $disks=@($disks | Where-Object {-not $tracks.Contains($_)})
     $stems=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($disk in $disks) {
-        if (-not $stems.Add([IO.Path]::ChangeExtension($disk,$null))) {throw "Multiple formats of the same disk in one ZIP: $disk. Keep one playable version per disk."}
+        if (-not $stems.Add([IO.Path]::ChangeExtension($disk,$null))) {throw "Multiple formats of the same game file in one ZIP: $disk. Keep one playable version."}
     }
     return @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}})
 }
@@ -388,11 +388,11 @@ function Get-PlaylistLines([string[]]$DiskNames,[string]$RelativeStem,[bool]$Zip
 }
 function New-Playlist([string[]]$DiskNames,[string]$RelativeStem,[string]$Destination,[bool]$ZipMode,[bool]$LooseFiles=$false) {
     $lines=@(Get-PlaylistLines $DiskNames $RelativeStem $ZipMode $LooseFiles)
-    if ($lines.Count -lt 2) {throw 'A playlist requires at least two playable media images.'}
+    if ($lines.Count -lt 2) {throw 'A playlist requires at least two playable media files.'}
     [IO.File]::WriteAllText($Destination,(($lines -join "`n")+"`n"),(New-Object Text.UTF8Encoding($false)))
     Write-Log ('PLAYLIST ORDER: '+($DiskNames -join ' -> '))
-    Write-Event 'ORDER' ('{0} disk image(s) in this playlist:' -f $DiskNames.Count)
-    for ($i=0;$i -lt $DiskNames.Count;$i++) {Write-Event ('DISK '+($i+1)) $DiskNames[$i]}
+    Write-Event 'ORDER' ('{0} media file(s) in this playlist:' -f $DiskNames.Count)
+    for ($i=0;$i -lt $DiskNames.Count;$i++) {Write-Event ('MEDIA '+($i+1)) $DiskNames[$i]}
 }
 
 function Get-TapeGrouping([string]$Title) {
@@ -487,7 +487,7 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
         $grouped++; Show-PreparationProgress 'Grouping loose media' $file.Name $grouped $looseFiles.Count 'files'
     }
     $orderedGroups=@($groups.Values | Sort-Object Stem); $ordered=0
-    Show-PreparationProgress 'Ordering disk sets' 'Checking disk labels and natural order.' 0 $orderedGroups.Count 'sets'
+    Show-PreparationProgress 'Ordering game files' 'Checking file labels and playback order.' 0 $orderedGroups.Count 'sets'
     foreach ($group in $orderedGroups) {
         $tags=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         if ($group.Disks.Count -gt 1) {
@@ -497,7 +497,7 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
         }
         $group.Disks=@($group.Disks | Sort-Object @{Expression={Get-NaturalDiskKey $_.Tag}},@{Expression={Get-NaturalDiskKey $_.Name}})
         $group
-        $ordered++; Show-PreparationProgress 'Ordering disk sets' $group.Stem $ordered $orderedGroups.Count 'sets'
+        $ordered++; Show-PreparationProgress 'Ordering game files' $group.Stem $ordered $orderedGroups.Count 'sets'
     }
 }
 
@@ -1482,7 +1482,7 @@ try {
             $script:Ok++; $script:UiMood='happy'; $script:UiPercent=100
             if ($plan.HasPlaylist) {
                 $result.Detail='Playlist and hidden media prepared for final verification.'
-                $script:UiSay='Playlist and disk images prepared for final verification.'; $script:UiStage='Playlist prepared'
+                $script:UiSay='Playlist and game files prepared for final verification.'; $script:UiStage='Playlist prepared'
                 Write-Event 'READY' ('{0}/{1}{2} - {3} image(s)' -f $job.System,$job.Stem,$profile.Playlist,$diskNames.Count)
             } else {
                 $result.Detail='Single-media game prepared for final verification; no playlist.'

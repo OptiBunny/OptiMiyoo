@@ -35,7 +35,7 @@ function Initialize-Display {
     $script:UiPendingEvents=[System.Collections.Generic.List[string]]::new()
     $script:UiEventRows=[System.Collections.Generic.List[string]]::new()
     $script:UiBannerRows=0; $script:UiPinned=$false
-    $script:UiGame='Awaiting a disk set'; $script:UiSystem='LOCAL'
+    $script:UiGame='Awaiting game files'; $script:UiSystem='LOCAL'
     $script:UiStage='Ready'; $script:UiDetail='Source files remain in SRC.'
     $script:UiPercent=-1; $script:UiMood='idle'
     $script:UiPreparing=$false; $script:UiPreparationCompleted=0; $script:UiPreparationTotal=-1
@@ -989,7 +989,7 @@ function Draw-DisplayPanel([switch]$Force) {
     $resultsLine=('Ready '+$script:Ok+'   Skipped '+$script:Skipped+'   Failed '+$script:Failed)
     if ($script:UiDemo) {$resultsLine='Sample: '+$resultsLine}
     $data=@(
-        ('DISK VIEWER // '+$script:UiSystem),
+        ('MEDIA VIEWER // '+$script:UiSystem),
         $setLine,
         '',
         $script:UiStage,
@@ -1025,12 +1025,12 @@ function Draw-DisplayPanel([switch]$Force) {
 function Show-Stage([string]$Stage,[string]$Detail,[double]$MeasuredPercent=-1) {
     Complete-PreparationProgress
     $script:UiStage=$Stage; $script:UiDetail=$Detail; $script:UiPercent=$MeasuredPercent
-    $script:UiMood='work'; $script:UiSay='Processing the current disk set.'
+    $script:UiMood='work'; $script:UiSay='Processing the current game.'
     if ($Stage -match 'Hash|Verif|Check') {$script:UiMood='check'; $script:UiSay='Checking file integrity.'}
-    elseif ($Stage -match 'Scan|Prepar|Read') {$script:UiMood='scan'; $script:UiSay='Reading disk images and checking set order.'}
+    elseif ($Stage -match 'Scan|Prepar|Read') {$script:UiMood='scan'; $script:UiSay='Reading game files and checking their order.'}
     elseif ($Stage -match 'HxC|IPF.*DSK') {$script:UiSay='Running the disk-image engine.'}
     elseif ($Stage -match 'Convert') {$script:UiSay='Converting disk images.'}
-    elseif ($Stage -match 'Playlist|Install') {$script:UiSay='Preparing the playlist and disk images.'}
+    elseif ($Stage -match 'Playlist|Install') {$script:UiSay='Preparing the playlist and game files.'}
     $changed=($script:UiLastStage -ne $Stage)
     if ($changed) {
         $script:UiLastStage=$Stage
@@ -1182,7 +1182,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
     # Entirely synthetic data: never call workers, file scanners or log writers.
     $scenes=@(
         @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB/NBZ -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
-        @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding disk sets, companion files and existing outputs.'},
+        @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding game files, companions and existing outputs.'},
         @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','ZX IPF-to-DSK conversion remains available.','S also enables C64 tapes and Lynx .lyx.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
         @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Check selected cores and supported file types.'},
         @{Group='Setup';Mood='check';Stage='Enabling a supported file type';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up config; add .m3u. No cores are installed or switched.'},

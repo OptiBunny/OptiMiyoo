@@ -89,9 +89,9 @@ namespace OptiMiyoo {
             try {
                 FileInformation information = Inspect(handle);
                 if ((information.Attributes & 0x400U) != 0 || ((information.Attributes & 0x10U) != 0) != directory)
-                    throw new IOException("Source path is linked or has the wrong file type; keeping it: " + path);
+                    throw new IOException("Path is linked or has the wrong file type; keeping it: " + path);
                 if (!directory && removal && (information.Attributes & 1U) != 0)
-                    throw new IOException("Original is read-only; keeping it: " + path);
+                    throw new IOException("File is read-only; keeping it: " + path);
                 return handle;
             } catch { handle.Dispose(); throw; }
         }

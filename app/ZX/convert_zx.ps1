@@ -129,7 +129,7 @@ function Write-LogFile([string]$Text) {
     } catch {
         $script:LogDisabled=$true
         $script:ReportProblem=$true
-        Write-Notice 'WARNING' 'Could not write the log. Conversion will continue; review the on-screen results.'
+        Write-Notice 'WARNING' 'Could not write the temporary log. Conversion will continue; review the final results.'
     }
 }
 

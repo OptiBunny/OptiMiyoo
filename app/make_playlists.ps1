@@ -187,7 +187,7 @@ function Write-Log([string]$Message) {
         catch {
             $script:ReportProblem=$true
             try {$script:Log.Dispose()} catch {}; $script:Log=$null
-            Write-Notice 'WARNING' 'Could not write the log. Processing will continue; review the CSV report.'
+            Write-Notice 'WARNING' 'Could not write the temporary log. Processing will continue; review the final results.'
         }
     }
 }
@@ -1532,7 +1532,7 @@ try {
         try {
             $reportParentLease=Open-SourcePolicyDirectoryLease ([IO.Path]::GetDirectoryName($reportPath))
             $results | ConvertTo-SafeReportRow | Export-Csv -LiteralPath $reportPath -NoClobber -NoTypeInformation -Encoding UTF8
-        } catch {$script:ReportProblem=$true; Write-Event 'WARNING' ('Report could not be saved: '+$_.Exception.Message)}
+        } catch {$script:ReportProblem=$true; Write-Event 'WARNING' ('Temporary processing report could not be saved: '+$_.Exception.Message)}
         finally {if ($reportParentLease) {$reportParentLease.Dispose()}}
     }
     $script:Clock.Stop()

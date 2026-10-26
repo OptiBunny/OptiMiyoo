@@ -186,10 +186,16 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
         $csvWriter=New-Object IO.StreamWriter($csvStream,(New-Object Text.UTF8Encoding($true)))
         $logStream=[IO.File]::Open($log,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
         $logWriter=New-Object IO.StreamWriter($logStream,(New-Object Text.UTF8Encoding($true)))
-        $rows=@($Result.Results | Select-Object System,Source,Playlist,DiskImages,Result,Original,RemovedFiles,KeptFiles,RemovalFailures,Detail | ConvertTo-SafeReportRow | ConvertTo-Csv -NoTypeInformation)
+        $rows=@($Result.Results | Select-Object System,Source,Playlist,@{Name='MediaFiles';Expression={$_.DiskImages}},Result,Original,RemovedFiles,KeptFiles,RemovalFailures,Detail | ConvertTo-SafeReportRow | ConvertTo-Csv -NoTypeInformation)
         foreach ($line in $rows) {$csvWriter.WriteLine($line)}
-        $logWriter.WriteLine(('OptiMiyoo verified results: {0} published; {1} failed; {2} originals removed.' -f $Result.Written,$Result.Failed,$Result.Removed))
-        foreach ($row in $Result.Results) {$logWriter.WriteLine((ConvertTo-SafeExternalText ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)))}
+        $skipped=@($Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
+        $logWriter.WriteLine(('OptiMiyoo verified results: {0} published; {1} skipped; {2} failed.' -f $Result.Written,$skipped,$Result.Failed))
+        $logWriter.WriteLine(('Source policy: '+$Result.SourcePolicy.ToUpperInvariant()))
+        $logWriter.WriteLine(('Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $Result.Removed,$Result.Kept,$Result.RemovalFailures))
+        foreach ($reason in @($Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
+            $logWriter.WriteLine(('Originals kept: '+((ConvertTo-SafeExternalText $reason) -replace '[\r\n]+',' ')))
+        }
+        foreach ($row in $Result.Results) {$logWriter.WriteLine(((ConvertTo-SafeExternalText ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)) -replace '[\r\n]+',' '))}
         $csvWriter.Flush();$csvStream.Flush($true);$logWriter.Flush();$logStream.Flush($true)
         Write-Host ('Report: '+$csv)
         Write-Host ('Log: '+$log)
@@ -282,7 +288,8 @@ function Invoke-ApplicationHost {
         }
         if ($state) {$displayEffect=$state.DisplayEffect}
         if ($state -and $state.Result) {
-            Write-Host ('Published: {0}; failed: {1}; originals removed: {2}.' -f $state.Result.Written,$state.Result.Failed,$state.Result.Removed)
+            $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
+            Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
             foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.Source+': '+$result.Result+' / '+$result.Detail))}
             Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
             Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)

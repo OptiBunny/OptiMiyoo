@@ -31,7 +31,7 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
 
 function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,[string]$Kind) {
     $items=New-Object 'System.Collections.Generic.List[object]';$pending=New-Object 'System.Collections.Generic.Stack[string]';$pending.Push($SourceRoot)
-    $extensions=@('.ipf');if ($Kind -eq 'C64') {$extensions=@('.nib','.nbz','.g64')}
+    $extensions=@('.ipf','.dsk');if ($Kind -eq 'C64') {$extensions=@('.nib','.nbz','.g64')}
     $scanned=0
     while ($pending.Count) {foreach ($file in @(Get-ChildItem -LiteralPath $pending.Pop() -Force | Sort-Object Name)) {
         if (++$scanned -gt 100000) {throw 'Conversion input scan exceeds the entry limit.'}
@@ -59,7 +59,7 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
         foreach ($item in $entries) {
             $item.Error=$errorText;$item.SourceBlockReason=$block
             if ($item.Media) {
-                if ($Kind -eq 'ZX') {$item.Name=[IO.Path]::ChangeExtension($item.Name,'.dsk').Replace('\','/');$item.Converter='HxC'}
+                if ($Kind -eq 'ZX' -and [IO.Path]::GetExtension($item.Name) -ieq '.ipf') {$item.Name=[IO.Path]::ChangeExtension($item.Name,'.dsk').Replace('\','/');$item.Converter='HxC'}
                 elseif ([IO.Path]::GetExtension($item.Name) -in '.nib','.nbz') {$item.Name=[IO.Path]::ChangeExtension($item.Name,'.g64').Replace('\','/');$item.Converter='Nib'}
             }
             if ($items.Count -ge 100000) {throw 'Conversion batch exceeds the output member limit; split it into smaller batches.'}

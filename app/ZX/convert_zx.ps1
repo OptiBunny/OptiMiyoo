@@ -69,17 +69,22 @@ function Invoke-ZXExplicitOutputs([string]$Root,[string]$Storage,[string]$Source
     Show-ConversionStart 'ZX Spectrum / IPF -> DSK'
     Invoke-ConversionGroupBatch $groups 'ZX' $Root $SourcePolicy $Existing {
         param($item,$source,$target,$temp,$index,$count)
-        if (-not $script:ExplicitEngineReady) {
-            if (-not (Ensure-HxC)) {throw 'Bundled HxC engine could not start.'}
-            $item | Add-Member NoteProperty DisplayName $item.Name -Force
-            if (-not (Ensure-CapsIPFReady $item)) {throw 'CAPS/IPF preflight failed; original kept.'}
-            $script:ExplicitEngineReady=$true
+        if ($item.Converter -eq 'HxC') {
+            if (-not $script:ExplicitEngineReady) {
+                if (-not (Ensure-HxC)) {throw 'Bundled HxC engine could not start.'}
+                $item | Add-Member NoteProperty DisplayName $item.Name -Force
+                if (-not (Ensure-CapsIPFReady $item)) {throw 'CAPS/IPF preflight failed; original kept.'}
+                $script:ExplicitEngineReady=$true
+            }
+            $shortInput=Join-Path $temp 'disk.ipf';$shortOutput=Join-Path $temp 'disk.dsk'
+            [IO.File]::Copy($source,$shortInput)
+            $result=Invoke-HxCConversion $shortInput $shortOutput
+            if (-not $result.Success) {throw ('DSK conversion failed: '+(Get-UsefulFailureSummary $result.Detail))}
+            [IO.File]::Move($shortOutput,$target);Remove-SourcePolicyOwnedPath -Path $shortInput -Root $temp
+        } else {
+            [IO.File]::Copy($source,$target)
+            if (-not (Test-DSK $target)) {throw 'Existing DSK structure is invalid; original kept.'}
         }
-        $shortInput=Join-Path $temp 'disk.ipf';$shortOutput=Join-Path $temp 'disk.dsk'
-        [IO.File]::Copy($source,$shortInput)
-        $result=Invoke-HxCConversion $shortInput $shortOutput
-        if (-not $result.Success) {throw ('DSK conversion failed: '+(Get-UsefulFailureSummary $result.Detail))}
-        [IO.File]::Move($shortOutput,$target);Remove-SourcePolicyOwnedPath -Path $shortInput -Root $temp
     }
 }
 
@@ -592,7 +597,7 @@ function Get-ZipIPFEntryNames([string]$ZipPath) {
         $extraCount=0
         foreach ($entry in $zip.Entries) {
             if ([string]::IsNullOrWhiteSpace($entry.Name)) {continue}
-            if ([IO.Path]::GetExtension($entry.FullName) -ieq '.ipf') {$entries.Add($entry.FullName)}
+            if ([IO.Path]::GetExtension($entry.FullName) -in '.ipf','.dsk') {$entries.Add($entry.FullName)}
             else {$extraCount++}
         }
         $hash=$null
@@ -616,22 +621,23 @@ function Get-ConversionItems {
     [long]$discovered=0
     $sourceFiles = @(Get-ChildItem -LiteralPath $script:SourceRoot -Recurse -File -ErrorAction SilentlyContinue |
         ForEach-Object {
-            if (-not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($_.Extension -ieq '.ipf' -or $_.Extension -ieq '.zip')) {
+            if (-not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($_.Extension -in '.ipf','.dsk','.zip')) {
                 $discovered++; $_
             }
             Show-PreparationProgress 'Scanning SRC' $_.Name $discovered -1 'inputs'
         } | Sort-Object FullName)
     Show-PreparationProgress 'Scanning SRC' 'Source input list collected.' $sourceFiles.Count $sourceFiles.Count 'inputs' -Force
     $checked=0
-    Show-PreparationProgress 'Reading IPF inputs' 'Reading loose files and archive directories.' 0 $sourceFiles.Count 'inputs'
+    Show-PreparationProgress 'Reading disk inputs' 'Reading loose files and archive directories.' 0 $sourceFiles.Count 'inputs'
 
     foreach ($file in $sourceFiles) {
-        Show-PreparationProgress 'Reading IPF inputs' $file.Name $checked $sourceFiles.Count 'inputs'
+        Show-PreparationProgress 'Reading disk inputs' $file.Name $checked $sourceFiles.Count 'inputs'
         try {
             $relative = Get-RelativePathCompat $script:SourceRoot $file.FullName
-            if ($file.Extension -ieq '.ipf') {
+            if ($file.Extension -in '.ipf','.dsk') {
                 $results.Add([PSCustomObject]@{
                     Type='Loose'; InputPath=$file.FullName; EntryName=$null; SourceBlockReason=''; SourceHash=$null
+                    Converter=$(if ($file.Extension -ieq '.ipf') {'HxC'} else {''})
                     RelativeOutput=[IO.Path]::ChangeExtension($relative, '.dsk')
                     DisplayName=$relative
                 })
@@ -645,15 +651,16 @@ function Get-ConversionItems {
             }
             $entries = @($zipResult.Entries)
             if ($entries.Count -eq 0) {
-                $script:UntouchedSources.Add([pscustomobject]@{InputPath=$file.FullName; Reason='ZIP has no IPF images; original kept.'})
+                $script:UntouchedSources.Add([pscustomobject]@{InputPath=$file.FullName; Reason='ZIP has no IPF or DSK images; original kept.'})
                 continue
             }
             $sourceBlockReason=''
-            if ($zipResult.OtherFiles -gt 0) {$sourceBlockReason='ZIP includes files that are not converted to DSK; original kept to preserve them.'}
+            if ($zipResult.OtherFiles -gt 0) {$sourceBlockReason='ZIP includes files that are not copied to output; original kept to preserve them.'}
 
             if ($entries.Count -eq 1) {
                 $results.Add([PSCustomObject]@{
                     Type='Zip'; InputPath=$file.FullName; EntryName=$entries[0]; SourceBlockReason=$sourceBlockReason; SourceHash=$zipResult.Hash
+                    Converter=$(if ([IO.Path]::GetExtension($entries[0]) -ieq '.ipf') {'HxC'} else {''})
                     RelativeOutput=[IO.Path]::ChangeExtension($relative, '.dsk')
                     DisplayName=($relative + ' :: ' + $entries[0])
                 })
@@ -666,13 +673,14 @@ function Get-ConversionItems {
                     $safeEntry = Get-SafeZipRelativePath $entry
                     $results.Add([PSCustomObject]@{
                         Type='Zip'; InputPath=$file.FullName; EntryName=$entry; SourceBlockReason=$sourceBlockReason; SourceHash=$zipResult.Hash
+                        Converter=$(if ([IO.Path]::GetExtension($entry) -ieq '.ipf') {'HxC'} else {''})
                         RelativeOutput=(Join-RelativePath $base ([IO.Path]::ChangeExtension($safeEntry, '.dsk')))
                         DisplayName=($relative + ' :: ' + $entry)
                     })
                 }
             }
         } finally {
-            $checked++; Show-PreparationProgress 'Reading IPF inputs' $file.Name $checked $sourceFiles.Count 'inputs'
+            $checked++; Show-PreparationProgress 'Reading disk inputs' $file.Name $checked $sourceFiles.Count 'inputs'
         }
     }
     return $results.ToArray()
@@ -725,7 +733,7 @@ function Stage-LooseIPF([string]$InputPath) {
         $input = [IO.File]::Open($InputPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
         $output = [IO.File]::Create($tempFile)
         Initialize-ArchiveLimits
-        if ($input.Length -gt 512MB) {throw 'IPF input exceeds the supported 512 MiB size limit; original kept.'}
+        if ($input.Length -gt 512MB) {throw 'Disk image exceeds the supported 512 MiB size limit; original kept.'}
         [void][OptiMiyoo.ArchiveLimits]::CopyBounded($input,$output,512MB)
         $output.Flush()
         $complete=$true
@@ -747,8 +755,8 @@ function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
     try {
         $zip=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
         $matches=@();for($i=0;$i -lt $zip.Entries.Count;$i++){if($zip.Entries[$i].FullName -ceq $EntryName){$matches+=,$i}}
-        if($matches.Count -ne 1){throw 'Missing or duplicate IPF entry in ZIP.'}
-        Show-Stage 0 'Preparing IPF from ZIP in sandbox' $EntryName 0
+        if($matches.Count -ne 1){throw 'Missing or duplicate disk entry in ZIP.'}
+        Show-Stage 0 'Preparing disk from ZIP in sandbox' $EntryName 0
         $tempFile=Join-Path $tempRoot 'disk.ipf'
         $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $matches[0] -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 0 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
         $complete=$true;return [pscustomobject]@{Path=$tempFile;TempRoot=$tempRoot}
@@ -1099,7 +1107,7 @@ function Main {
     if (Test-ApplicationWorker) {Write-Status 'INFO' 'Working on staged copies. Originals are handled after verification.'}
     else {Write-Status 'INFO' ('Source policy: '+$SourcePolicy.ToUpperInvariant()+'. Skipped/failed inputs stay in SRC.')}
     if ($script:OutputMode -eq 'ZipDSK') {
-        Write-Status 'INFO' 'Output mode: one ZIP per converted DSK.'
+        Write-Status 'INFO' 'Output mode: one ZIP per DSK.'
     } else {
         Write-Status 'INFO' 'Output mode: loose DSK files.'
     }
@@ -1134,12 +1142,12 @@ function Main {
 
     if ($items.Count -eq 0 -and $script:ScanFailures.Count -gt 0) {
         $script:Total=$script:ScanFailures.Count
-        Write-Status 'WARN' 'No readable IPF inputs remain. The conversion engine was not started.'
+        Write-Status 'WARN' 'No readable disk inputs remain. The conversion engine was not started.'
         Show-Summary
         return 1
     }
     if ($items.Count -eq 0 -and $script:ScanFailures.Count -eq 0) {
-        Write-Status 'WARN' 'No .IPF files were found, loose or inside ZIP archives.'
+        Write-Status 'WARN' 'No IPF or DSK files were found, loose or inside ZIP archives.'
         Write-Status 'INFO' 'Put your files in SRC and run the BAT again.'
         $script:Total = 0
         Show-Summary
@@ -1162,16 +1170,16 @@ function Main {
     $script:Total = $items.Count + $script:ScanFailures.Count
     $looseCount = @($items | Where-Object { $_.Type -eq 'Loose' }).Count
     $zipCount = @($items | Where-Object { $_.Type -eq 'Zip' }).Count
-    Write-Status 'INFO' ("Found {0} IPF image(s): {1} loose, {2} inside ZIP(s)." -f $items.Count, $looseCount, $zipCount)
+    Write-Status 'INFO' ("Found {0} disk image(s): {1} loose, {2} inside ZIP(s)." -f $items.Count, $looseCount, $zipCount)
     if ($script:OutputMode -eq 'ZipDSK') {
         Write-Status 'INFO' 'ZIP inputs are extracted temporarily; each validated DSK is re-packed as its own ZIP in DST.'
     } else {
         Write-Status 'INFO' 'ZIP inputs are extracted temporarily; DST receives loose .DSK files.'
     }
 
-    $probeItems=@($items)
+    $probeItems=@($items | Where-Object {$_.Converter -eq 'HxC'})
     if ($script:OverwriteMode -eq 'SkipAll') {
-        $probeItems=@($items | Where-Object {
+        $probeItems=@($probeItems | Where-Object {
             -not (Test-Path -LiteralPath (Join-Path $script:DestinationRoot (Get-FinalRelativeOutput $_.RelativeOutput)))
         })
     }
@@ -1249,18 +1257,18 @@ function Main {
             }
             if ($item.Type -eq 'Zip') {
                 Write-Status 'INFO' ('Extracting temporarily: ' + $item.DisplayName)
-                Show-Stage 0 'Preparing IPF from ZIP' $item.DisplayName
+                Show-Stage 0 'Preparing disk from ZIP' $item.DisplayName
                 $expanded = Expand-OneZipIPF $item.InputPath $item.EntryName
             } else {
                 Write-Status 'INFO' ('Staging source read-only: ' + $item.DisplayName)
-                Show-Stage 0 'Preparing a read-only IPF copy' $item.DisplayName
+                Show-Stage 0 'Preparing a read-only disk copy' $item.DisplayName
                 $expanded = Stage-LooseIPF $item.InputPath
             }
             $inputPath = $expanded.Path
             $tempRoot = $expanded.TempRoot
             if ($SourcePolicy -eq 'Remove') {
                 if ((Get-SourcePolicyHash $item.InputPath) -ne $sourceHash) {throw 'Source changed during staging; original kept.'}
-                if ($item.Type -eq 'Loose' -and (Get-SourcePolicyHash $inputPath) -ne $sourceHash) {throw 'Staged IPF differs from source; original kept.'}
+                if ($item.Type -eq 'Loose' -and (Get-SourcePolicyHash $inputPath) -ne $sourceHash) {throw 'Staged disk differs from source; original kept.'}
                 $sourceLease.Dispose(); $sourceLease=$null
             }
 
@@ -1271,15 +1279,20 @@ function Main {
             Write-Diagnostic ('Output mode: ' + $script:OutputMode)
             Write-Diagnostic ('Transactional DSK work output: ' + $workOutPath)
 
-            # Native tools never receive the user's destination path. Copy the
-            # validated native result through .NET into the existing transaction
-            # staging file, which remains on the destination volume for commit.
-            $engineOutPath=Join-Path $tempRoot 'disk.dsk'
-            $result = Invoke-HxCConversion $inputPath $engineOutPath
+            # Keep native output and unchanged DSK bytes on the same verified
+            # transaction path. Native tools never receive the final destination.
+            if ($item.Converter -eq 'HxC') {
+                $engineOutPath=Join-Path $tempRoot 'disk.dsk'
+                $result=Invoke-HxCConversion $inputPath $engineOutPath
+            } else {
+                if (-not (Test-DSK $inputPath)) {throw 'Existing DSK image is invalid; original kept.'}
+                $engineOutPath=$inputPath
+                $result=[pscustomobject]@{Success=$true;NonZeroExit=$false}
+            }
             if ($result.Success) {
                 [IO.File]::Copy($engineOutPath,$workOutPath)
                 if ((Get-SourcePolicyHash $engineOutPath) -ne (Get-SourcePolicyHash $workOutPath)) {
-                    throw 'Staged DSK differs from native output; original kept.'
+                    throw 'Staged DSK differs from verified input; original kept.'
                 }
                 if ($script:OutputMode -eq 'ZipDSK') {
                     $entryName = [IO.Path]::GetFileName($relativeDsk)

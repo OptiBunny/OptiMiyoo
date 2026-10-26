@@ -51,7 +51,7 @@ and choose a numbered system.
 
 ### C64 converter: C
 
-Converts NIB/NBZ to G64. Existing G64 images are copied unchanged.
+Converts NIB/NBZ to G64.
 
 ### ZX converter: Z
 

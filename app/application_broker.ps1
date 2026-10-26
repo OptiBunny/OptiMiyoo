@@ -480,12 +480,13 @@ function Start-ApplicationBrokerBatch {
                 $key=Get-ApplicationBrokerRelative $sourceJob.InputPath $src
                 $input=$state.SourceSnapshot.Files[$key]
                 if($sourceJob.Type -eq 'Zip'){if(-not $archives.ContainsKey($sourceJob.InputPath)){$archives[$sourceJob.InputPath]=Get-ApplicationBrokerArchive $module $sourceJob.InputPath};$input=$archives[$sourceJob.InputPath][$sourceJob.EntryName]}
-                if(-not $input){throw 'IPF input was not present in the frozen source manifest.'}
+                if(-not $input){throw 'Disk input was not present in the frozen source manifest.'}
                 $name=[IO.Path]::GetFileName($sourceJob.RelativeOutput)
-                $job.Files[$name]=[pscustomobject]@{Hash='';Length=-1L;Converter='HxC';InputHash=$input.Hash}
+                Add-ApplicationBrokerExpectedFile $job.Files $name $input
+                if($sourceJob.Converter){$job.Files[$name].Converter=$sourceJob.Converter;$job.Files[$name].Hash='';$job.Files[$name].Length=-1L}
                 $job.Writes=@([pscustomobject]@{Destination=$plan.Destination;Folder=$false});$job.DataKind='File';if($Format -eq 'ZipDSK'){$job.DataKind='Zip'}
                 if(Test-Path -LiteralPath $plan.Destination){$job.Conflicts=@($job.Writes)}
-                if(@($rawResult.Collisions | Where-Object {$_.First -eq $sourceJob.DisplayName -or $_.Second -eq $sourceJob.DisplayName}).Count){throw 'Several IPF inputs share one output destination.'}
+                if(@($rawResult.Collisions | Where-Object {$_.First -eq $sourceJob.DisplayName -or $_.Second -eq $sourceJob.DisplayName}).Count){throw 'Several disk inputs share one output destination.'}
             } catch {$job.BlockedReason=$_.Exception.Message}
             $jobs.Add($job)
         }
@@ -643,8 +644,8 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
                     $name=@($expected.Keys)[0];$actual[$name]=$copied
                 }
                 Assert-ApplicationBrokerManifest $expected $actual $Batch $ReceiptStore
-                # Grouped ZX outputs are byte-matched above to host-owned HxC
-                # receipts, which are issued only after validating each DSK.
+                # Grouped ZX outputs are byte-matched above to original DSK
+                # inputs or host-owned HxC receipts for validated conversions.
                 if($Batch.Operation -eq 'ZX' -and $Batch.Storage -notin 'Zip','Loose','Folders'){
                     $valid=& $Batch.Module {param($path,$kind,$name)if($kind -eq 'Zip'){Test-ZipDskPackage $path $name}else{Test-DSK $path}} $stage $Job.DataKind @($Job.Files.Keys)[0]
                     if(-not $valid){throw 'Converted DSK structure is invalid.'}

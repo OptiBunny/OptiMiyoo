@@ -343,9 +343,8 @@ function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
 
 function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Auto',
+          [string]$System,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask')
-    if($Operation -in 'C64','ZX' -and $Storage -notin 'Zip','Loose','Folders'){throw 'Choose ZIPs, folders or loose files for conversion.'}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
@@ -389,7 +388,7 @@ function Start-ApplicationBrokerBatch {
                 $job.Files=Get-ApplicationBrokerExpectedFiles $state $module $sourceJob
                 if($plan.PreserveZip){$job.ContainerHash=$state.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $sourceJob.Zip $src)].Hash}
                 $job.DiskNames=@($media.DiskNames)
-                $job.DataKind='Folder';if($plan.ZipMode){$job.DataKind='Zip'}elseif($plan.LooseFiles){$job.DataKind='Files'}elseif($plan.SingleFile){$job.DataKind='File'}
+                $job.DataKind='Folder';if($plan.ZipMode){$job.DataKind='Zip'}elseif($plan.LooseFiles){$job.DataKind='Files'}
                 if($plan.HasPlaylist){$job.PlaylistText=$plan.PlaylistText}
                 $job.Conflicts=@(@($plan.Writes)+@($plan.Retired)+@($plan.VisibleCandidates) | Where-Object {Test-Path -LiteralPath $_.Destination})
             } catch {$job.BlockedReason=$_.Exception.Message}
@@ -398,7 +397,7 @@ function Start-ApplicationBrokerBatch {
         }
         & $module {param($raw)Set-PlaylistOutputConflicts $raw} $raw
         foreach($job in $jobs){if($job.SourceJob.Error){$job.BlockedReason=$job.SourceJob.Error}}
-    } elseif($Storage -in 'Zip','Loose','Folders'){
+    } elseif($Operation -in 'C64','ZX'){
         $System=@{C64='COMMODORE';ZX='ZXS'}[$Operation]
         $raw=@(& $module {param($src,$dst,$storage,$operation)if($operation -eq 'C64'){Get-C64ConversionGroups $src $dst $storage}else{Get-ZXConversionGroups $src $dst $storage}} $src $dst $Storage $Operation)
         if($raw.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
@@ -503,9 +502,9 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot)
             Assert-NoMediaNesting $job.SourceJob $dst $job.Plan.ZipMode
             Assert-PlaylistOutputOwnership $job.Plan $names
         } $Job $Batch.Profile $DestinationRoot
-    } elseif($Batch.Storage -in 'Zip','Loose','Folders'){
+    } elseif($Batch.Operation -in 'C64','ZX'){
         & $Batch.Module {param($group,$dst)Assert-ConversionGroupOwnership $group $dst} $Job.SourceJob $DestinationRoot
-    } else {throw 'Unknown converter output storage.'}
+    } else {throw 'Unknown application operation.'}
 }
 
 function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
@@ -563,7 +562,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$true;Manifest=$actual;Hash=$null})
             } else {
                 $lengths=$null
-                if($Job.DataKind -in 'File','Files'){
+                if($Job.DataKind -eq 'Files'){
                     if($expected.Count -ne 1){throw 'Single-file output plan has multiple members.'}
                     $lengths=Get-ApplicationBrokerExpectedLengths $expected[@($expected.Keys)[0]] $Batch $ReceiptStore
                 }
@@ -646,12 +645,11 @@ function Complete-ApplicationBrokerBatch {
             try {
                 $sealed=Copy-ApplicationBrokerOutput $state $batch $job $ReceiptStore
                 Assert-ApplicationBrokerOwnership $batch $job $dst
-                # Reuse the established two-part transaction and rollback logic
-                # for all formats, including ZX's single-file output.
+                # Reuse the verified publication and rollback logic for all output layouts.
                 $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock
                 $folderManifest=(Get-Command Get-ApplicationBrokerBackupManifest).ScriptBlock
                 $validateBackup={param($destination,$backup,$folder)& $backupFactory $state $destination $backup $folder $folderManifest}.GetNewClosure()
-                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator)Install-PlaylistSet $items $null $false $overwrite $retired -ValidateBackup $validator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup
+                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
                 $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})

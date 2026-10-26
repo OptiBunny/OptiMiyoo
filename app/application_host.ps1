@@ -29,7 +29,7 @@ function Get-ApplicationSelection {
     param($Payload)
     $operation=[string]$Payload.Operation;$system=[string]$Payload.System
     $storage=[string]$Payload.Storage
-    if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Auto','Zip','Loose','Folders') {throw 'Unknown application selection.'}
+    if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Zip','Loose','Folders') {throw 'Unknown application selection.'}
     if ($operation -eq 'Playlist' -and $system -notin 'AMIGA','COMMODORE','PS','SEGACD','CPC','MSX','VIC20','DOS','ZXS') {throw 'Unknown playlist system.'}
     if ($operation -eq 'C64') {$system='COMMODORE'}
     if ($operation -eq 'ZX') {$system='ZXS'}
@@ -247,9 +247,9 @@ function Invoke-ApplicationHost {
                 $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage})
                 $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
                 $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
-                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.Storage=$selection.Storage;$worker.NoPause=$true}
+                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.NoPause=$true}
                 else {[void]$worker.Remove('NoPause');[void]$worker.Remove('Preview');[void]$worker.Remove('OnionRoot')}
-                if ($Entry -in 'C64','ZX' -and $selection.Storage -in 'Zip','Loose','Folders') {$worker.Storage=$selection.Storage}
+                $worker.Storage=$selection.Storage
             }
             if ($Entry -eq 'SD') {
                 if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
@@ -292,7 +292,6 @@ function Invoke-ApplicationHost {
             }
             Write-ApplicationVerifiedReport $originalRoot $state.Result
             if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
-            elseif (@($state.Result.Results | Where-Object {$_.Result -eq 'Unsupported'}).Count) {$exitCode=2}
             if ($menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
                 Write-Host 'Press Enter for the main menu, or Q to exit.'
                 do {$key=[Console]::ReadKey($true)} while ($key.Key -ne [ConsoleKey]::Enter -and $key.Key -ne [ConsoleKey]::Q)

@@ -28,9 +28,9 @@ function Enter-ApplicationHost {
 function Resolve-ApplicationOutputSelection {
     param([ValidateSet('Playlist','C64','ZX')][string]$Operation,
           [string]$Storage)
-    if ($Storage -and $Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Unknown output storage.'}
-    if ($Storage) {$Storage=@{Auto='Auto';Zip='Zip';Loose='Loose';Folders='Folders'}[$Storage]}
-    if (-not $Storage -or ($Operation -in 'C64','ZX' -and $Storage -eq 'Auto')) {
+    if ($Storage -and $Storage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage.'}
+    if ($Storage) {$Storage=@{Zip='Zip';Loose='Loose';Folders='Folders'}[$Storage]}
+    if (-not $Storage) {
         $Storage='Zip';if ($Operation -eq 'ZX') {$Storage='Folders'}
     }
     return @{Storage=$Storage}
@@ -94,8 +94,7 @@ function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     Set-ApplicationBatchContext $batch
     # All source removal happens in the parent after verified publication.
     $Arguments.Root=$batch.WorkRoot;$Arguments.SourcePolicy='Keep'
-    if ($operation -eq 'Playlist' -or $output.Storage -in 'Zip','Loose','Folders') {$Arguments.Storage=$output.Storage}
-    else {[void]$Arguments.Remove('Storage')}
+    $Arguments.Storage=$output.Storage
     Restore-Display
     try {& $Path @Arguments | Out-Host;$code=$LASTEXITCODE}
     catch {$code=1;Write-Host ('  ERROR: '+(ConvertTo-SafeExternalText $_.Exception.Message))}

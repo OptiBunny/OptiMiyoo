@@ -3,7 +3,7 @@
 param(
     [Parameter(Position=0)][string]$Root,
     [string]$System,
-    [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
+    [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
     [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
     [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
     [string]$OnionRoot,
@@ -95,7 +95,7 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
     }
 }
 
-function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$LegacyFolder, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null) {
+function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null) {
     # A playlist and its disk data are one replacement. Roll back both if either
     # install fails; never leave a new playlist pointing at missing/old data.
     $backups = New-Object 'System.Collections.Generic.List[object]'
@@ -105,7 +105,6 @@ function Install-PlaylistSet([object[]]$Items, [string]$LegacyPath, [bool]$Legac
     $replaceTargets = New-Object 'System.Collections.Generic.List[object]'
     foreach ($item in $Items) { $targets.Add($item) }
     foreach ($item in $Retired) { $targets.Add($item) }
-    if ($LegacyPath) { $targets.Add([pscustomobject]@{ Destination = $LegacyPath; Folder = $LegacyFolder }) }
     $directoryLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
     try {
         try {
@@ -256,10 +255,9 @@ function Get-VerifiedHash([string]$LiteralPath) {
     try {return [pscustomobject]@{Hash=(Get-StreamHash $stream $label)}}
     finally {$stream.Dispose()}
 }
-function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Length,[string]$Name,[object]$ExpectedCrc=$null) {
+function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Length,[string]$Name) {
     $buffer=New-Object byte[] 1048576
     $sha=[Security.Cryptography.SHA256]::Create()
-    $crc=$null; if ($null -ne $ExpectedCrc) {$crc=New-Object OptiMiyoo.ZipCrc32}
     [long]$total=0; $watch=[Diagnostics.Stopwatch]::StartNew()
     $action='Copying disk data'; if ($OutputStream -eq [IO.Stream]::Null) {$action='Reading archive contents'}
     Write-Event 'FILE' ('{0} / {1:N2} MiB / {2}' -f $Name,($Length/1MB),$action)
@@ -269,7 +267,6 @@ function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Len
             if ($n -gt $Length-$total) {throw "Stream exceeds its declared size: $Name"}
             $OutputStream.Write($buffer,0,$n)
             [void]$sha.TransformBlock($buffer,0,$n,$buffer,0)
-            if ($crc) {$crc.Update($buffer,$n)}
             $total+=$n
             if ($watch.ElapsedMilliseconds -ge 125) {
                 Show-Stage 0 $action ('{0} | {1:N1}/{2:N1} MiB' -f $Name,($total/1MB),($Length/1MB)) (100*$total/[Math]::Max(1,$Length))
@@ -278,7 +275,6 @@ function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Len
         }
         [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
         if ($total -ne $Length) { throw "Incomplete stream: $Name" }
-        if ($crc) {$crc.Verify([uint32]$ExpectedCrc,$Name)}
         Show-Stage 0 $action $Name 100
         return [BitConverter]::ToString($sha.Hash).Replace('-','')
     } finally { $sha.Dispose() }
@@ -327,18 +323,16 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     }
     $tracks=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @($disks | Where-Object {[IO.Path]::GetExtension($_) -eq '.cue'})) {
-        $entry=$Archive.GetEntry($name); $cueStream=$null
-        try {
-            $text=Read-SandboxedZipText $ZipPath $Archive $entry 1MB
-            $lines=[regex]::Split($text,'\r\n|\r|\n')
-            $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
-            foreach ($track in @(Get-CueReferences @($lines) $name)) {
-                $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
-                $trackEntry=$Archive.GetEntry($relative)
-                if ($null -eq $trackEntry -or $trackEntry.FullName.EndsWith('/')) {throw ('Missing CUE track or spelling/case mismatch: '+$relative)}
-                [void]$tracks.Add($relative)
-            }
-        } finally {if ($cueStream) {$cueStream.Dispose()}}
+        $entry=$Archive.GetEntry($name)
+        $text=Read-SandboxedZipText $ZipPath $Archive $entry 1MB
+        $lines=[regex]::Split($text,'\r\n|\r|\n')
+        $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
+        foreach ($track in @(Get-CueReferences @($lines) $name)) {
+            $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
+            $trackEntry=$Archive.GetEntry($relative)
+            if ($null -eq $trackEntry -or $trackEntry.FullName.EndsWith('/')) {throw ('Missing CUE track or spelling/case mismatch: '+$relative)}
+            [void]$tracks.Add($relative)
+        }
     }
     $disks=@($disks | Where-Object {-not $tracks.Contains($_)})
     $stems=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -629,13 +623,13 @@ function Assert-OwnedPlaylist([string]$Path,[string]$Stem,[string[]]$Lines=$null
     if ($count -eq 0) {throw 'Existing playlist is empty; output left alone.'}
 }
 
-function Get-GameMediaNames($Job,[string]$Storage='Auto') {
+function Get-GameMediaNames($Job,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip') {
     $diskNames=@(); $contentNames=@()
     if ($Job.Zip) {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
-            if ($Storage -in 'Loose','Folders' -or (-not $Job.Profile.ZipMemberPlaylist -and $Storage -eq 'Auto')) {Assert-ZipExtractionNames $archive}
+            if ($Storage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
         } finally {$archive.Dispose()}
     } else {
@@ -648,14 +642,6 @@ function Get-GameMediaNames($Job,[string]$Storage='Auto') {
         }
     }
     return [pscustomobject]@{DiskNames=$diskNames;ContentNames=$contentNames}
-}
-
-function Test-OutputPathOverlap([string]$First,[string]$Second) {
-    $a=[IO.Path]::GetFullPath($First).TrimEnd('\','/')
-    $b=[IO.Path]::GetFullPath($Second).TrimEnd('\','/')
-    return ($a.Equals($b,[StringComparison]::OrdinalIgnoreCase) -or
-        $a.StartsWith($b+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or
-        $b.StartsWith($a+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase))
 }
 
 function Set-PlaylistOutputConflicts([object[]]$Jobs) {
@@ -697,21 +683,16 @@ function Set-PlaylistOutputConflicts([object[]]$Jobs) {
 }
 
 function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,$Media) {
-    if ($Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Unknown output storage choice.'}
+    if ($Storage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage choice.'}
     $profile=$Job.Profile
-    $zipMode=($Storage -eq 'Zip' -or ([bool]$profile.ZipMemberPlaylist -and $Storage -eq 'Auto' -and [bool]$Job.Zip))
+    $zipMode=$Storage -eq 'Zip'
     $looseFiles=$Storage -eq 'Loose'
     $isMulti=$Media.DiskNames.Count -gt 1
     $hasPlaylist=$isMulti
-    $singleFile=($Storage -eq 'Auto' -and -not $isMulti -and -not $zipMode -and $Media.ContentNames.Count -eq 1)
-    $dataFolder=(-not $zipMode -and -not $singleFile -and -not $looseFiles)
+    $dataFolder=$Storage -eq 'Folders'
     $relativeData=$Job.Stem
     if ($hasPlaylist) {$relativeData='.hidden/'+$Job.Stem}
     if ($zipMode) {$relativeData+='.zip'}
-    elseif ($singleFile) {
-        if ($Job.Zip) {$relativeData=$Job.Stem+[IO.Path]::GetExtension($Media.DiskNames[0])}
-        else {$relativeData=$Job.Disks[0].Path.Substring($SourceRoot.TrimEnd('\','/').Length+1).Replace('\','/')}
-    }
     $flatBase=([string][IO.Path]::GetDirectoryName($Job.Stem.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     if ($flatBase) {$flatBase+='/'}
     if ($isMulti) {$flatBase='.hidden/'+$flatBase}
@@ -732,8 +713,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         $dataWrites=@($flatWrites.ToArray());$dataPath=$dataWrites[0].Destination
         $relativeData=$dataPath.Substring($DestinationRoot.TrimEnd('\','/').Length+1).Replace('\','/')
     } else {
-        $memberName=$null;if($singleFile){$memberName=$Media.DiskNames[0]}
-        $dataWrites=@([pscustomobject]@{Destination=$dataPath;Folder=$dataFolder;Role='Data';MemberName=$memberName})
+        $dataWrites=@([pscustomobject]@{Destination=$dataPath;Folder=$dataFolder;Role='Data';MemberName=$null})
     }
     $dataTargets=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $dataParents=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -770,7 +750,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         Storage=$Storage;LooseFiles=$looseFiles;PreserveZip=($zipMode -and [bool]$Job.Zip);DataWrites=$dataWrites;
         HasPlaylist=$hasPlaylist;
         PlaylistLines=$lines;PlaylistText=$playlistText;FlatPlaylistLines=$flatLines;FlatDataWrites=@($flatWrites.ToArray());
-        SingleFile=$singleFile;DataFolder=$dataFolder;RelativeData=$relativeData;DataPath=$dataPath;M3uPath=$m3uPath;
+        DataFolder=$dataFolder;RelativeData=$relativeData;DataPath=$dataPath;M3uPath=$m3uPath;
         Stem=$Job.Stem;Root=$DestinationRoot;Writes=$writes;Retired=@();VisibleCandidates=$visible.ToArray()}
     # Only an owning playlist can authorize retirement of old loose media.
     # Unknown side files and outputs with changed names are left alone.
@@ -924,11 +904,8 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames) {
                         } else {
                             $cueEntry=$oldArchive.GetEntry($name)
                             if ($null -eq $cueEntry) {throw 'An existing playlist references a missing CUE; output left alone.'}
-                            $cueStream=$null
-                            try {
-                                $text=Read-SandboxedZipText $target.Destination $oldArchive $cueEntry 1MB
-                                $tracks=@(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $name)
-                            } finally {if($cueStream){$cueStream.Dispose()}}
+                            $text=Read-SandboxedZipText $target.Destination $oldArchive $cueEntry 1MB
+                            $tracks=@(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $name)
                         }
                         foreach ($track in $tracks) {
                             $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
@@ -1363,7 +1340,6 @@ try {
     foreach ($profile in $selected) {
         Show-PreparationProgress 'Checking selected core' $profile.Folder 0 -1 'profiles' -Force
         $support=Get-PlaylistSupport $profile $OnionRoot
-        $zipNotice=Get-ZipOutputNotice $profile $support
         Write-Event 'CORE' ($support.Basis+' / '+$support.Core+' / '+$support.Status)
         if (-not $support.CanBuild) {Write-Event 'PLAYBACK NOTE' ((Get-PlaylistFeatureLabel $profile $support)+' '+$support.Reason)}
         $tapeSupport=$null
@@ -1385,9 +1361,6 @@ try {
         foreach ($job in $systemJobs) {
             $job | Add-Member -NotePropertyName Profile -NotePropertyValue $profile
             $job | Add-Member -NotePropertyName TapeSupport -NotePropertyValue $tapeSupport
-            $job | Add-Member -NotePropertyName ZipOutputNotice -NotePropertyValue $zipNotice
-            $unsupportedReason=$null
-            $job | Add-Member -NotePropertyName Unsupported -NotePropertyValue $unsupportedReason
             $jobs.Add($job)
         }
     }
@@ -1425,7 +1398,7 @@ try {
     Show-PreparationProgress 'Planning game outputs' 'Reading archive directories and media names.' 0 $jobs.Count 'sets'
     foreach ($job in $jobs) {
         $job | Add-Member -NotePropertyName OutputPlan -NotePropertyValue $null
-        if ($job.Error -or $job.Unsupported) {
+        if ($job.Error) {
             $checked++; Show-PreparationProgress 'Planning game outputs' $job.Source $checked $jobs.Count 'sets'; continue
         }
         Show-PreparationProgress 'Planning game outputs' $job.Source $checked $jobs.Count 'sets'
@@ -1468,11 +1441,6 @@ try {
             if (-not $job.OutputPlan.HasPlaylist) {$result.Playlist=''}
         }
         try {
-            if ($job.Unsupported) {
-                $script:Skipped++; $result.Result='Unsupported'; $result.Detail=$job.Unsupported
-                Write-Event 'SKIP' ('NOT BUILT: '+$job.System+'/'+$job.Source+' - '+$result.Detail)
-                continue
-            }
             if ($job.Error) {throw $job.Error}
             # Inspect names first, before reading/hashing image contents or asking
             # to replace anything. One playable image never needs a playlist.
@@ -1514,7 +1482,7 @@ try {
                 [string]::Join([char]0,[string[]]$contentNames) -cne [string]::Join([char]0,[string[]]$plan.ContentNames)) {
                 throw 'Source media names changed after output planning. Original kept; rerun the batch.'
             }
-            $singleFile=$plan.SingleFile;$dataFolder=$plan.DataFolder;$relativeData=$plan.RelativeData
+            $dataFolder=$plan.DataFolder;$relativeData=$plan.RelativeData
             $dataPath=$plan.DataPath;$m3uPath=$plan.M3uPath;$retired=@($plan.Retired)
             $paths=@($plan.Writes)+@($plan.Retired)+@($plan.VisibleCandidates)
             foreach ($target in $paths) {Assert-PlainOutputParents $target.Destination $destinationRoot}
@@ -1585,9 +1553,6 @@ try {
                     if(-not $manifest.ContainsKey($name)){throw 'A planned loose output is missing from the verified media.'}
                     [pscustomobject]@{Staged=(Join-Path $stageData $name.Replace('/',[IO.Path]::DirectorySeparatorChar));Destination=$write.Destination;Folder=$false;Hash=$manifest[$name].Hash}
                 })
-            } elseif ($singleFile) {
-                $stagedFile=Join-Path $stageData $diskNames[0].Replace('/',[IO.Path]::DirectorySeparatorChar)
-                $items=@([pscustomobject]@{Staged=$stagedFile;Destination=$dataPath;Folder=$false;Hash=$manifest[$diskNames[0]].Hash})
             } else {
                 $items=@([pscustomobject]@{Staged=$stageData;Destination=$dataPath;Folder=$dataFolder;Hash=$dataHash;Manifest=$manifest})
             }
@@ -1598,7 +1563,7 @@ try {
             # Recheck folder boundaries immediately before the transaction.
             Assert-PlaylistOutputOwnership $plan $expectedNames
             Show-Stage 0.95 'Installing verified game output' $job.Source
-            $commit=Install-PlaylistSet $items $null $false $overwrite $retired
+            $commit=Install-PlaylistSet $items $overwrite $retired
             Complete-SourcePolicyJob $sourcePlan $job.SourceId $sourceHashes $items
             Complete-ApplicationCurrentJob
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}
@@ -1677,7 +1642,6 @@ try {
     Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'
     if ($script:Failed -gt 0 -or $script:ReportProblem -or $sourceSummary.Failed -gt 0) {$exitCode=1}
-    elseif (@($results | Where-Object {$_.Result -eq 'Unsupported'}).Count -gt 0) {$exitCode=2}
 } catch {
     $exitCode=1
     Write-Event 'ERROR' $_.Exception.Message

@@ -287,11 +287,7 @@ function Invoke-ApplicationHost {
             Write-Host ('Published: {0}; failed: {1}; originals removed: {2}.' -f $state.Result.Written,$state.Result.Failed,$state.Result.Removed)
             foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.Source+': '+$result.Result+' / '+$result.Detail))}
             Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
-            if ($state.Result.Operation -eq 'C64') {
-                Write-Host ('  Originals removed from SRC: {0:N0}   Kept in SRC: {1:N0}   Removal failures: {2:N0}' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
-            } else {
-                Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
-            }
+            Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
             foreach ($reason in @($state.Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
                 Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalText $reason))
             }

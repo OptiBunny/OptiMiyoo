@@ -46,7 +46,6 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
                     if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {continue}
                     $name=$entry.FullName.Replace('\','/');Assert-ConversionRelativeName $name
                     $convert=[IO.Path]::GetExtension($name) -in $extensions
-                    if (-not $convert -and $Kind -eq 'ZX') {$block='ZIP includes files not converted to DSK; the original is kept.';continue}
                     $entries.Add([pscustomobject]@{InputPath=$file.FullName;Type='Zip';EntryName=$name;InputName=$name;Name=$name;Converter='';Media=$convert;Error='';SourceBlockReason=''})
                 }
             } else {
@@ -117,9 +116,13 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
         $group.Plan=[pscustomobject]@{Stem=$group.Stem;Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData));RelativeData=$relativeData;Folder=$folder;Loose=$loose;LooseFiles=$loose;Targets=$writes.ToArray();DataWrites=$writes.ToArray();Retired=@()}
     }
     $owners=@{}
-    foreach ($group in $result) {foreach ($write in $group.Plan.DataWrites) {
-        $path=$write.Destination.TrimEnd('\','/');if (-not $owners.ContainsKey($path)) {$owners[$path]=New-Object 'System.Collections.Generic.List[object]'};$owners[$path].Add($group)
-    }}
+    foreach ($group in $result) {
+        # Skipped or invalid inputs cannot write outputs or claim their paths.
+        if ($group.Error) {continue}
+        foreach ($write in $group.Plan.DataWrites) {
+            $path=$write.Destination.TrimEnd('\','/');if (-not $owners.ContainsKey($path)) {$owners[$path]=New-Object 'System.Collections.Generic.List[object]'};$owners[$path].Add($group)
+        }
+    }
     foreach ($path in @($owners.Keys)) {
         if ($owners[$path].Count -gt 1) {foreach ($group in $owners[$path]) {$group.Error='Several games share an output filename. Rename the conflicting images or choose ZIPs or folders.'}}
         $parent=[IO.Path]::GetDirectoryName($path)

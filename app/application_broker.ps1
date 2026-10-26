@@ -407,7 +407,7 @@ function Start-ApplicationBrokerBatch {
             $plan=$group.Plan;$job=New-ApplicationBrokerJob $group.SourceKey $group $plan
             $job.Paths=@($group.Paths);$job.SourceBlockReason=$group.SourceBlockReason;$job.BlockedReason=$group.Error
             try {
-                if($group.Error){throw $group.Error}
+                if($group.Error){if($group.Error -eq 'No supported disk images in this input.'){$job.BlockedResult='Skipped'};throw $group.Error}
                 foreach($member in $group.Items){
                     $key=Get-ApplicationBrokerRelative $member.InputPath $src
                     if(-not $state.SourceSnapshot.Files.ContainsKey($key)){throw 'Converter input was not present in the frozen source manifest.'}
@@ -422,7 +422,7 @@ function Start-ApplicationBrokerBatch {
                     if($member.Converter){$job.Files[$member.Name].Converter=$member.Converter;$job.Files[$member.Name].Hash='';$job.Files[$member.Name].Length=-1L}
                 }
                 if(-not $job.Files.Count){$job.BlockedResult='Skipped';throw 'No supported disk images.'}
-                $job.DiskNames=@($job.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.g64','.dsk'} | Sort-Object)
+                $job.DiskNames=@($group.Items | Where-Object {$_.Media} | ForEach-Object {$_.Name} | Sort-Object)
                 $job.Writes=@($plan.DataWrites);$job.Retired=@()
                 $job.DataKind='Zip';if($Storage -eq 'Folders'){$job.DataKind='Folder'}elseif($Storage -eq 'Loose'){$job.DataKind='Files'}
                 $job.Conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
@@ -570,8 +570,15 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot)
     } elseif($Batch.Operation -eq 'C64'){
         & $Batch.Module {param($job,$dst)Assert-C64OwnedOutputs $job.Plan $job.DiskNames $dst @($job.Files.Keys)} $Job $DestinationRoot
     } else {
-        & $Batch.SourceModule {param($path,$dst)Assert-PlainOutputParents $path $dst} $Job.Plan.Destination $DestinationRoot
-        if(Test-Path -LiteralPath $Job.Plan.Destination){$item=Get-Item -LiteralPath $Job.Plan.Destination -Force;if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Existing converter output is not a regular file.'}}
+        & $Batch.Module {param($job,$dst)
+            # Legacy ZX still writes one disk at a time, with the same output
+            # ownership checks as grouped converter batches.
+            $group=[pscustomobject]@{
+                Items=@($job.Files.Keys | ForEach-Object {[pscustomobject]@{Name=$_}})
+                Plan=[pscustomobject]@{DataWrites=$job.Writes;LooseFiles=($job.DataKind -eq 'File')}
+            }
+            Assert-ConversionGroupOwnership $group $dst
+        } $Job $DestinationRoot
     }
 }
 

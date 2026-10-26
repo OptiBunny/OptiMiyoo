@@ -83,7 +83,7 @@ function Invoke-ZXExplicitOutputs([string]$Root,[string]$Storage,[string]$Source
             [IO.File]::Move($shortOutput,$target);Remove-SourcePolicyOwnedPath -Path $shortInput -Root $temp
         } else {
             [IO.File]::Copy($source,$target)
-            if (-not (Test-DSK $target)) {throw 'Existing DSK structure is invalid; original kept.'}
+            if ($item.Media -and -not (Test-DSK $target)) {throw 'Existing DSK structure is invalid; original kept.'}
         }
     }
 }

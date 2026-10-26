@@ -207,10 +207,26 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
     }
 }
 
+function Initialize-ApplicationVersion([string]$ApplicationRoot) {
+    # Trusted prompts run outside the worker and use the installed version file.
+    $stream=$null;$reader=$null
+    try {
+        $stream=[IO.File]::OpenRead((Join-Path $ApplicationRoot 'VERSION'))
+        if ($stream.Length -lt 1 -or $stream.Length -gt 64) {throw 'Invalid installed application version.'}
+        $reader=New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
+        $version=$reader.ReadToEnd().Trim()
+        if ($version -cnotmatch '\A[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:[-+][0-9A-Za-z.-]{1,32})?\z') {throw 'Invalid installed application version.'}
+        $script:AppVersion=$version
+    } finally {
+        if ($reader) {$reader.Dispose()} elseif ($stream) {$stream.Dispose()}
+    }
+}
+
 function Invoke-ApplicationHost {
     param([Parameter(Mandatory=$true)][string]$ApplicationRoot,[string]$Entry,[hashtable]$Arguments)
     $ErrorActionPreference='Stop'
     $application=[IO.Path]::GetFullPath($ApplicationRoot)
+    Initialize-ApplicationVersion $application
     $originalRoot=$application
     if ($Arguments.Root) {$originalRoot=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath([string]$Arguments.Root)}
     $originalArguments=$Arguments.Clone()

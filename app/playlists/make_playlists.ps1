@@ -124,7 +124,8 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
             # appearing retired output belongs to someone else until checked.
             foreach ($item in $replaceTargets) {
                 if (Test-Path -LiteralPath $item.Destination) {
-                    $backup = Join-Path ([IO.Path]::GetDirectoryName($item.Destination)) ('.m3u_' + [Guid]::NewGuid().ToString('N') + '.backup')
+                    # Keep the temporary name short enough for valid deep output paths.
+                    $backup = Join-Path ([IO.Path]::GetDirectoryName($item.Destination)) ('.m3u_' + [Guid]::NewGuid().ToString('N').Substring(0,12) + '.backup')
                     Move-OutputPath $item.Destination $backup ([bool]$item.Folder)
                     $captured=[pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder; Guard=$null }
                     $backups.Add($captured)

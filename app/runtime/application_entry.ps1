@@ -16,12 +16,19 @@ function Get-ApplicationValidationRoot([string]$Path,[string]$Root) {
 
 function Enter-ApplicationHost {
     param([string]$ApplicationRoot,[ValidateSet('Playlist','C64','ZX','SD')][string]$Entry,[hashtable]$Arguments)
-    . (Join-Path $ApplicationRoot 'app/shared/portable_storage.ps1')
+    $ErrorActionPreference='Stop'
     $temporary=$null
     try {
+        . (Join-Path $ApplicationRoot 'app/shared/portable_storage.ps1')
         $temporary=Open-OptiPortableTempScope $ApplicationRoot
         . (Join-Path $ApplicationRoot 'app/runtime/application_host.ps1')
         return (Invoke-ApplicationHost -ApplicationRoot $ApplicationRoot -Entry $Entry -Arguments $Arguments)
+    } catch {
+        # exit(Enter-ApplicationHost ...) must receive a failure code, even when
+        # bootstrap fails before the host's normal session error handler runs.
+        $message=[regex]::Replace([string]$_.Exception.Message,'[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' ')
+        Write-Host ('OptiMiyoo could not start: '+$message) -ForegroundColor Red
+        return 1
     } finally {if ($temporary) {Close-OptiPortableTempScope $temporary}}
 }
 

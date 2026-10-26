@@ -1169,7 +1169,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             }
             Write-MenuLine '  Single media stays visible; playlists need 2+ images.'
             Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
-            $defaultOutput='1'; if ($profile.Folder -in 'CPC','MSX','ZXS') {$defaultOutput='2'}
+            $defaultOutput='1'; if ($profile.Folder -in 'PS','CPC','MSX','ZXS') {$defaultOutput='2'}
             $zipNotice=Get-ZipOutputNotice $profile $support
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $zipDefault=' (default)'; $folderDefault=''

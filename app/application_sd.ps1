@@ -180,9 +180,8 @@ function Close-ApplicationSdSession {
 }
 
 function Resolve-ApplicationSdInput([string]$Text) {
-    $choice=[pscustomobject]@{Cancelled=$false;Path=$null;Error=$null}
+    $choice=[pscustomobject]@{Path=$null;Error=$null}
     $candidate=$Text.Trim().Trim('"')
-    if ($candidate -eq 'B') {$choice.Cancelled=$true;return $choice}
     if ([string]::IsNullOrWhiteSpace($candidate)) {
         $choice.Error='Enter your SD path, e.g. E:\, or press Esc to go back.';return $choice
     }
@@ -202,9 +201,9 @@ function Resolve-ApplicationSdInput([string]$Text) {
 function Read-ApplicationSdConsolePath {
     param([string]$InitialText='', [string]$ErrorMessage='')
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
-    $title='Onion SD setup';$prompt='SD drive or folder (for example E:\)'
+    $title='Onion SD setup';$prompt='SD drive or folder (for example E:\) / Esc: Back'
     if ($ErrorMessage) {$prompt=$ErrorMessage}
-    $rows=@(Get-OnionSetupMenuRows)+@('B. Back to main menu (Esc also goes back)');$text=$InitialText;$dirty=$true
+    $rows=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');$text=$InitialText;$dirty=$true
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
@@ -227,7 +226,6 @@ function Read-ApplicationSdConsolePath {
             if($key.Key -eq [ConsoleKey]::Enter){
                 if(-not $script:UiVT){[Console]::WriteLine()}
                 $selected=$text.Trim().Trim('"')
-                if($selected -eq 'B'){return $null}
                 return $selected
             }
             if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,$text.Length-1)}
@@ -250,14 +248,13 @@ function Invoke-ApplicationSdFolderPrompt {
             $selected=Read-ApplicationSdConsolePath -InitialText $text -ErrorMessage $message
             if ($null -eq $selected) {break}
             $choice=Resolve-ApplicationSdInput $selected
-            if ($choice.Cancelled) {$selected=$null;break}
             $text=$selected
             if ($choice.Error) {$message=$choice.Error;continue}
             if (-not [IO.Directory]::Exists($choice.Path)) {
                 $message='Folder not found. Check your SD path, or press Esc to go back.';continue
             }
             if (-not [IO.Directory]::Exists((Join-Path $choice.Path 'RetroArch/.retroarch/cores'))) {
-                $message='No Onion cores folder here. Choose your SD root.';continue
+                $message='No Onion cores here. Choose your SD root, or press Esc to go back.';continue
             }
             $selected=$choice.Path;break
         }

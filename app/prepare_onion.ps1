@@ -112,13 +112,12 @@ try {
     $cores=Join-Path $OnionRoot 'RetroArch/.retroarch/cores'
     Assert-PlainOnionPath $cores $OnionRoot
     if (-not (Test-Path -LiteralPath $cores -PathType Container)) {throw 'This does not look like an Onion SD card root: RetroArch cores folder not found.'}
-    $profileData=Get-Content -LiteralPath (Join-Path $ScriptDir 'systems.json') -Raw | ConvertFrom-Json
-    $profiles=@($profileData)
+    $profiles=@(Get-OnionSetupProfiles $ScriptDir)
     $backupRoot=Join-Path $OnionRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
     $changed=0; $unsupported=0
     Write-OnionText 'Checking selected cores. Setup only adds supported file-list extensions to config.json.'
     foreach ($profile in $profiles) {
-        $support=Get-PlaylistSupport $profile $OnionRoot
+        $support=Get-OnionSetupSupport $profile $OnionRoot
         if ($support.Status -eq 'NOT INSTALLED') {continue}
         if ($profile.Folder -eq 'COMMODORE') {
             $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $support
@@ -136,7 +135,7 @@ try {
             # core change must not race the eligibility check on Windows.
             $launchLock=[OptiMiyoo.OnionPathLease]::Open($support.LaunchPath,$OnionRoot,$false,$false,$false)
             $coreLock=[OptiMiyoo.OnionPathLease]::Open((Join-Path $cores $support.Core),$OnionRoot,$false,$false,$false)
-            $fresh=Get-PlaylistSupport $profile $OnionRoot
+            $fresh=Get-OnionSetupSupport $profile $OnionRoot
             if (-not $fresh.CanBuild -or $fresh.Core -ne $support.Core) {throw 'Selected core changed during setup. Run the check again.'}
             $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$false,$false)
             $stream=$configLease.Stream
@@ -148,11 +147,7 @@ try {
             $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
             if ($config.launch -ne 'launch.sh') {throw 'Config launcher changed during setup. Run the check again.'}
             if (-not $config.extlist -or $config.extlist -isnot [string]) {throw 'Config has no valid extlist string.'}
-            $extensions=@($profile.Playlist.TrimStart('.'))
-            if ($profile.Folder -eq 'COMMODORE') {
-                $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $fresh
-                if ($tapeSupport.CanBuild) {$extensions+=@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.')})}
-            }
+            $extensions=@(Get-OnionSetupExtensions $profile $OnionRoot $fresh)
             $missing=@($extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
             if ($missing.Count -eq 0) {Write-OnionText ('READY: '+$folder+' / '+$support.Core); continue}
             $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')

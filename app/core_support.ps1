@@ -217,7 +217,7 @@ function Test-CoreBinaryPatterns([string]$Path,[string[]]$Patterns,[int]$Overlap
     return ,$found
 }
 
-function Get-PlaylistSupport($Profile,[string]$SdRoot) {
+function Get-OnionCoreSupport($Profile,[string]$SdRoot,[string]$Extension,[switch]$Playlist) {
     # Onion's ROM folder and emulator configuration folder can differ.
     # PlayStation uses Roms/PS but Emu/PSX.
     $emuFolder=$Profile.Folder
@@ -247,7 +247,8 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
             if ($result.Core -eq $Profile.DefaultCore -and -not $Profile.DefaultSupported) {
                 $result.Status='UNSUPPORTED'; $result.Reason=$Profile.DefaultReason
             } else {
-                $result.Status='UNVERIFIED'; $result.Reason='Playlist loading and disk swapping have not been established for this selected core.'
+                $result.Status='UNVERIFIED'; $result.Reason='Loading this file type has not been established for the selected core.'
+                if ($Playlist) {$result.Reason='Playlist loading and disk swapping have not been established for this selected core.'}
             }
             return $result
         }
@@ -256,29 +257,71 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
         if (-not (Test-Path -LiteralPath $corePath -PathType Leaf)) {
             $result.Status='NOT INSTALLED'; $result.Reason='The selected core file is missing from the SD card.'; return $result
         }
-        $extension=$Profile.Playlist.TrimStart('.')
-        # A format-list token must be bounded by pipes or NUL bytes, not just
-        # an arbitrary mention of m3u in an error string. Known core families
-        # above supply the disk-control check; the binary check gates old builds.
-        $pattern='(?:\x00|\|)'+[regex]::Escape($extension)+'(?:\||\x00)'
-        if ($Profile.Folder -eq 'ZXS') {$pattern='tzx\|tap\|[^\x00\r\n]{0,300}\|m3u(?:\||\x00)'}
-        $advertises=(Test-CoreBinaryPatterns $corePath @($pattern) ([Math]::Max(512,$extension.Length+2)) $SdRoot)[0]
-        if (-not $advertises) {$result.Reason=('Selected core build does not advertise '+$Profile.Playlist+' loading.'); return $result}
+        $formatToken=$Extension.TrimStart('.')
+        # Bound format tokens so incidental error text cannot grant support.
+        # Known playlist core families supply the disk-control check; these
+        # binary checks also distinguish older builds without playlist loading.
+        $pattern='(?:\x00|\|)'+[regex]::Escape($formatToken)+'(?:\||\x00)'
+        if ($Playlist -and $Profile.Folder -eq 'ZXS') {$pattern='tzx\|tap\|[^\x00\r\n]{0,300}\|m3u(?:\||\x00)'}
+        $patterns=@($pattern)
+        $lynxRaw=(-not $Playlist -and $Profile.Folder -eq 'LYNX' -and $Extension -eq '.lyx')
+        # Older Handy/Beetle Lynx loaders accept headerless ROMs by contents.
+        # Their lnx|o list omits lyx, but only limits archive-member selection;
+        # a loose .lyx path from Onion still reaches the raw cartridge loader.
+        if ($lynxRaw) {$patterns+='\x00lnx\|o\x00'}
+        $advertises=(Test-CoreBinaryPatterns $corePath $patterns ([Math]::Max(512,$formatToken.Length+2)) $SdRoot) -contains $true
+        if (-not $advertises) {$result.Reason=('Selected core build does not advertise '+$Extension+' loading.'); return $result}
         $result.CanBuild=$true; $result.Status='SUPPORTED'
-        $result.Reason='Selected core is a known disk-swap core and its installed build advertises playlist loading.'
+        $result.Reason=('Selected core build advertises '+$Extension+' loading.')
+        if ($lynxRaw) {$result.Reason='Selected Lynx core supports loading headerless ROM files.'}
+        if ($Playlist) {$result.Reason='Selected core is a known disk-swap core and its installed build advertises playlist loading.'}
     } catch {$result.Status='UNVERIFIED'; $result.Reason=$_.Exception.Message}
     return $result
 }
 
+function Get-PlaylistSupport($Profile,[string]$SdRoot) {
+    return Get-OnionCoreSupport $Profile $SdRoot $Profile.Playlist -Playlist
+}
+
+function Get-OnionSetupProfiles([string]$CodeRoot=$PSScriptRoot) {
+    $profileData=Get-Content -LiteralPath (Join-Path $CodeRoot 'systems.json') -Raw | ConvertFrom-Json
+    @($profileData)
+    # Lynx is a file-list addition only, not a numbered playlist system.
+    [pscustomobject]@{
+        Folder='LYNX';EmuFolder='LYNX';Name='Atari Lynx';SetupExtension='.lyx'
+        DefaultCore='handy_libretro.so';DefaultSupported=$false
+        DefaultReason='LYX support must be checked in the installed core.'
+        SupportedCores=@('handy_libretro.so','mednafen_lynx_libretro.so')
+    }
+}
+
+function Get-OnionSetupSupport($Profile,[string]$SdRoot) {
+    if ($Profile.PSObject.Properties['SetupExtension']) {
+        return Get-OnionCoreSupport $Profile $SdRoot $Profile.SetupExtension
+    }
+    return Get-PlaylistSupport $Profile $SdRoot
+}
+
+function Get-OnionSetupExtensions($Profile,[string]$SdRoot,$Support) {
+    if (-not $Support.CanBuild) {return}
+    if ($Profile.PSObject.Properties['SetupExtension']) {
+        return $Profile.SetupExtension.TrimStart('.')
+    }
+    $Profile.Playlist.TrimStart('.')
+    if ($Profile.Folder -eq 'COMMODORE') {
+        $tape=Get-TapeSwapSupport $Profile $SdRoot $Support
+        if ($tape.CanBuild) {$tape.Extensions | ForEach-Object {$_.TrimStart('.')}}
+    }
+}
+
 function Get-OnionSetupMenuRows {
     @(
-        'Enables playlists in Onion''s game list.',
+        'Enables supported files in Onion''s list.',
         'Only edits config.json''s file-type list.',
-        'Adds supported .m3u / .m3u8 and C64 tapes.',
+        'Adds playlists, C64 tapes and Lynx .lyx.',
         'SD config backups: OptiMiyoo_Backup_<ID>/',
         'Does not install or switch emulator cores.',
         'Refresh Onion''s game list after setup.',
-        'Supported cores (checked on your SD):',
         '1. Amiga: PUAE2021 / PUAE',
         '2. C64: VICE x64 / x64sc',
         '3. PlayStation: PCSX ReARMed',
@@ -289,7 +332,8 @@ function Get-OnionSetupMenuRows {
         '7. VIC-20: VICE xvic',
         '8. MS-DOS: DOSBox Pure',
         '9. ZX: needs newer Fuse with M3U support.',
-        '   Default Onion Fuse cannot load playlists.'
+        '   Default Onion Fuse cannot load playlists.',
+        'Lynx .lyx: Handy / Beetle Lynx'
     )
 }
 

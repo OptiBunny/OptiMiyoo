@@ -10,7 +10,7 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 | **1–9** | [Create playlists](#create-playlists) without changing file formats. |
 | **C** | [Convert C64 NIB/NBZ to G64](#c64-converter-c). |
 | **Z** | [Convert ZX Spectrum IPF to DSK](#zx-converter-z). |
-| **S** | [Make supported playlists appear in Onion's game list](#sd-setup). |
+| **S** | [Enable supported file types in Onion's game list](#sd-setup). |
 | **D** | [Demo](#demo). |
 | **F** | Switch the bunny and logo between CRT and Smooth. |
 | **Q** | Exit. |
@@ -113,8 +113,9 @@ system's ROM folder on your SD card, then refresh the game list.
 
 ### SD setup
 
-Choose **S** and enter your SD drive, such as `E:\`. **Esc** cancels.
-Setup makes supported playlists and C64 tape files appear in Onion's game list.
+Choose **S** and enter your SD drive, such as `E:\`. **B** or **Esc** goes back.
+Setup enables supported playlists, C64 tape files, and Atari Lynx `.lyx` files
+in Onion's game list after checking the selected cores.
 Your selected emulators, games, and saves stay as they are.
 
 To undo setup, copy each saved `config.json` from `OptiMiyoo_Backup_<ID>` on the

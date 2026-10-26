@@ -72,11 +72,7 @@ function Get-ApplicationSdPatch([byte[]]$Original,$Profile,$Support,[string]$Oni
     $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
     $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
     if($config.launch -cne 'launch.sh' -or $config.extlist -isnot [string] -or -not $config.extlist){throw 'SD config does not have a verified launcher and extension list.'}
-    $extensions=@($Profile.Playlist.TrimStart('.'))
-    if($Profile.Folder -eq 'COMMODORE') {
-        $tape=& $script:ApplicationSdModule {param($profile,$root,$support)Get-TapeSwapSupport $profile $root $support} $Profile $OnionRoot $Support
-        if($tape.CanBuild){$extensions+=@($tape.Extensions | ForEach-Object {$_.TrimStart('.')})}
-    }
+    $extensions=@(& $script:ApplicationSdModule {param($profile,$root,$support)Get-OnionSetupExtensions $profile $root $support} $Profile $OnionRoot $Support)
     $missing=@($extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
     if($missing.Count -eq 0){return ,$Original}
     $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')
@@ -102,8 +98,7 @@ function New-ApplicationSdSession {
         $workLease=[OptiMiyoo.OnionPathLease]::Open($work,$work,$true,$false,$false)
         if(Test-Path -LiteralPath $state.StagedRoot){throw 'SD snapshot needs a fresh Onion staging folder.'}
         [void][IO.Directory]::CreateDirectory((Join-Path $state.StagedRoot 'RetroArch/.retroarch/cores'))
-        $profileData=Get-Content -LiteralPath (Join-Path $script:ApplicationSdCodeRoot 'systems.json') -Raw | ConvertFrom-Json
-        $state.Profiles=@($profileData)
+        $state.Profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
         foreach($profile in $state.Profiles) {
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             if($folder -notmatch '^[A-Z0-9]+$'){throw 'Invalid installed SD profile.'}
@@ -121,7 +116,7 @@ function New-ApplicationSdSession {
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder
-            $support=& $script:ApplicationSdModule {param($profile,$root)Get-PlaylistSupport $profile $root} $profile $original
+            $support=& $script:ApplicationSdModule {param($profile,$root)Get-OnionSetupSupport $profile $root} $profile $original
             $file.Core=$support.Core
             # An unverified profile remains visible in the staged assessment but
             # has no publication authority, even if the child changes its core.

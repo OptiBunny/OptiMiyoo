@@ -136,7 +136,7 @@ function Invoke-ApplicationNativeRequest {
             $outputName=if ($kind -eq 'Nib') {'output.g64'} else {'output.dsk'}
         }
         $runtime=New-Object 'System.Collections.Generic.List[string]'
-        if ($kind -eq 'Nib') {$exe=Join-Path $State.ApplicationRoot 'app/tools/nibconv.exe';$lpac=$true}
+        if ($kind -eq 'Nib') {$exe=Join-Path $State.ApplicationRoot 'app/C64/tools/nibconv.exe';$lpac=$true}
         else {
             $arch=if ($kind -eq 'HxcX86') {'x86'} else {'x64'}
             $directory=Join-Path $State.ApplicationRoot ('app/ZX/tools/hxc/'+$arch)

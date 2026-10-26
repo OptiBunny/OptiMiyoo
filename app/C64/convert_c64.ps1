@@ -18,7 +18,7 @@ $script:AppVersion = '0.0.9'
 
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$NibConv = Join-Path $ScriptDir 'tools/nibconv.exe'
+$NibConv = Join-Path $ScriptDir 'C64/tools/nibconv.exe'
 . (Join-Path $ScriptDir 'source_policy.ps1')
 . (Join-Path $ScriptDir 'overwrite_prompt.ps1')
 . (Join-Path $ScriptDir 'media_validation.ps1')

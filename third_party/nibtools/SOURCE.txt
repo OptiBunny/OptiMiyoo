@@ -10,7 +10,7 @@ Bundled binary
 OptiMiyoo builds AMD64 nibconv.exe from the unmodified release source, retaining
 relocations required by Windows AppContainer. It converts existing image files;
 physical-drive tools and OpenCBM components are not used.
-File: app/tools/nibconv.exe
+File: app/C64/tools/nibconv.exe
 SHA-256: 91ffa3f66ec00b2648613bbcfea32d162b72dd260c2f188dc7562045989b68ff
 
 Reproduce the executable

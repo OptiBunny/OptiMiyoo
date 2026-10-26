@@ -1060,7 +1060,6 @@ function Invoke-OptiMenu([object[]]$Profiles) {
         $worker=$null; $workerArgs=$null; $pageName=$page
         if ($page -eq 'Main') {
             Show-MenuTitle 'Main menu'
-            Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
             $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
             Write-MenuLine ('  F. CRT effect: '+$crtState+' / turn on or off')
             Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
@@ -1077,6 +1076,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 $compact=('{0,2}. {1,-9} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$shortNames[$Profiles[$i].Folder],$shortLabel)
                 Write-MenuLine ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
             }
+            Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
             Write-MenuLine '  Q. Exit'
             $answer=Read-MenuChoice 'Choose a system number or letter [Enter = 1, Amiga]'
             if ($answer -eq 'Q') {return $lastCode}

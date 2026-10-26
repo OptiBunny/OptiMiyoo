@@ -7,12 +7,12 @@ the displayed default. Use the back and exit keys shown on each screen.
 
 | Choose | Task |
 | --- | --- |
-| **D** | [Demo](#demo). |
 | **F** | Turn the CRT effect on or off. |
 | **S** | [Enable supported file types in Onion's game list](#sd-setup). |
 | **C** | [C64 converter](#c64-converter-c). |
 | **Z** | [ZX Spectrum converter](#zx-converter-z). |
 | **1–9** | [Create playlists](#create-playlists) without changing file formats. |
+| **D** | [Demo](#demo). |
 | **Q** | Exit. |
 
 ## Prepare a batch

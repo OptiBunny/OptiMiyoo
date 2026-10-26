@@ -270,6 +270,21 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
     return $result
 }
 
+function Get-OnionSetupMenuRows {
+    @(
+        'Show playlists in Onion''s game list.',
+        'Checks each system''s selected emulator core.',
+        'Only edits config.json''s visible file types:',
+        '  adds supported .m3u / .m3u8 playlists',
+        '  and supported C64 tape formats.',
+        'Backs up each config before editing it:',
+        '  SD card: OptiMiyoo_Backup_<ID>/',
+        'Games, saves and cores stay unchanged.',
+        'Cannot add playlist support to a core.',
+        'Refresh Onion''s game list after setup.'
+    )
+}
+
 function Get-PlaylistFeatureLabel($Profile,$Support) {
     if ($Support.CanBuild) {return ''}
     if ($Support.Status -eq 'NOT INSTALLED') {return '[not installed]'}

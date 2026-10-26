@@ -199,7 +199,8 @@ function Close-ApplicationSdSession {
 
 function Read-ApplicationSdConsolePath {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
-    $title='Onion SD setup';$prompt='SD card root (for example E:\)';$rows=@('Choose the SD card root folder.','Setup adds supported file-list extensions.','Selected emulator cores stay unchanged.','Escape cancels.');$text='';$dirty=$true
+    $title='Onion SD setup';$prompt='SD drive or folder (for example E:\)'
+    $rows=@(Get-OnionSetupMenuRows)+@('Enter starts setup. Esc cancels.');$text='';$dirty=$true
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt

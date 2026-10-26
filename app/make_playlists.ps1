@@ -1265,9 +1265,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             }
             $pageName='Onion SD setup'
             Show-MenuTitle $pageName
-            Write-MenuLine '  Enter the SD card root (for example E:\).'
-            Write-MenuLine '  Only config.json file-list extensions are edited. Selected cores are preserved.'
-            Write-MenuLine '  Commodore tapes and PP disks share the same config and M3U extension.'
+            foreach ($row in @(Get-OnionSetupMenuRows)) {Write-MenuLine ('  '+$row)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $prompt='SD card root'
             if ($menuOnionRoot) {$prompt+=' [Enter = '+$menuOnionRoot+']'}

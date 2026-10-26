@@ -95,12 +95,12 @@ ROM folder on your SD card. Then refresh Onion's game list.
 | --- | --- | --- |
 | **1** | Amiga | `Roms/AMIGA` |
 | **2** | Commodore 64 | `Roms/COMMODORE` |
-| **3** | PlayStation | `Roms/PS` |
-| **4** | Sega CD / Mega-CD | `Roms/SEGACD` |
-| **5** | Amstrad CPC | `Roms/CPC` |
-| **6** | MSX / MSX2 | `Roms/MSX` |
+| **3** | MS-DOS | `Roms/DOS` |
+| **4** | MSX / MSX2 | `Roms/MSX` |
+| **5** | PlayStation | `Roms/PS` |
+| **6** | Sega CD / Mega-CD | `Roms/SEGACD` |
 | **7** | VIC-20 | `Roms/VIC20` |
-| **8** | MS-DOS | `Roms/DOS` |
+| **8** | Amstrad CPC | `Roms/CPC` |
 | **9** | ZX Spectrum | `Roms/ZXS` |
 
 ### SD setup

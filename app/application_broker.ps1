@@ -343,9 +343,9 @@ function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
 
 function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Auto','LegacyFolders','Zip','Loose','Folders')][string]$Storage='Auto',
+          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Auto',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask')
-    if($Operation -eq 'ZX' -and $Storage -notin 'Zip','Loose','Folders'){throw 'Choose ZIPs, folders or loose files for ZX conversion.'}
+    if($Operation -in 'C64','ZX' -and $Storage -notin 'Zip','Loose','Folders'){throw 'Choose ZIPs, folders or loose files for conversion.'}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
@@ -429,44 +429,6 @@ function Start-ApplicationBrokerBatch {
             } catch {$job.BlockedReason=$_.Exception.Message}
             $jobs.Add($job)
         }
-    } elseif($Operation -eq 'C64'){
-        $System='COMMODORE';$raw=New-Object 'System.Collections.Generic.List[object]'
-        $sourceInputs=@(& $module {param($src)Get-C64SourceInputs $src} $src)
-        if($sourceInputs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
-        foreach($inputFile in $sourceInputs){
-            $sourceJob=[pscustomobject]@{Zip=$inputFile;IsArchive=($inputFile.Extension -ieq '.zip');Images=0;NibImages=0;ScanError='';Plan=$null;Files=@{}}
-            try {
-                if($sourceJob.IsArchive){$sourceJob.Files=Get-ApplicationBrokerArchive $module $inputFile.FullName}
-                else {
-                    $key=Get-ApplicationBrokerRelative $inputFile.FullName $src
-                    if(-not $state.SourceSnapshot.Files.ContainsKey($key)){throw 'C64 input was not present in the frozen source manifest.'}
-                    if($state.SourceSnapshot.Files[$key].Length -gt 512MB){throw 'Disk image exceeds the 512 MiB input limit; original kept.'}
-                    $sourceJob.Files[$inputFile.Name]=$state.SourceSnapshot.Files[$key]
-                }
-                $sourceJob.Images=@($sourceJob.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz','.g64'}).Count
-                $sourceJob.NibImages=@($sourceJob.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'}).Count
-            } catch {$sourceJob.ScanError=$_.Exception.Message}
-            $raw.Add($sourceJob)
-        }
-        $legacyStorage='Auto';if($Storage -eq 'LegacyFolders'){$legacyStorage='Folders'}
-        & $module {param($raw,$src,$dst,$storage)Set-C64OutputConflicts $raw ($src.TrimEnd('\','/')+'\') $dst $storage} $raw.ToArray() $src $dst $legacyStorage
-        foreach($sourceJob in $raw){
-            $plan=$sourceJob.Plan;$job=New-ApplicationBrokerJob (Get-ApplicationBrokerRelative $sourceJob.Zip.FullName $src) $sourceJob $plan
-            $job.Paths=@($sourceJob.Zip.FullName);$job.BlockedReason=$sourceJob.ScanError
-            if($sourceJob.Images -eq 0 -and -not $sourceJob.ScanError){$job.BlockedReason='No NIB/NBZ/G64 images.';$job.BlockedResult='Skipped'}
-            try {
-                foreach($name in $sourceJob.Files.Keys){Add-ApplicationBrokerExpectedFile $job.Files $name $sourceJob.Files[$name]}
-                foreach($name in @($job.Files.Keys | Where-Object {[IO.Path]::GetExtension($_) -in '.nib','.nbz'})){
-                    $target=[IO.Path]::ChangeExtension($name,'.g64').Replace('\','/');if($job.Files.ContainsKey($target)){throw 'Converted media name collides with existing image.'}
-                    $file=$job.Files[$name];$job.Files.Remove($name);$file.Converter='Nib';$file.Hash='';$file.Length=-1;$job.Files[$target]=$file
-                }
-                $job.DiskNames=@(& $module {param($names)$names | Where-Object {[IO.Path]::GetExtension($_) -eq '.g64'} | Sort-Object} @($job.Files.Keys))
-                $job.Writes=@([pscustomobject]@{Destination=$plan.Destination;Folder=$plan.Folder})
-                $job.Retired=@($plan.Retired);$job.DataKind='Zip';if($plan.Loose){$job.DataKind='File'}elseif($plan.Folder){$job.DataKind='Folder'}
-                $job.Conflicts=@($plan.Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
-            } catch {$job.BlockedReason=$_.Exception.Message}
-            $jobs.Add($job)
-        }
     }
     if($jobs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
     $sourcePlan=& $sourceModule {param($src,$policy)New-SourcePolicyPlan $src $policy} $src $SourcePolicy
@@ -543,8 +505,6 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot)
         } $Job $Batch.Profile $DestinationRoot
     } elseif($Batch.Storage -in 'Zip','Loose','Folders'){
         & $Batch.Module {param($group,$dst)Assert-ConversionGroupOwnership $group $dst} $Job.SourceJob $DestinationRoot
-    } elseif($Batch.Operation -eq 'C64'){
-        & $Batch.Module {param($job,$dst)Assert-C64OwnedOutputs $job.Plan $job.DiskNames $dst @($job.Files.Keys)} $Job $DestinationRoot
     } else {throw 'Unknown converter output storage.'}
 }
 
@@ -722,15 +682,13 @@ function Complete-ApplicationBrokerBatch {
         }
         foreach($result in $results){
             $job=$batch.Jobs[$result.JobId];$playlist='';$destination='';$diskImages=0;$sourceName=$job.SourceKey
-            if($batch.Operation -in 'C64','ZX' -and $batch.Storage -in 'Zip','Loose','Folders'){$sourceName=$job.SourceJob.Source}
+            if($batch.Operation -in 'C64','ZX'){$sourceName=$job.SourceJob.Source}
             if($job.Plan){
                 if($batch.Operation -eq 'Playlist'){
                     $diskImages=@($job.Plan.DiskNames).Count;$destination=$job.Plan.RelativeData
                     if($job.Plan.HasPlaylist){$playlist=Get-ApplicationBrokerRelative $job.Plan.M3uPath $dst}
                 }
-                elseif($batch.Storage -in 'Zip','Loose','Folders'){$diskImages=@($job.SourceJob.Items | Where-Object {$_.Media}).Count;$destination=$job.Plan.RelativeData}
-                elseif($batch.Operation -eq 'C64'){$diskImages=$job.SourceJob.Images;$destination=$job.Plan.RelativeData}
-                else {$diskImages=1;$destination=$job.Plan.RelativeData}
+                else {$diskImages=@($job.SourceJob.Items | Where-Object {$_.Media}).Count;$destination=$job.Plan.RelativeData}
             }
             $result | Add-Member NoteProperty System $batch.System
             $result | Add-Member NoteProperty Source $sourceName

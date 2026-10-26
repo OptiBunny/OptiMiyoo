@@ -27,16 +27,11 @@ function Enter-ApplicationHost {
 
 function Resolve-ApplicationOutputSelection {
     param([ValidateSet('Playlist','C64','ZX')][string]$Operation,
-          [string]$Storage,[string]$Mode)
-    if ($Storage -and $Storage -notin 'Auto','Zip','Loose','Folders','LegacyFolders') {throw 'Unknown output storage.'}
-    if ($Mode -and $Mode -notin 'Keep','Remove','Folders') {throw 'Unknown C64 mode.'}
-    if ($Storage) {$Storage=@{Auto='Auto';Zip='Zip';Loose='Loose';Folders='Folders';LegacyFolders='LegacyFolders'}[$Storage]}
-    if ($Storage -eq 'LegacyFolders' -and $Operation -ne 'C64') {throw 'Legacy folder storage is only valid for C64.'}
-    if ($Operation -eq 'ZX' -and (-not $Storage -or $Storage -eq 'Auto')) {$Storage='Folders'}
-    elseif (-not $Storage) {
-        if ($Operation -eq 'Playlist') {$Storage='Zip'}
-        elseif ($Mode -eq 'Folders') {$Storage='LegacyFolders'}
-        else {$Storage='Auto'}
+          [string]$Storage)
+    if ($Storage -and $Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Unknown output storage.'}
+    if ($Storage) {$Storage=@{Auto='Auto';Zip='Zip';Loose='Loose';Folders='Folders'}[$Storage]}
+    if (-not $Storage -or ($Operation -in 'C64','ZX' -and $Storage -eq 'Auto')) {
+        $Storage='Zip';if ($Operation -eq 'ZX') {$Storage='Folders'}
     }
     return @{Storage=$Storage}
 }
@@ -86,7 +81,7 @@ function Set-ApplicationBatchContext($Batch) {
 function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     $name=[IO.Path]::GetFileName($Path)
     $operation=switch ($name) {'make_playlists.ps1' {'Playlist'} 'convert_c64.ps1' {'C64'} 'convert_zx.ps1' {'ZX'} default {throw 'Unknown application worker.'}}
-    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $Arguments.Storage -Mode $Arguments.Mode
+    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $Arguments.Storage
     $batch=Invoke-ApplicationRpc -Operation Batch.Begin -Payload @{Operation=$operation;System=$Arguments.System;Storage=$output.Storage}
     $jobs=New-Object 'System.Collections.Generic.List[object]';$offset=0
     do {
@@ -101,7 +96,6 @@ function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     $Arguments.Root=$batch.WorkRoot;$Arguments.SourcePolicy='Keep'
     if ($operation -eq 'Playlist' -or $output.Storage -in 'Zip','Loose','Folders') {$Arguments.Storage=$output.Storage}
     else {[void]$Arguments.Remove('Storage')}
-    if ($operation -eq 'C64') {$Arguments.Mode=$(if ($output.Storage -eq 'LegacyFolders') {'Folders'}else{'Keep'})}
     Restore-Display
     try {& $Path @Arguments | Out-Host;$code=$LASTEXITCODE}
     catch {$code=1;Write-Host ('  ERROR: '+(ConvertTo-SafeExternalText $_.Exception.Message))}

@@ -252,13 +252,20 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
         foreach ($backup in $backups) {try {Remove-SourcePolicyOwnedPath -Path $backup.Path -Root $DestinationRoot} catch {Write-Notice 'WARNING' ('Previous output backup remains at '+$backup.Path)}}
         return [pscustomobject]@{Outputs=$staged.ToArray();Locks=$locks;Replaced=($backups.Count -gt 0)}
     } catch {
+        $message=$_.Exception.Message
         if ($locks) {foreach ($lock in $locks) {$lock.Dispose()}};$locks=$null
         for ($i=$installed.Count-1;$i -ge 0;$i--) {
             $output=$installed[$i]
-            try {if ($output.Folder) {[IO.Directory]::Move($output.Destination,$output.Staged)} else {[IO.File]::Move($output.Destination,$output.Staged)}} catch {$output.Preserve=$true}
+            # Failed verification can mean another program replaced this path.
+            # Retain rollback data instead of deleting it as temporary output.
+            $output.Preserve=$true
+            try {
+                if ($output.Folder) {[IO.Directory]::Move($output.Destination,$output.Staged)} else {[IO.File]::Move($output.Destination,$output.Staged)}
+                $message+=' Recovery output retained at: '+$output.Staged+'.'
+            } catch {$message+=' Could not move output back from: '+$output.Destination+'.'}
         }
         for ($i=$backups.Count-1;$i -ge 0;$i--) {try {if ($backups[$i].Folder) {[IO.Directory]::Move($backups[$i].Path,$backups[$i].Destination)} else {[IO.File]::Move($backups[$i].Path,$backups[$i].Destination)}} catch {Write-Notice 'WARNING' ('Previous output retained at '+$backups[$i].Path)}}
-        throw
+        throw $message
     } finally {
         foreach ($parent in $parents) {$parent.Dispose()}
         foreach ($output in $staged) {if (-not $output.Preserve -and $output.Identity -and (Test-Path -LiteralPath $output.Container)) {Remove-SourcePolicyOwnedPath -Path $output.Container -Root $DestinationRoot -Identity $output.Identity -MaximumEntries 400005}}

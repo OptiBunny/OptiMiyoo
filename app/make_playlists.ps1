@@ -16,7 +16,6 @@ param(
     [ValidateSet('Tour','C64','ZX','Playlists','Results','Bunny','Setup')][string]$PreviewSection='Tour',
     [switch]$ZXConvert,
     [switch]$C64Convert,
-    [ValidateSet('Keep','Remove','Folders')][string]$C64Mode='Keep',
     [ValidateSet('Main','C64','ZX')][string]$StartPage='Main'
 )
 . (Join-Path $PSScriptRoot 'application_entry.ps1')
@@ -1209,7 +1208,6 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $workerArgs.Storage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
             if ($page -eq 'C64') {
                 $worker=Join-Path $ScriptDir 'C64/convert_c64.ps1'
-                $workerArgs.NoPause=$true;$workerArgs.OnionRoot=$menuOnionRoot
             } else {
                 $worker=Join-Path $ScriptDir 'ZX/convert_zx.ps1'
             }
@@ -1312,7 +1310,7 @@ try {
         Restore-Display
         $policyArgs=@{}; if ($PSBoundParameters.ContainsKey('SourcePolicy')) {$policyArgs.SourcePolicy=$SourcePolicy}
         if ($PSBoundParameters.ContainsKey('Storage')) {$policyArgs.Storage=$Storage}
-        & (Join-Path $ScriptDir 'C64/convert_c64.ps1') @policyArgs -Root $Root -Mode $C64Mode -OnionRoot $OnionRoot -Existing $Existing -NoPause:$NoPause -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
+        & (Join-Path $ScriptDir 'C64/convert_c64.ps1') @policyArgs -Root $Root -Existing $Existing -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
         exit $LASTEXITCODE
     }
     if ($ZXConvert) {

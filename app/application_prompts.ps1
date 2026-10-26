@@ -5,11 +5,10 @@
 
 function Get-ApplicationPromptTitle {
     param([Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto')
+          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Auto')
     $systems=@{AMIGA='Amiga';COMMODORE='Commodore 64';PS='PlayStation';SEGACD='Sega CD';
         CPC='Amstrad CPC';MSX='MSX';VIC20='VIC-20';DOS='MS-DOS';ZXS='ZX Spectrum'}
-    if($Storage -eq 'LegacyFolders' -and $Operation -ne 'C64'){throw 'Legacy folder storage is only valid for C64.'}
-    $storageName=@{Zip='ZIP output';Loose='Loose files';Folders='Folder per game';LegacyFolders='Folder output';Auto='Auto storage'}[$Storage]
+    $storageName=@{Zip='ZIP output';Loose='Loose files';Folders='Folder per game';Auto='Auto storage'}[$Storage]
     switch($Operation) {
         'Playlist' {
             if(-not $systems.ContainsKey($System)){throw 'Unknown playlist system in trusted prompt.'}
@@ -17,7 +16,7 @@ function Get-ApplicationPromptTitle {
         }
         'C64' {
             if($System -and $System -cne 'COMMODORE'){throw 'Invalid C64 prompt system.'}
-            if($Storage -eq 'Auto'){$storageName='ZIP output'}
+            if($Storage -notin 'Zip','Loose','Folders'){throw 'Choose ZIPs, folders or loose files for C64 conversion.'}
             return ('Commodore 64 / '+$storageName)
         }
         'ZX' {
@@ -44,7 +43,7 @@ function ConvertTo-ApplicationPromptPath([string]$Path) {
 function Get-ApplicationPromptModel {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
-          [ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Auto',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage
     if($Kind -eq 'SourcePolicy' -and $Operation -eq 'SD'){throw 'SD setup cannot remove source media.'}
@@ -130,7 +129,7 @@ function Invoke-ApplicationPolicyPrompt {
     param([Parameter(Mandatory=$true)]$Session,
           [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
-          [ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Auto',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
           [switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')

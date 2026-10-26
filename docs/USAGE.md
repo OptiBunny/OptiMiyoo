@@ -3,13 +3,13 @@
 ## Menu guide
 
 Run **`OptiMiyoo.bat`**. Type a choice and press **Enter**; Enter alone accepts
-the displayed default. In option menus, **B** goes back and **Q** exits.
+the displayed default. Use the back and exit keys shown on each screen.
 
 | Choose | Task |
 | --- | --- |
 | **1–9** | [Create playlists](#create-playlists) without changing file formats. |
-| **C** | [Convert C64 NIB/NBZ to G64](#c64-converter-c). |
-| **Z** | [Convert ZX Spectrum IPF to DSK](#zx-converter-z). |
+| **C** | [C64 converter](#c64-converter-c). |
+| **Z** | [ZX Spectrum converter](#zx-converter-z). |
 | **S** | [Enable supported file types in Onion's game list](#sd-setup). |
 | **D** | [Demo](#demo). |
 | **F** | Switch the bunny and logo between CRT and Smooth. |
@@ -17,27 +17,16 @@ the displayed default. In option menus, **B** goes back and **Q** exits.
 
 ## Prepare a batch
 
-Copy one system's games into `SRC`. They can be one ZIP per game, a folder per
-game, or individual files. Finished files go into `DST`.
+Copy one system's games into `SRC`, using one ZIP per game, a folder per game,
+or individual files. Finished files go into `DST`.
 
-For a separate batch folder, create `SRC` and `DST` inside it, then drag the
+To work in a separate folder, create `SRC` and `DST` inside it, then drag that
 folder onto `OptiMiyoo.bat`.
-
-## Choose how to save
-
-After choosing a numbered system, **C**, or **Z**, pick an output type:
-
-| Choice | Files in `DST` |
-| --- | --- |
-| **1: ZIPs** | One ZIP per game. |
-| **2: Folders** | One folder per game, including single-disc games. |
-| **3: Loose files** | Individual files, without adding a folder for each game. |
-
-Then [choose what happens to originals](#originals-and-existing-files) to start.
 
 ## Create playlists
 
-For discs kept as individual files, use numbered names like these:
+Choose your [system number](#systems-and-rom-folders). Give separate discs
+matching names with a disc number so OptiMiyoo can group them:
 
 ```text
 Game (Disc 1).chd
@@ -47,11 +36,8 @@ Game (Disc 2).chd
 Inside a game folder, `Disc 1.chd` and `Disc 2.chd` also work.
 For tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 
-Keep CUE files, their tracks, and any matching SBI files together.
-Keep different versions of the same disc in separate batches.
-
-Choose your [system number](#systems-and-rom-folders), then
-[how to save the files](#choose-how-to-save).
+Keep CUE files, their tracks, and any matching SBI files together. Keep different
+versions of the same disc in separate batches.
 
 For games with multiple discs or tape sides, the ZIP, game folder or loose files
 go in `.hidden`. The playlist stays outside it, visible in Onion's game list.
@@ -59,23 +45,32 @@ Games with one disc or tape side stay visible without a playlist.
 
 ## Convert disk images
 
-Choose **C** or **Z**, then [how to save the files](#choose-how-to-save).
-These options convert files only. To make playlists afterwards, [prepare a new
-batch](#prepare-a-batch) using the converted files and choose a numbered system.
+**C** and **Z** convert files without creating playlists. To make playlists
+afterwards, use the converted files as input for a [new batch](#prepare-a-batch)
+and choose a numbered system.
 
 ### C64 converter: C
 
-Converts NIB/NBZ to G64 and copies existing G64 images unchanged.
+Converts NIB/NBZ to G64. Existing G64 images are copied unchanged.
 
 ### ZX converter: Z
 
-Converts IPF to DSK.
-Some IPF copy-protection details cannot be preserved in DSK.
+Converts IPF to DSK. Some IPF copy-protection details cannot be preserved in DSK.
+
+## Choose how to save
+
+The playlist maker and both converters offer the same choices:
+
+| Choice | Files in `DST` |
+| --- | --- |
+| **1: ZIPs** | One ZIP per game. |
+| **2: Folders** | One folder per game. |
+| **3: Loose files** | Files without adding a game folder. |
 
 ## Originals and existing files
 
-Choose **1: Keep originals** (default) or **2: Remove originals** to start a batch.
-Remove deletes original files from `SRC` only after checking the finished files
+Choose **1: Keep originals** (default) or **2: Remove originals** to start.
+Remove deletes processed files from `SRC` only after checking the finished files
 in `DST`. Skipped or failed files are kept.
 
 If a file or folder with the same name already exists in `DST`:
@@ -83,21 +78,18 @@ If a file or folder with the same name already exists in `DST`:
 | Key | Action |
 | --- | --- |
 | **Y** | Overwrite the files shown |
-| **N / Enter** | Skip this game or disc |
-| **A** | Overwrite all matching files or folders in this batch |
-| **S** | Skip all games or discs with existing files in this batch |
+| **N / Enter** | Keep them and skip this game or disc |
+| **A** | Overwrite this and all later matches in the batch |
+| **S** | Skip this and all later matches in the batch |
 
 Use **> / <** to see more of the file list. **B / Q** also means Skip here.
 
 ## Copy to your Miyoo
 
-After a batch, **Enter** returns to the main menu and **Q** exits.
-Copy the wanted contents of `DST`, including `.hidden` when present, to the
-system's ROM folder on your SD card, then refresh the game list.
+Copy the contents of `DST`, including `.hidden` when present, to the system's
+ROM folder on your SD card. Then refresh Onion's game list.
 
 ### Systems and ROM folders
-
-**Enter** at the main menu selects **1: Amiga**.
 
 | Menu | System | Onion folder |
 | --- | --- | --- |
@@ -113,24 +105,23 @@ system's ROM folder on your SD card, then refresh the game list.
 
 ### SD setup
 
-Choose **S** and enter your SD drive, such as `E:\`. **B** or **Esc** goes back.
-Setup enables supported playlists, C64 tape files, and Atari Lynx `.lyx` files
-in Onion's game list after checking the selected cores.
-Your selected emulators, games, and saves stay as they are.
+Choose **S** and enter your SD drive, such as `E:\`. This enables supported
+playlists, C64 tape files, and Atari Lynx `.lyx` files in Onion's game list.
+It does not install or switch emulator cores. **B + Enter** or **Esc** goes back.
 
 To undo setup, copy each saved `config.json` from `OptiMiyoo_Backup_<ID>` on the
-SD card back to its matching emulator folder.
+SD card to its matching folder under `Emu`.
 
 ### Swap discs
 
-To swap discs, launch the playlist and open **RetroArch → Quick Menu → Disk
-Control**: eject, select the next image, and insert. C64 tapes may also need
-keyboard/load commands; DOSBox Pure uses its own disk-selection controls.
+Launch the playlist, then open **RetroArch → Quick Menu → Disk Control**.
+Eject the current disc, select the next image, and insert it. C64 tapes may also
+need keyboard/load commands; DOSBox Pure has its own disc-selection controls.
 
 ## Demo
 
-Choose **D**, then **1** for a full walkthrough of the menus, animations, and
-main features. The demo does not change game or SD files.
+Choose **D**, then **1** for a walkthrough of the menus, animations, and main
+features. The demo does not change game or SD files.
 
 During playback, keys work without Enter:
 

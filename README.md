@@ -13,10 +13,10 @@ Create multi-disc playlists or convert disk images for **Onion OS on Miyoo Mini 
 
 1. Download and extract the ZIP to a writable folder.
 2. Copy one system's games into the app's `SRC` folder. See
-   [how to arrange them](docs/USAGE.md#prepare-a-batch).
+   [how to prepare your games](docs/USAGE.md#prepare-a-batch).
 3. Run **`OptiMiyoo.bat`**. Choose a **numbered system** for playlists,
    **C** for C64 conversion, or **Z** for ZX Spectrum conversion.
-   Choose ZIPs, a folder per game, or loose files. Originals are kept by default.
+   Originals are kept by default.
 4. Copy the contents of `DST`, including `.hidden` when present, to the matching
    [Onion ROM folder](docs/USAGE.md#systems-and-rom-folders) on your SD card,
    then refresh the game list.

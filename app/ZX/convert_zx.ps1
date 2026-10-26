@@ -298,7 +298,6 @@ function Test-PeArchitecture([string]$FilePath, [string]$Architecture) {
 
 function Get-CapsRuntimeRequirements([string]$EnginePath) {
     $arch = Get-EngineArchitecture $EnginePath
-    if ($arch -eq 'x64') { return @('libstdc++-6.dll') }
     if ($arch -eq 'x86') { return @('libstdc++-6.dll', 'libgcc_s_dw2-1.dll') }
     return @()
 }

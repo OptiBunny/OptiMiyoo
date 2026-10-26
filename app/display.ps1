@@ -816,7 +816,7 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
         $lines.Add('  INPUT > '+(Format-InputField $inputView $fieldWidth (-not $script:UiDemo)))
         Write-TerminalPanel $lines.ToArray() (11+$inputView.Caret)
     } else {
-        $message='Processing continues; progress is logged.'
+        $message='Processing continues.'
         if ($script:UiDemo) {$message='DEMO / no files are accessed'}
         $lines.Add('  '+(Fit-Text $message $width))
         Write-TerminalPanel $lines.ToArray()

@@ -195,7 +195,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
         $choice.Error='Use a full SD path, e.g. E:\, or B to go back.';return $choice
     }
     try {$choice.Path=[IO.Path]::GetFullPath($candidate)}
-    catch {$choice.Error='Check the SD path, or press B to go back.'}
+    catch {$choice.Error='Check the SD path, or press Esc to go back.'}
     return $choice
 }
 
@@ -254,7 +254,7 @@ function Invoke-ApplicationSdFolderPrompt {
             $text=$selected
             if ($choice.Error) {$message=$choice.Error;continue}
             if (-not [IO.Directory]::Exists($choice.Path)) {
-                $message='Folder not found. Check your SD path, or press B.';continue
+                $message='Folder not found. Check your SD path, or press Esc to go back.';continue
             }
             if (-not [IO.Directory]::Exists((Join-Path $choice.Path 'RetroArch/.retroarch/cores'))) {
                 $message='No Onion cores folder here. Choose your SD root.';continue

@@ -399,7 +399,7 @@ function Start-ApplicationBrokerBatch {
         foreach($job in $jobs){if($job.SourceJob.Error){$job.BlockedReason=$job.SourceJob.Error}}
     } elseif($Operation -in 'C64','ZX'){
         $System=@{C64='COMMODORE';ZX='ZXS'}[$Operation]
-        $raw=@(& $module {param($src,$dst,$storage,$operation)if($operation -eq 'C64'){Get-C64ConversionGroups $src $dst $storage}else{Get-ZXConversionGroups $src $dst $storage}} $src $dst $Storage $Operation)
+        $raw=@(& $module {param($src,$dst,$storage,$operation)Get-ConversionSourceGroups $src $dst $storage $operation} $src $dst $Storage $Operation)
         if($raw.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
         $archives=@{}
         foreach($group in $raw){

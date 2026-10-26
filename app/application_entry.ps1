@@ -98,7 +98,6 @@ function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     Restore-Display
     try {& $Path @Arguments | Out-Host;$code=$LASTEXITCODE}
     catch {$code=1;Write-Host ('  ERROR: '+(ConvertTo-SafeExternalText $_.Exception.Message))}
-    $result=Invoke-ApplicationRpc -Operation Batch.Complete -Payload @{BatchId=$batch.BatchId;CompletedJobIds=$global:OptiMiyooApplicationContext.Completed.ToArray()}
-    if ($result.Failed) {$code=1}
+    $null=Invoke-ApplicationRpc -Operation Batch.Complete -Payload @{BatchId=$batch.BatchId;CompletedJobIds=$global:OptiMiyooApplicationContext.Completed.ToArray()}
     return [int]$code
 }

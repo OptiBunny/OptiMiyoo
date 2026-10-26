@@ -159,7 +159,6 @@ namespace OptiMiyoo {
   public int WallTimeLimitSeconds {get;set;}
   public bool WallTimeLimitExceeded {get{return wallTimeLimitExceeded;}}
   public bool IsAppContainer {get {return child!=null && child.IsAppContainer;}}
-  public bool RequestedLpac {get {return lpac;}}
   public uint Id {get {return child==null?0:child.Id;}}
   public StreamReader StandardOutput {get {return child.StandardOutput;}}
   public StreamReader StandardError {get {return child.StandardError;}}

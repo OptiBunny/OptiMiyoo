@@ -166,8 +166,7 @@ try {& (Join-Path $PSScriptRoot $config.Entry) @parameters;$code=$LASTEXITCODE}
 catch {Write-Host ('ERROR: '+$_.Exception.Message);$code=1}
 if ($config.Batch) {
     try {
-        $result=Invoke-ApplicationRpc -Operation Batch.Complete -Payload @{BatchId=$config.Batch.BatchId;CompletedJobIds=$global:OptiMiyooApplicationContext.Completed.ToArray()}
-        if ($result.Failed) {$code=1}
+        $null=Invoke-ApplicationRpc -Operation Batch.Complete -Payload @{BatchId=$config.Batch.BatchId;CompletedJobIds=$global:OptiMiyooApplicationContext.Completed.ToArray()}
     } catch {Write-Host 'The broker kept unpublished outputs and original files.';$code=1}
 }
 

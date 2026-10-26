@@ -278,10 +278,10 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
     $sourceRoot=Join-Path $Root 'SRC';$destinationRoot=Join-Path $Root 'DST';$policy=$Existing
     $sourcePlan=New-SourcePolicyPlan $sourceRoot $SourcePolicy
     foreach ($group in $Groups) {Add-SourcePolicyJob $sourcePlan $group.SourceKey $group.Paths $group.SourceBlockReason}
-    $script:Total=$Groups.Count;$script:Processed=0;$script:Ok=0;$script:Converted=0;$script:Skipped=0;$script:Failed=0
+    $script:Total=$Groups.Count;$script:Processed=0;$script:Ok=0;$script:Skipped=0;$script:Failed=0
     foreach ($group in $Groups) {
         Set-ApplicationCurrentJob $group.SourceKey
-        $script:UiGame=$group.Source;$script:ZipName=$group.Source;$script:UiLastStage=''
+        $script:UiGame=$group.Source;$script:UiLastStage=''
         $temp=$null;$tempOwned=$false;$tempIdentity='';$tempLease=$null;$commit=$null;$leases=New-Object 'System.Collections.Generic.List[IDisposable]';$hashes=@{}
         try {
             Write-Event 'GAME' ('{0}/{1} | {2}' -f ($script:Processed+1),$script:Total,$group.Source)
@@ -327,7 +327,7 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
             $commit=Save-ConversionGroup $group $convertedDir $destinationRoot $overwrite
             Complete-SourcePolicyJob $sourcePlan $group.SourceKey $hashes $commit.Outputs
             Complete-ApplicationCurrentJob
-            $script:Ok++;$script:Converted++;Write-Notice 'OK' ($group.Source+' -> '+$group.Plan.RelativeData)
+            $script:Ok++;Write-Notice 'OK' ($group.Source+' -> '+$group.Plan.RelativeData)
         } catch {$script:Failed++;Write-Notice 'FAILED' ($group.Source+' | '+$_.Exception.Message);Write-Log ($_ | Out-String)}
         finally {
             foreach ($lease in $leases) {$lease.Dispose()}

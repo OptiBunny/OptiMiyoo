@@ -27,7 +27,6 @@ $script:HxCX86 = Join-Path $script:ToolsRoot 'x86\hxcfe.exe'
 $script:HxCExe = $null
 $script:HxCFallback = $null
 $script:EngineRuntimeDirs = @{}
-$script:Converted = 0
 $script:Skipped = 0
 $script:Failed = 0
 $script:Total = 0
@@ -53,12 +52,8 @@ function Format-Duration([double]$Seconds) {
     return ('{0:00}:{1:00}:{2:00}' -f [Math]::Floor($t.TotalHours),$t.Minutes,$t.Seconds)
 }
 
-function Get-ZXConversionGroups([string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
-    Get-ConversionSourceGroups $SourceRoot $DestinationRoot $Storage 'ZX'
-}
-
 function Invoke-ZXExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
-    $groups=@(Get-ZXConversionGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage)
+    $groups=@(Get-ConversionSourceGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage 'ZX')
     $script:ExplicitEngineReady=$false
     Show-ConversionStart 'ZX Spectrum / IPF -> DSK'
     Invoke-ConversionGroupBatch $groups $Root $SourcePolicy $Existing {
@@ -142,8 +137,7 @@ function Write-LogFile([string]$Text) {
 function Write-Status([string]$Kind,[string]$Text) {
     $label=$Kind
     switch ($Kind) {'OK' {$label='READY'} 'FAIL' {$label='FAILED'} 'WARN' {$label='NOTE'}}
-    $script:Ok=$script:Converted
-    $script:Processed=$script:Converted+$script:Skipped+$script:Failed
+    $script:Processed=$script:Ok+$script:Skipped+$script:Failed
     Write-Event $label $Text
 }
 

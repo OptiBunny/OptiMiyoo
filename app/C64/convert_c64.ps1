@@ -32,12 +32,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 . (Join-Path $ScriptDir 'conversion_layout.ps1')
 Initialize-NativeTextCapture
 
-function Get-C64ConversionGroups([string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
-    Get-ConversionSourceGroups $SourceRoot $DestinationRoot $Storage 'C64'
-}
-
 function Invoke-C64ExplicitOutputs([string]$Root,[string]$Storage,[string]$SourcePolicy,[string]$Existing) {
-    $groups=@(Get-C64ConversionGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage)
+    $groups=@(Get-ConversionSourceGroups (Join-Path $Root 'SRC') (Join-Path $Root 'DST') $Storage 'C64')
     Show-ConversionStart 'Commodore 64 / NIB -> G64'
     Invoke-ConversionGroupBatch $groups $Root $SourcePolicy $Existing {
         param($item,$source,$target,$temp,$index,$count)
@@ -64,7 +60,6 @@ function Format-Duration([double]$Seconds) {
 
 function Show-Progress {
     param([string]$Stage,[string]$Detail,[int]$StagePercent=-1,[switch]$Force)
-    $script:UiGame=$script:ZipName
     # Only byte measurements or a completed stage are shown as a percentage.
     Show-Stage $Stage $Detail $StagePercent
     if ($Force) {Draw-DisplayPanel -Force}

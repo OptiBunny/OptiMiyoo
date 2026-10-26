@@ -36,7 +36,9 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root,[switch]$NoA
 
 $entryPoint=Join-Path $PSScriptRoot 'playlists/make_playlists.ps1'
 $interactive=($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
-if ($interactive -and -not $CurrentTerminal -and (Start-OptiTerminalWindow $entryPoint $Root -NoAnimation:$NoAnimation)) {exit 0}
+# Default-console handoff does not set WT_SESSION. Reuse a capable current
+# host instead of leaving an exited launcher window behind during startup.
+if ($interactive -and -not $CurrentTerminal -and -not $Host.UI.SupportsVirtualTerminal -and (Start-OptiTerminalWindow $entryPoint $Root -NoAnimation:$NoAnimation)) {exit 0}
 $parameters=@{DisplayEffect='CRT';NoAnimation=[bool]$NoAnimation}
 if ($Root) {$parameters.Root=$Root}
 & $entryPoint @parameters

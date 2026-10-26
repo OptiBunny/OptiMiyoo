@@ -348,7 +348,7 @@ function Get-OnionSetupMenuRows {
         '   Default CrocoDS cannot load playlists.',
         '9. ZX: enables .m3u playlists / newer Fuse with M3U support',
         '   Default Onion Fuse cannot load playlists.',
-        'Lynx: enables .lyx games / Handy, Beetle Lynx'
+        '10. Lynx: enables .lyx games / Handy, Beetle Lynx'
     )
 }
 

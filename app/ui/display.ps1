@@ -1285,8 +1285,8 @@ function Show-MioPreview([string]$Section='Tour') {
                 if (Update-DisplaySize -Throttled) {$dirty=$true}
                 $script:UiDemoPaused=$paused
                 $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
-                $script:UiSay=('DEMO {0}/{1} | Space pause | N/P | R replay | F CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)
-                if ($paused) {$script:UiSay=('DEMO {0}/{1} PAUSED | Space resume | N/P | F CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)}
+                $script:UiSay=('DEMO {0}/{1} | Space pause | N/P | R replay | E CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)
+                if ($paused) {$script:UiSay=('DEMO {0}/{1} PAUSED | Space resume | N/P | E CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)}
                 $frameInterval=250; $periodic=$true
                 if ($scene.Menu) {$periodic=$false}
                 elseif ($scene.Status -or $scene.Complete) {$frameInterval=1000}
@@ -1318,7 +1318,7 @@ function Show-MioPreview([string]$Section='Tour') {
                     elseif ($key.Key -in [ConsoleKey]::N,[ConsoleKey]::RightArrow,[ConsoleKey]::Enter) {break}
                     elseif ($key.Key -in [ConsoleKey]::P,[ConsoleKey]::LeftArrow) {$next=[Math]::Max(0,$index-1); break}
                     elseif ($key.Key -eq [ConsoleKey]::R) {$next=0; break}
-                    elseif ($key.Key -eq [ConsoleKey]::F) {Switch-DisplayEffect; $dirty=$true}
+                    elseif ($key.Key -eq [ConsoleKey]::E) {Switch-DisplayEffect; $dirty=$true}
                 } else {
                     Wait-DisplayFrame 30
                 }

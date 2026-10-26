@@ -1061,7 +1061,6 @@ function Invoke-OptiMenu([object[]]$Profiles) {
         if ($page -eq 'Main') {
             Show-MenuTitle 'Main menu'
             $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
-            Write-MenuLine ('  F. CRT effect: '+$crtState+' / turn on or off')
             Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
             Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
@@ -1077,6 +1076,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 Write-MenuLine ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
             }
             Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
+            Write-MenuLine ('  E. CRT effect: '+$crtState+' / turn on or off')
             Write-MenuLine '  Q. Exit'
             $answer=Read-MenuChoice 'Choose a system number or letter [Enter = 1, Amiga]'
             if ($answer -eq 'Q') {return $lastCode}
@@ -1084,7 +1084,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq 'Z') {$page='ZX'; continue}
             if ($answer -eq 'S') {$page='SD'; continue}
             if ($answer -eq 'D') {$page='Demo'; continue}
-            if ($answer -eq 'F') {
+            if ($answer -eq 'E') {
                 Switch-DisplayEffect
                 $common.DisplayEffect=$script:DisplayEffect
                 continue

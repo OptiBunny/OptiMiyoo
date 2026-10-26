@@ -272,24 +272,24 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
 
 function Get-OnionSetupMenuRows {
     @(
-        'Shows supported playlists and C64 tapes.',
+        'Enables playlists in Onion''s game list.',
         'Only edits config.json''s file-type list.',
-        'Adds .m3u / .m3u8 and supported tape types.',
-        'Backs up configs on SD before changes:',
-        '  OptiMiyoo_Backup_<ID>/',
-        'Games, saves and cores stay unchanged.',
-        'Cannot add playback support to a core.',
+        'Adds supported .m3u / .m3u8 and C64 tapes.',
+        'SD config backups: OptiMiyoo_Backup_<ID>/',
+        'Does not install or switch emulator cores.',
         'Refresh Onion''s game list after setup.',
         'Supported cores (checked on your SD):',
         '1. Amiga: PUAE2021 / PUAE',
         '2. C64: VICE x64 / x64sc',
         '3. PlayStation: PCSX ReARMed',
         '4. Sega CD: PicoDrive / Genesis Plus GX',
-        '5. CPC: Caprice32 [different core required]',
+        '5. CPC: use Caprice32 instead of CrocoDS.',
+        '   Default CrocoDS cannot load playlists.',
         '6. MSX / MSX2: blueMSX',
         '7. VIC-20: VICE xvic',
         '8. MS-DOS: DOSBox Pure',
-        '9. ZX: Fuse [newer M3U build required]'
+        '9. ZX: needs newer Fuse with M3U support.',
+        '   Default Onion Fuse cannot load playlists.'
     )
 }
 

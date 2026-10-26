@@ -200,7 +200,7 @@ function Close-ApplicationSdSession {
 function Read-ApplicationSdConsolePath {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
     $title='Onion SD setup';$prompt='SD drive or folder (for example E:\)'
-    $rows=@(Get-OnionSetupMenuRows)+@('Enter starts setup. Esc cancels.');$text='';$dirty=$true
+    $rows=@(Get-OnionSetupMenuRows)+@('B. Back to main menu (Esc also goes back)');$text='';$dirty=$true
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
@@ -220,7 +220,12 @@ function Read-ApplicationSdConsolePath {
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return $null}
             if($script:UiVT -and (-not $script:UiPanel -or $script:UiHeight -lt 19)){continue}
-            if($key.Key -eq [ConsoleKey]::Enter){if(-not $script:UiVT){[Console]::WriteLine()};return $text.Trim().Trim('"')}
+            if($key.Key -eq [ConsoleKey]::Enter){
+                if(-not $script:UiVT){[Console]::WriteLine()}
+                $selected=$text.Trim().Trim('"')
+                if($selected -eq 'B'){return $null}
+                return $selected
+            }
             if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,$text.Length-1)}
             elseif(-not [char]::IsControl($key.KeyChar) -and $key.KeyChar -notmatch '[\u202a-\u202e\u2066-\u2069]' -and $text.Length -lt 32767){$text+=[string]$key.KeyChar}
             $dirty=$true

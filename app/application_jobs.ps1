@@ -218,7 +218,7 @@ function New-ApplicationNativeCapture {
     return $proxy
 }
 
-function Invoke-ApplicationEngineText([string]$EnginePath,[string]$Arguments,[int]$TimeoutMs) {
+function Invoke-ApplicationEngineText([string]$EnginePath,[string]$Arguments) {
     $kind=if ([IO.Path]::GetFileName([IO.Path]::GetDirectoryName($EnginePath)) -eq 'x86') {'HxcX86'} else {'HxcX64'}
     $inputPath=$null;$outputPath=$null
     if ($Arguments -ceq '-modulelist') {$mode='Modules'}
@@ -232,7 +232,7 @@ function Invoke-ApplicationEngineText([string]$EnginePath,[string]$Arguments,[in
         do {
             $done=$capture.WaitForExit(125)
             while ($null -ne ($line=$capture.NextLine())) {[void]$text.AppendLine($line)}
-            Show-Stage 0 'Running isolated HxC / waiting for engine output' (Get-EngineLabel $EnginePath)
+            Show-Stage 'Running isolated HxC / waiting for engine output' (Get-EngineLabel $EnginePath)
         } while (-not $done)
         if (-not $capture.WaitOutput(5000)) {throw 'Isolated HxC capture did not finish.'}
         while ($null -ne ($line=$capture.NextLine())) {[void]$text.AppendLine($line)}

@@ -283,6 +283,21 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
     return Get-OnionCoreSupport $Profile $SdRoot $Profile.Playlist -Playlist
 }
 
+function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions) {
+    # Build only the file-type-list edit. Each caller checks core eligibility
+    # independently before supplying extensions; this helper never touches files.
+    $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
+    $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if($config.launch -cne 'launch.sh' -or $config.extlist -isnot [string] -or -not $config.extlist){throw 'SD config does not have a verified launcher and extension list.'}
+    $missing=@($Extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
+    if($missing.Count -eq 0){return ,$Original}
+    $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')
+    if($rx.Matches($raw).Count -ne 1){throw 'Ambiguous extension list in SD config.'}
+    $updated=$rx.Replace($raw,('${1}${2}|'+($missing -join '|')+'${3}'))
+    $null=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    return ,$utf8.GetBytes($updated)
+}
+
 function Get-OnionSetupProfiles([string]$CodeRoot=$PSScriptRoot) {
     $profileData=Get-Content -LiteralPath (Join-Path $CodeRoot 'systems.json') -Raw | ConvertFrom-Json
     @($profileData)
@@ -347,7 +362,7 @@ function Get-PlaylistFeatureLabel($Profile,$Support) {
 function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
     # ZipMemberPlaylist describes OptiMiyoo's archive#member playlist layout,
     # not general ZIP loading. DefaultZipSupport follows Onion's core docs.
-    $notice=[pscustomobject]@{Label='';Hint='';PlaylistOnly=$false}
+    $notice=[pscustomobject]@{Label='';Hint=''}
     $knownMemberCore=($Profile.ZipMemberPlaylist -and $Support.Core -in @($Profile.SupportedCores))
     if ($Support.Status -in 'UNVERIFIED','NOT INSTALLED' -or
         ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore)) {
@@ -363,7 +378,6 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
     } elseif (-not $Conversion -and -not $Profile.ZipMemberPlaylist) {
         $notice.Label='[ZIP playlists unsupported]'
         $notice.Hint='The core loads ZIPs, but not ZIP playlists.'
-        $notice.PlaylistOnly=$true
         if ($Profile.Folder -eq 'MSX') {
             $notice.Label='[unsupported by default Onion OS core]'
             $notice.Hint='ZIP games work; ZIP playlists are unsupported.'

@@ -62,24 +62,9 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
         $hash=Get-ApplicationSdHash $lease.Stream;$bytes=$null
         if($Config){$bytes=Read-ApplicationSdBytes $lease.Stream $Maximum}
         $State.TotalBytes+=$lease.Stream.Length
-        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Length=$lease.Stream.Length;Hash=$hash;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder='';Core=''}
+        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Length=$lease.Stream.Length;Hash=$hash;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder=''}
         $lease=$null
     }finally{if($output){$output.Dispose()};if($lease){$lease.Dispose()}}
-}
-
-function Get-ApplicationSdPatch([byte[]]$Original,$Profile,$Support,[string]$OnionRoot) {
-    if(-not $Support.CanBuild){return $null}
-    $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
-    $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if($config.launch -cne 'launch.sh' -or $config.extlist -isnot [string] -or -not $config.extlist){throw 'SD config does not have a verified launcher and extension list.'}
-    $extensions=@(& $script:ApplicationSdModule {param($profile,$root,$support)Get-OnionSetupExtensions $profile $root $support} $Profile $OnionRoot $Support)
-    $missing=@($extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
-    if($missing.Count -eq 0){return ,$Original}
-    $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')
-    if($rx.Matches($raw).Count -ne 1){throw 'Ambiguous extension list in SD config.'}
-    $updated=$rx.Replace($raw,('${1}${2}|'+($missing -join '|')+'${3}'))
-    $null=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    return ,$utf8.GetBytes($updated)
 }
 
 function New-ApplicationSdSession {
@@ -117,11 +102,13 @@ function New-ApplicationSdSession {
             $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder
             $support=& $script:ApplicationSdModule {param($profile,$root)Get-OnionSetupSupport $profile $root} $profile $original
-            $file.Core=$support.Core
             # An unverified profile remains visible in the staged assessment but
             # has no publication authority, even if the child changes its core.
             if($support.CanBuild -and $state.Files.ContainsKey('Emu/'+$folder+'/launch.sh') -and $state.Files.ContainsKey('RetroArch/.retroarch/cores/'+$support.Core)) {
-                try{$file.Expected=Get-ApplicationSdPatch $file.Bytes $profile $support $original}
+                try {
+                    $extensions=@(& $script:ApplicationSdModule {param($profile,$root,$support)Get-OnionSetupExtensions $profile $root $support} $profile $original $support)
+                    $file.Expected=Get-OnionConfigPatch -Original $file.Bytes -Extensions $extensions
+                }
                 catch{$file.Expected=$null}
             }
         }

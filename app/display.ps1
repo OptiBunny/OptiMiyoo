@@ -330,12 +330,6 @@ function Clear-DisplayPanel {
         $script:UiPendingEvents.Clear()
     }
 }
-function Suspend-DisplayPanel {
-    # Plain prompts own the terminal until input is complete. Only suspend
-    # for an actual question, never for automatic overwrite/skip decisions.
-    Clear-DisplayPanel
-    if ($script:UiInteractive) {try {[Console]::CursorVisible=$true} catch {}}
-}
 function Restore-Display {
     if ($script:UiFrameTimer) {try {$script:UiFrameTimer.Dispose()} catch {}}
     $script:UiFrameTimer=$null
@@ -668,7 +662,7 @@ function Flush-DisplayEvents {
         while ($script:UiEventRows.Count -gt 100) {$script:UiEventRows.RemoveAt(0)}
     }
 }
-function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0,[bool]$ShowCaret=$true) {
+function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0) {
     $script:UiIdleMenuCache=$null
     Flush-DisplayEvents
     $layout=Get-TerminalFrame $Lines
@@ -795,7 +789,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $inputView=Get-InputViewport $InputText $Caret $fieldWidth
     if ($script:UiDemo) {$lines.Add('  '+(Get-MioPreviewTourBar $w))}
     else {$lines.Add('  '+(Color-Text 'INPUT > ' '107;216;245')+(Format-InputField $inputView $fieldWidth))}
-    Write-TerminalPanel $lines.ToArray() (11+$inputView.Caret) (-not $script:UiDemo)
+    Write-TerminalPanel $lines.ToArray() (11+$inputView.Caret)
     if ($patchable) {
         $script:UiIdleMenuCache=[pscustomobject]@{
             Width=$w;Height=$script:UiHeight;Columns=$script:UiColumns;BannerRows=$script:UiBannerRows
@@ -820,12 +814,12 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
     if ($Caret -ge 0) {
         $fieldWidth=$width-8; $inputView=Get-InputViewport $InputText $Caret $fieldWidth
         $lines.Add('  INPUT > '+(Format-InputField $inputView $fieldWidth (-not $script:UiDemo)))
-        Write-TerminalPanel $lines.ToArray() (11+$inputView.Caret) (-not $script:UiDemo)
+        Write-TerminalPanel $lines.ToArray() (11+$inputView.Caret)
     } else {
         $message='Processing continues; progress is logged.'
         if ($script:UiDemo) {$message='DEMO / no files are accessed'}
         $lines.Add('  '+(Fit-Text $message $width))
-        Write-TerminalPanel $lines.ToArray() 0 $false
+        Write-TerminalPanel $lines.ToArray()
     }
 }
 
@@ -1027,9 +1021,8 @@ function Draw-DisplayPanel([switch]$Force) {
     try {[Console]::CursorVisible=$false} catch {}
     Write-TerminalPanel $lines.ToArray()
 }
-function Show-Stage([double]$Fraction,[string]$Stage,[string]$Detail,[double]$MeasuredPercent=-1) {
+function Show-Stage([string]$Stage,[string]$Detail,[double]$MeasuredPercent=-1) {
     Complete-PreparationProgress
-    # Fraction is retained for the converter API, never presented as measured work.
     $script:UiStage=$Stage; $script:UiDetail=$Detail; $script:UiPercent=$MeasuredPercent
     $script:UiMood='work'; $script:UiSay='Processing the current disk set.'
     if ($Stage -match 'Hash|Verif|Check') {$script:UiMood='check'; $script:UiSay='Verifying output integrity before installation.'}

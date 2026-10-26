@@ -1,23 +1,6 @@
 ﻿. (Join-Path $PSScriptRoot 'compile_support.ps1')
 # Shared source-retention checks. Windows PowerShell 5.1 compatible.
 # A source can be removed only when every job using it has verified output.
-function Read-SourcePolicy([string]$Title) {
-    while ($true) {
-        $answer=Read-DisplayInput 'Choose originals [Enter = 1, Keep]' ($Title+' / originals') @(
-            '1. KEEP originals in SRC (default)',
-            '2. REMOVE originals after verified success',
-            'Skipped or failed items always keep their originals.',
-            'B. Back to output settings     Q. Exit')
-        switch ($answer) {
-            '' {return 'Keep'}
-            '1' {return 'Keep'}
-            '2' {return 'Remove'}
-            'B' {return 'Back'}
-            'Q' {return 'Exit'}
-        }
-    }
-}
-
 function Assert-SourcePolicyPath([string]$Path,[string]$Root) {
     $full=[IO.Path]::GetFullPath($Path)
     $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
@@ -356,15 +339,6 @@ function Remove-SourcePolicyFile([string]$Path,$Lease) {
     if (-not $Lease) {throw 'Verified deletion handle is missing; original kept.'}
     $Lease.Delete()
     if (Test-Path -LiteralPath $Path) {throw 'An original is still present at this path; it was not deleted by pathname.'}
-}
-
-function Remove-VerifiedSourceFile([string]$Path,[string]$ExpectedHash,[string]$Root,[scriptblock]$Progress=$null) {
-    $lease=$null
-    try {
-        $lease=Open-VerifiedSourcePolicyFile $Path $ExpectedHash $Root $Progress
-        if ($Progress) {try {& $Progress 'Removing verified originals' $Path 0 0 | Out-Null} catch {}}
-        Remove-SourcePolicyFile $Path $lease
-    } finally {if ($lease) {$lease.Dispose()}}
 }
 
 function Open-SourcePolicyOutputs([object[]]$Outputs,[scriptblock]$Progress=$null) {

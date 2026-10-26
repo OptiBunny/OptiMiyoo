@@ -63,10 +63,10 @@ function Format-Duration([double]$Seconds) {
 # Converter-specific validation and progress helpers.
 
 function Show-Progress {
-    param([double]$Fraction,[string]$Stage,[string]$Detail,[int]$StagePercent=-1,[switch]$Force)
+    param([string]$Stage,[string]$Detail,[int]$StagePercent=-1,[switch]$Force)
     $script:UiGame=$script:ZipName
     # Only byte measurements or a completed stage are shown as a percentage.
-    Show-Stage $Fraction $Stage $Detail $StagePercent
+    Show-Stage $Stage $Detail $StagePercent
     if ($Force) {Draw-DisplayPanel -Force}
 }
 
@@ -112,7 +112,7 @@ function Assert-G64([string]$Path) {
 
 function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Index, [int]$Count, [string]$DisplayName) {
     $capture = New-NativeNibCapture $NibConv $InputPath $OutputPath
-    $phase = 'Starting'; [double]$fraction = 0; $trackDetail = 'waiting for nibconv output'
+    $phase = 'Starting'; $trackDetail = 'waiting for nibconv output'
     $conversionProblem = $null
     $diskClock = [Diagnostics.Stopwatch]::StartNew()
     try {
@@ -125,20 +125,16 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
             while ($null -ne ($line = $capture.NextLine())) {
                 Write-Log ('nibconv: ' + $line)
                 if ($line -match 'Not valid NIB data') { $conversionProblem = $line.Trim() }
-                if ($line -match 'Aligning tracks') { $phase = 'Aligning'; $fraction = [Math]::Max($fraction, 0.02) }
-                elseif ($line -match 'Searching for fat tracks') { $phase = 'Checking tracks'; $fraction = [Math]::Max($fraction, 0.75) }
-                elseif ($line -match 'Writing G64 file') { $phase = 'Writing G64'; $fraction = [Math]::Max($fraction, 0.80) }
+                if ($line -match 'Aligning tracks') { $phase = 'Aligning' }
+                elseif ($line -match 'Searching for fat tracks') { $phase = 'Checking tracks' }
+                elseif ($line -match 'Writing G64 file') { $phase = 'Writing G64' }
                 elseif ($line -match '^\s*(\d+\.\d+)\s*:') {
-                    $track = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
                     $trackDetail = 'track ' + $Matches[1]
-                    if ($phase -eq 'Aligning') { $fraction = [Math]::Max($fraction, 0.02 + 0.70 * [Math]::Min(1, $track / 42)) }
-                    elseif ($phase -eq 'Writing G64') { $fraction = [Math]::Max($fraction, 0.80 + 0.18 * [Math]::Min(1, $track / 42.5)) }
                 }
             }
             $detail = ('{0} | {1}, {2} | Disk elapsed {3}' -f $DisplayName, $phase, $trackDetail,
                 (Format-Duration $diskClock.Elapsed.TotalSeconds))
-            Show-Progress (0.15 + 0.65 * (($Index + $fraction) / $Count)) `
-                ('Converting disk {0}/{1}' -f ($Index + 1), $Count) `
+            Show-Progress ('Converting disk {0}/{1}' -f ($Index + 1), $Count) `
                 $detail -1 -Force
             if (-not $finished) { Start-Sleep -Milliseconds 125 }
         } while (-not $finished)
@@ -148,7 +144,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
         $capture.Export()
         if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output. See the log for its messages.' }
         Assert-G64 $OutputPath
-        Show-Progress (0.15 + 0.65 * (($Index + 1) / $Count)) 'Converting disk images' `
+        Show-Progress 'Converting disk images' `
             ('Disk {0}/{1} complete: {2}' -f ($Index + 1), $Count, $DisplayName) 100 -Force
     } finally { $capture.Dispose() }
 }

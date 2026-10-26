@@ -40,27 +40,19 @@ function Format-Duration([double]$Seconds) {
     return ('{0:00}:{1:00}:{2:00}' -f [Math]::Floor($span.TotalHours), $span.Minutes, $span.Seconds)
 }
 
-function Confirm-Overwrite([string]$Destination, [bool]$Folder) {
+function Confirm-Overwrite {
     if ($script:ExistingPolicy -eq 'Overwrite') { return $true }
     if ($script:ExistingPolicy -eq 'Skip') { return $false }
     foreach ($id in 2, 1, 0) { Write-Progress -Id $id -Activity 'Waiting for overwrite choice' -Completed }
-    $paths=@($Destination -split '\r?\n *')
-    $warnings=@('Skip: no copying or comparison.', 'Skipped originals stay in SRC.')
-    if ($Folder) {$warnings+='Replacing this folder replaces ALL contents.'}
-    $choices=@(Get-OverwriteChoiceRows)
-    $invalid=$false
     $script:Clock.Stop()
     try {
         do {
-            $shownWarnings=$warnings
-            if ($invalid) {$shownWarnings+='Please enter Y, N, A or S.'}
-            $choice=ConvertFrom-OverwriteAnswer (Read-OverwriteChoice 'Existing playlist output' $paths $shownWarnings $choices (Get-OverwriteInputPrompt))
+            $choice=ConvertFrom-OverwriteAnswer (Read-ApplicationOverwriteChoice)
             switch ($choice) {
                 'Overwrite' { return $true }
                 'Skip' { return $false }
                 'OverwriteAll' { $script:ExistingPolicy = 'Overwrite'; return $true }
                 'SkipAll' { $script:ExistingPolicy = 'Skip'; return $false }
-                default { $invalid=$true }
             }
         } while ($true)
     } finally { $script:Clock.Start() }
@@ -232,18 +224,18 @@ function Get-StreamHash([IO.Stream]$Stream,[string]$Name='Disk data') {
     $buffer=New-Object byte[] 1048576
     [long]$total=0; [long]$length=$Stream.Length-$Stream.Position
     $watch=[Diagnostics.Stopwatch]::StartNew()
-    Show-Stage 0 'Verifying SHA-256' $Name 0
+    Show-Stage 'Verifying SHA-256' $Name 0
     try {
         while (($n=$Stream.Read($buffer,0,$buffer.Length)) -gt 0) {
             [void]$sha.TransformBlock($buffer,0,$n,$buffer,0); $total+=$n
             if ($watch.ElapsedMilliseconds -ge 125) {
-                Show-Stage 0 'Verifying SHA-256' ('{0} | {1:N1}/{2:N1} MiB' -f $Name,($total/1MB),($length/1MB)) (100*$total/[Math]::Max(1,$length))
+                Show-Stage 'Verifying SHA-256' ('{0} | {1:N1}/{2:N1} MiB' -f $Name,($total/1MB),($length/1MB)) (100*$total/[Math]::Max(1,$length))
                 $watch.Restart()
             }
         }
         [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
         if ($total -ne $length) {throw "Hash read was incomplete: $Name"}
-        Show-Stage 0 'Verifying SHA-256' $Name 100
+        Show-Stage 'Verifying SHA-256' $Name 100
         return [BitConverter]::ToString($sha.Hash).Replace('-','')
     }
     finally { $sha.Dispose() }
@@ -261,7 +253,7 @@ function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Len
     [long]$total=0; $watch=[Diagnostics.Stopwatch]::StartNew()
     $action='Copying disk data'; if ($OutputStream -eq [IO.Stream]::Null) {$action='Reading archive contents'}
     Write-Event 'FILE' ('{0} / {1:N2} MiB / {2}' -f $Name,($Length/1MB),$action)
-    Show-Stage 0 $action $Name 0
+    Show-Stage $action $Name 0
     try {
         while (($n=$InputStream.Read($buffer,0,$buffer.Length)) -gt 0) {
             if ($n -gt $Length-$total) {throw "Stream exceeds its declared size: $Name"}
@@ -269,13 +261,13 @@ function Copy-Stream([IO.Stream]$InputStream,[IO.Stream]$OutputStream,[long]$Len
             [void]$sha.TransformBlock($buffer,0,$n,$buffer,0)
             $total+=$n
             if ($watch.ElapsedMilliseconds -ge 125) {
-                Show-Stage 0 $action ('{0} | {1:N1}/{2:N1} MiB' -f $Name,($total/1MB),($Length/1MB)) (100*$total/[Math]::Max(1,$Length))
+                Show-Stage $action ('{0} | {1:N1}/{2:N1} MiB' -f $Name,($total/1MB),($Length/1MB)) (100*$total/[Math]::Max(1,$Length))
                 $watch.Restart()
             }
         }
         [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
         if ($total -ne $Length) { throw "Incomplete stream: $Name" }
-        Show-Stage 0 $action $Name 100
+        Show-Stage $action $Name 100
         return [BitConverter]::ToString($sha.Hash).Replace('-','')
     } finally { $sha.Dispose() }
 }
@@ -362,10 +354,10 @@ function Assert-ZipExtractionNames([IO.Compression.ZipArchive]$Archive) {
 }
 function Read-ZipContents([IO.Compression.ZipArchive]$Archive,[string]$Destination,[string]$ZipPath) {
     if($Destination) {Assert-ZipExtractionNames $Archive}
-    Show-Stage 0.05 'Checking ZIP contents in sandbox' ([IO.Path]::GetFileName($ZipPath))
+    Show-Stage 'Checking ZIP contents in sandbox' ([IO.Path]::GetFileName($ZipPath))
     $operation='Hash';if($Destination){$operation='Extract'}
-    $manifest=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $Archive -Profile Media -Operation $operation -Destination $Destination -Progress {param($index,$count,$done,$length) Show-Stage (0.05+0.55*($index+$done/[Math]::Max(1,$length))/[Math]::Max(1,$count)) 'Checking ZIP contents in sandbox' ('Entry {0}/{1}' -f ($index+1),$count) (100*$done/[Math]::Max(1,$length))}
-    Show-Stage 0.6 'Checking ZIP contents' 'Sandbox verification complete'
+    $manifest=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $Archive -Profile Media -Operation $operation -Destination $Destination -Progress {param($index,$count,$done,$length) Show-Stage 'Checking ZIP contents in sandbox' ('Entry {0}/{1}' -f ($index+1),$count) (100*$done/[Math]::Max(1,$length))}
+    Show-Stage 'Checking ZIP contents' 'Sandbox verification complete'
     return $manifest
 }
 
@@ -1060,37 +1052,6 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
     } else {Write-Host (ConvertTo-SafeExternalText $Text)}
 }
 
-function Invoke-MenuWorker([string]$Path,[hashtable]$Arguments) {
-    if (Test-ApplicationWorker) {return (Invoke-ApplicationMenuWorker $Path $Arguments)}
-    # Restore before handing over so the child captures the real console state.
-    Restore-Display
-    $code=1
-    try {
-        & $Path @Arguments | Out-Host
-        $code=$LASTEXITCODE
-    } catch {Write-Host (ConvertTo-SafeExternalText ('  ERROR: '+$_.Exception.Message))}
-    finally {Initialize-Display}
-    return [int]$code
-}
-
-function Read-RunNavigation([string]$Page,[int]$Code) {
-    if ($NoPause) {return 'Exit'}
-    $invalid=$false
-    while ($true) {
-        Show-MenuTitle ($Page+' / task complete')
-        if ($Code -ne 0) {$script:UiMenuMood='oops'} else {$script:UiMenuMood='happy'}
-        Write-MenuLine ''
-        Write-MenuLine ('  Task finished. Exit code: '+$Code)
-        Write-MenuLine ('  [Enter / M] Main menu   [B] Back to '+$Page+'   [Q] Exit')
-        if ($invalid) {Write-MenuLine '  Press Enter for the main menu, or choose B, M or Q.'}
-        $answer=Read-MenuChoice 'Choose navigation [Enter = Main menu]'
-        if ($answer -in '','M') {return 'Main'}
-        if ($answer -eq 'B') {return 'Back'}
-        if ($answer -eq 'Q') {return 'Exit'}
-        $invalid=$true
-    }
-}
-
 function Invoke-OptiMenu([object[]]$Profiles) {
     $page=$StartPage; $profile=$null; $lastCode=0
     $menuOnionRoot=$OnionRoot
@@ -1225,46 +1186,23 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $storageChoice=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
             $worker=Join-Path $ScriptDir 'make_playlists.ps1'
             $workerArgs=$common.Clone(); $workerArgs.System=$profile.Folder
-            $workerArgs.Storage=$storageChoice; $workerArgs.NoPause=$true
+            $workerArgs.Storage=$storageChoice
             $workerArgs.OnionRoot=$menuOnionRoot
         } elseif ($page -eq 'SD') {
-            if (Test-ApplicationWorker) {
-                $selected=Invoke-ApplicationRpc -Operation SD.Select -Payload @{}
-                if ($selected.Cancelled) {$page='Main';continue}
-                return 0
-            }
-            $pageName='Onion SD setup'
-            Show-MenuTitle $pageName
-            foreach ($row in @(Get-OnionSetupMenuRows)) {Write-MenuLine ('  '+$row)}
-            Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $prompt='SD card root'
-            if ($menuOnionRoot) {$prompt+=' [Enter = '+$menuOnionRoot+']'}
-            $answer=Read-MenuChoice $prompt
-            if ($answer -eq 'B') {$page='Main'; continue}
-            if ($answer -eq 'Q') {return $lastCode}
-            if ($answer -eq '') {$answer=$menuOnionRoot}
-            if (-not $answer) {Write-MenuLine '  Enter a path, B or Q.'; continue}
-            $worker=Join-Path $ScriptDir 'prepare_onion.ps1'
-            $workerArgs=@{OnionRoot=$answer.Trim('"');NoPause=$true}
-            if (Test-Path -LiteralPath (Join-Path $workerArgs.OnionRoot 'RetroArch/.retroarch/cores') -PathType Container) {$menuOnionRoot=$workerArgs.OnionRoot}
+            $selected=Invoke-ApplicationRpc -Operation SD.Select -Payload @{}
+            if ($selected.Cancelled) {$page='Main';continue}
+            return 0
         }
         if ($page -in 'Storage','C64','ZX') {
-            if (Test-ApplicationWorker) {
-                $operation='Playlist';$chosenStorage=$workerArgs.Storage
-                if ($page -eq 'ZX') {$operation='ZX'}
-                elseif ($page -eq 'C64') {$operation='C64'}
-                $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage
-            } else {$policyChoice=Read-SourcePolicy $pageName}
+            $operation='Playlist';$chosenStorage=$workerArgs.Storage
+            if ($page -eq 'ZX') {$operation='ZX'}
+            elseif ($page -eq 'C64') {$operation='C64'}
+            $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage
             if ($policyChoice -eq 'Back') {continue}
             if ($policyChoice -eq 'Exit') {return $lastCode}
             $workerArgs.SourcePolicy=$policyChoice
         }
-        $lastCode=Invoke-MenuWorker $worker $workerArgs
-        if (Test-ApplicationWorker) {return $lastCode}
-        $next=Read-RunNavigation $pageName $lastCode
-        if ($next -eq 'Exit') {return $lastCode}
-        if ($next -eq 'Main') {$page='Main'}
-        # Back leaves the page selected and redraws its choices for another run.
+        return (Invoke-ApplicationMenuWorker $worker $workerArgs)
     }
 }
 
@@ -1283,27 +1221,6 @@ try {
     $profiles=@($profileData)
     Show-Header
     if ($Preview) {Show-MioPreview $PreviewSection; Restore-Display; exit 0}
-    if ($C64Convert) {
-        Restore-Display
-        $policyArgs=@{}; if ($PSBoundParameters.ContainsKey('SourcePolicy')) {$policyArgs.SourcePolicy=$SourcePolicy}
-        if ($PSBoundParameters.ContainsKey('Storage')) {$policyArgs.Storage=$Storage}
-        & (Join-Path $ScriptDir 'C64/convert_c64.ps1') @policyArgs -Root $Root -Existing $Existing -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
-        exit $LASTEXITCODE
-    }
-    if ($ZXConvert) {
-        Restore-Display
-        $policyArgs=@{}; if ($PSBoundParameters.ContainsKey('SourcePolicy')) {$policyArgs.SourcePolicy=$SourcePolicy}
-        if ($PSBoundParameters.ContainsKey('Storage')) {$policyArgs.Storage=$Storage}
-        & (Join-Path $ScriptDir 'ZX/convert_zx.ps1') @policyArgs -Root $Root -Existing $Existing -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
-        $resultCode=$LASTEXITCODE
-        if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
-        exit $resultCode
-    }
-    if ($PrepareOnion) {
-        Restore-Display
-        & (Join-Path $ScriptDir 'prepare_onion.ps1') -OnionRoot $OnionRoot -NoPause:$NoPause
-        exit $LASTEXITCODE
-    }
     if (-not $System) {
         $exitCode=Invoke-OptiMenu $profiles
         exit $exitCode
@@ -1445,7 +1362,7 @@ try {
             # Inspect names first, before reading/hashing image contents or asking
             # to replace anything. One playable image never needs a playlist.
             $diskNames=@(); $contentNames=@(); $manifest=@{}; $dataHash=$null; $sourceHashes=@{}
-            Show-Stage 0.01 'Inspecting game media' ($job.System+'/'+$job.Source)
+            Show-Stage 'Inspecting game media' ($job.System+'/'+$job.Source)
             if ($job.Zip) {
                 $sourceLock=[IO.File]::Open($job.Zip,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
                 Assert-ArchiveBudget -Stream $sourceLock -Profile Media
@@ -1491,7 +1408,7 @@ try {
             $conflicts=@($paths | Where-Object {Test-Path -LiteralPath $_.Destination})
             $overwrite=$false
             if ($conflicts.Count -gt 0) {
-                $overwrite=Confirm-Overwrite (($conflicts | ForEach-Object {$_.Destination}) -join "`n                  ") (@($conflicts | Where-Object {$_.Folder}).Count -gt 0)
+                $overwrite=Confirm-Overwrite
                 if (-not $overwrite) {
                     $result.Result='Skipped'; $result.Detail='Overwrite declined; no media content copied or compared.'; $script:Skipped++
                     Write-Event 'SKIP' ($job.System+'/'+$job.Source+' - original kept; output not compared or copied.'); continue
@@ -1562,7 +1479,7 @@ try {
             }
             # Recheck folder boundaries immediately before the transaction.
             Assert-PlaylistOutputOwnership $plan $expectedNames
-            Show-Stage 0.95 'Installing verified game output' $job.Source
+            Show-Stage 'Installing verified game output' $job.Source
             $commit=Install-PlaylistSet $items $overwrite $retired
             Complete-SourcePolicyJob $sourcePlan $job.SourceId $sourceHashes $items
             Complete-ApplicationCurrentJob
@@ -1650,5 +1567,4 @@ try {
     foreach ($id in 1,0) {Write-Progress -Id $id -Activity 'Complete' -Completed}
     if ($script:Log) {try {$script:Log.Dispose()} catch {$exitCode=1}}
 }
-if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
 exit $exitCode

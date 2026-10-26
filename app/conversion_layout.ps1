@@ -288,7 +288,7 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Kind,[string]$Ro
             if ($conflicts.Count) {
                 $choice=$policy
                 while ($choice -eq 'Ask') {
-                    $answer=Read-OverwriteChoice ($Kind+' / existing output') @($conflicts | ForEach-Object {$_.Destination}) @() @('Y. Overwrite this output','N. Skip this output (default)','A. Overwrite all conflicts','S. Skip all conflicts') (Get-OverwriteInputPrompt)
+                    $answer=Read-ApplicationOverwriteChoice
                     $choice=ConvertFrom-OverwriteAnswer $answer
                     if ($choice -eq 'OverwriteAll') {$policy='Overwrite';$choice='Overwrite'}
                     elseif ($choice -eq 'SkipAll') {$policy='Skip';$choice='Skip'}
@@ -315,13 +315,13 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Kind,[string]$Ro
             foreach ($item in $group.Items) {
                 $source=Join-Path $inputDir $item.InputName;$target=Join-Path $convertedDir $item.Name
                 [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
-                if ($item.Media) {Show-Stage 0 ('Preparing disk '+($index+1)+'/'+$mediaCount) $item.InputName}
-                else {Show-Stage 0 'Copying companion file' $item.InputName}
+                if ($item.Media) {Show-Stage ('Preparing disk '+($index+1)+'/'+$mediaCount) $item.InputName}
+                else {Show-Stage 'Copying companion file' $item.InputName}
                 & $Convert $item $source $target $temp $index $mediaCount
                 if ($item.Media) {$index++}
             }
             foreach ($path in $group.Paths) {if ((Get-SourcePolicyHash $path) -ne $hashes[[IO.Path]::GetFullPath($path)]) {throw 'Source changed during conversion; original kept.'}}
-            Show-Stage 0 'Verifying and saving outputs' $group.Source
+            Show-Stage 'Verifying and saving outputs' $group.Source
             $commit=Save-ConversionGroup $group $convertedDir $destinationRoot $overwrite
             Complete-SourcePolicyJob $sourcePlan $group.SourceKey $hashes $commit.Outputs
             Complete-ApplicationCurrentJob

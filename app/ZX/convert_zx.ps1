@@ -168,7 +168,7 @@ function Test-BundledEngine([string]$EnginePath) {
 }
 
 function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$TimeoutMs) {
-    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationEngineText $EnginePath $Arguments $TimeoutMs)}
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationEngineText $EnginePath $Arguments)}
     Initialize-NativeTextCapture
     Initialize-NativeSandbox
     $engineDirectory=Split-Path -Parent $EnginePath
@@ -224,7 +224,7 @@ function Invoke-EngineText([string]$EnginePath, [string]$Arguments, [int]$Timeou
             while ($null -ne $stderrCapture.NextLine()) {}
             $detail=Get-EngineLabel $EnginePath
             if ($script:CurrentZXItem) {$detail=$script:CurrentZXItem}
-            Show-Stage 0 'Running isolated HxC / waiting for engine output' $detail
+            Show-Stage 'Running isolated HxC / waiting for engine output' $detail
         } while (-not $finished -and $timer.ElapsedMilliseconds -lt $TimeoutMs -and -not $stdoutCapture.LimitExceeded -and -not $stderrCapture.LimitExceeded)
         if (-not $finished) {$process.Kill();[void]$process.WaitForExit(5000)}
         $stdoutReady=$stdoutCapture.Wait(5000);$stderrReady=$stderrCapture.Wait(5000)
@@ -418,27 +418,6 @@ function Test-CapsIPFEngine([string]$EnginePath, [string]$InputPath) {
     return [PSCustomObject]@{ Success=$false; CapsLoadFailure=$false; Detail=($label + ' did not recognize the probe file as an IPF image.') }
 }
 
-function Prompt-CapsRuntimeDirectory {
-    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {Write-Status 'WARN' 'Restore the complete bundled converter files, then retry.';return $null}
-    $answer=Read-DisplayInput 'MinGW runtime folder' 'ZX Spectrum / runtime setup' @(
-        'The 32-bit CAPSImg fallback needs libstdc++-6.dll,',
-        'libgcc_s_dw2-1.dll and libwinpthread-1.dll.',
-        'These files are included in the complete OptiMiyoo download.',
-        'To use another compatible set, drag its folder into this window.',
-        'A 32-bit RetroArch installation may also contain these libraries.',
-        'Enter without a path, B or Q stops safely.') 'wait'
-    if ($null -eq $answer) { return $null }
-    $answer = $answer.Trim().Trim([char]34)
-    if ([string]::IsNullOrWhiteSpace($answer) -or $answer -in 'B','Q') { return $null }
-    if (Test-Path -LiteralPath $answer -PathType Leaf) { $answer = Split-Path -Parent $answer }
-    if (-not (Test-Path -LiteralPath $answer -PathType Container)) {
-        Write-Status 'WARN' 'That folder does not exist.'
-        return $null
-    }
-    # A user-selected runtime is used only for this run.
-    return $answer
-}
-
 function Ensure-CapsIPFReady($ProbeItem) {
     $probePath = [string]$ProbeItem.InputPath
     $probeTempRoot = $null
@@ -475,21 +454,7 @@ function Ensure-CapsIPFReady($ProbeItem) {
 
         if ($working.Count -eq 0 -and $capsRuntimeProblem) {
             Write-Status 'WARN' 'CAPSImg was found, but Windows could not load its MinGW runtime dependency.'
-            $manualDir = Prompt-CapsRuntimeDirectory
-            if ($manualDir) {
-                foreach ($engine in $engines) {
-                    if (Test-CapsRuntimeDirectory $engine $manualDir) {
-                        Set-CapsRuntimeDirectory $engine $manualDir
-                    }
-                }
-                $working = @()
-                foreach ($engine in $engines) {
-                    try {$probe = Test-CapsIPFEngine $engine $probePath}
-                    catch {$probe=[pscustomobject]@{Success=$false;CapsLoadFailure=$false;Detail=((Get-EngineLabel $engine)+' probe failed: '+$_.Exception.Message)}}
-                    if ($probe.Success) { $working += $engine }
-                    else { Write-Status 'WARN' $probe.Detail }
-                }
-            }
+            Write-Status 'WARN' 'Restore the complete bundled converter files, then retry.'
         }
 
         if ($working.Count -eq 0) {
@@ -591,9 +556,9 @@ function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
         $zip=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
         $matches=@();for($i=0;$i -lt $zip.Entries.Count;$i++){if($zip.Entries[$i].FullName -ceq $EntryName){$matches+=,$i}}
         if($matches.Count -ne 1){throw 'Missing or duplicate disk entry in ZIP.'}
-        Show-Stage 0 'Preparing disk from ZIP in sandbox' $EntryName 0
+        Show-Stage 'Preparing disk from ZIP in sandbox' $EntryName 0
         $tempFile=Join-Path $tempRoot 'disk.ipf'
-        $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $matches[0] -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 0 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
+        $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $matches[0] -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
         $complete=$true;return [pscustomobject]@{Path=$tempFile;TempRoot=$tempRoot}
     } finally {
         if($zip){$zip.Dispose()}
@@ -687,7 +652,7 @@ function Invoke-HxCOnce([string]$EnginePath, [string]$InputPath, [string]$Output
     $arguments = ('-verbose -finput:"{0}" -conv:AMSTRADCPC_DSK -foutput:"{1}"' -f $InputPath, $OutputPath)
     $label = Get-EngineLabel $EnginePath
     $run = Invoke-IPFEngineText $EnginePath $arguments $InputPath 120000
-    Show-Stage 0 'Verifying DSK output' ([IO.Path]::GetFileName($InputPath))
+    Show-Stage 'Verifying DSK output' ([IO.Path]::GetFileName($InputPath))
     $valid = Test-DSK $OutputPath
     $detail = $run.Output
     if ([string]::IsNullOrWhiteSpace($detail)) { $detail = '(no stdout/stderr text)' }

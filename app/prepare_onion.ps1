@@ -1,5 +1,6 @@
 ﻿#requires -Version 5.1
-param([string]$OnionRoot,[switch]$NoPause)
+[CmdletBinding()]
+param([string]$OnionRoot)
 . (Join-Path $PSScriptRoot 'application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent $PSScriptRoot) -Entry SD -Arguments $PSBoundParameters)
@@ -104,7 +105,7 @@ function Write-OnionBytesVerified([IO.FileStream]$Stream,[byte[]]$Bytes,[string]
 
 $rootLease=$null
 try {
-    if (-not $OnionRoot) {$OnionRoot=([string](Read-Host 'SD card root, for example E:\')).Trim().Trim('"')}
+    if ([string]::IsNullOrWhiteSpace($OnionRoot)) {throw 'SD setup requires the staged SD root supplied by the application host.'}
     $OnionRoot=(Resolve-Path -LiteralPath $OnionRoot).ProviderPath
     Assert-PlainOnionPath $OnionRoot $OnionRoot
     Initialize-OnionPathLease
@@ -142,19 +143,9 @@ try {
             if ($stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $original=$memory.ToArray()} finally {$memory.Dispose()}
-            $utf8=New-Object Text.UTF8Encoding($false,$true)
-            $raw=$utf8.GetString($original)
-            $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
-            if ($config.launch -ne 'launch.sh') {throw 'Config launcher changed during setup. Run the check again.'}
-            if (-not $config.extlist -or $config.extlist -isnot [string]) {throw 'Config has no valid extlist string.'}
             $extensions=@(Get-OnionSetupExtensions $profile $OnionRoot $fresh)
-            $missing=@($extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
-            if ($missing.Count -eq 0) {Write-OnionText ('READY: '+$folder+' / '+$support.Core); continue}
-            $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')
-            if ($rx.Matches($raw).Count -ne 1) {throw 'Ambiguous extlist in config.'}
-            $newRaw=$rx.Replace($raw,('${1}${2}|'+($missing -join '|')+'${3}'))
-            $null=($newRaw.TrimStart([char]0xFEFF) | ConvertFrom-Json)
-            $newBytes=$utf8.GetBytes($newRaw)
+            $newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions
+            if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+$support.Core); continue}
             # An already prepared config only needs read access. Upgrade to a
             # writable handle only for a real edit, then recheck the bytes from
             # that handle so a change during the reopen cannot be overwritten.
@@ -175,7 +166,7 @@ try {
             $writeStarted=$true
             Write-OnionBytesVerified $stream $newBytes 'Updated config'
             $changed++
-            Write-OnionText ('UPDATED: '+$folder+' / '+$support.Core+' / '+($missing -join ', ')+' visible')
+            Write-OnionText ('UPDATED: '+$folder+' / '+$support.Core+' / '+($extensions -join ', ')+' enabled')
         } catch {
             $exitCode=1
             if ($writeStarted -and $stream -and $null -ne $original) {
@@ -192,7 +183,5 @@ try {
         }
     }
     Write-OnionText ("$changed system setup(s) updated; $unsupported unsupported/unverified. Selected cores preserved.")
-    if ($changed -gt 0 -and -not (Test-ApplicationWorker)) {Write-OnionText ('Original config.json files: '+$backupRoot); Write-OnionText 'Refresh the Onion game list.'}
 } catch {$exitCode=1; Write-OnionText ('ERROR: '+$_.Exception.Message)} finally {if ($rootLease) {$rootLease.Dispose()}}
-if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
 exit $exitCode

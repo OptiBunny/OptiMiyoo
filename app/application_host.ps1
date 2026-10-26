@@ -237,7 +237,7 @@ function Invoke-ApplicationHost {
             $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
             $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
             $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
-            foreach ($key in 'NoAnimation','NoColor','NoPause','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
+            foreach ($key in 'NoAnimation','NoColor','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
             if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
             if ($menu) {$worker.StartPage=$startPage}
             if ($sd) {$worker.OnionRoot=$sd.StagedRoot}
@@ -247,13 +247,13 @@ function Invoke-ApplicationHost {
                 $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage})
                 $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
                 $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
-                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.NoPause=$true}
-                else {[void]$worker.Remove('NoPause');[void]$worker.Remove('Preview');[void]$worker.Remove('OnionRoot')}
+                if ($Entry -eq 'Playlist') {$worker.System=$selection.System}
+                else {[void]$worker.Remove('Preview');[void]$worker.Remove('OnionRoot')}
                 $worker.Storage=$selection.Storage
             }
             if ($Entry -eq 'SD') {
                 if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
-                $worker=@{OnionRoot=$sd.StagedRoot;NoPause=$true}
+                $worker=@{OnionRoot=$sd.StagedRoot}
             }
             Write-ApplicationBootstrap $session $Entry $worker $batch
             $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')

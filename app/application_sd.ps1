@@ -192,10 +192,32 @@ function Close-ApplicationSdSession {
     finally{if($state.RootLease){$state.RootLease.Dispose();$state.RootLease=$null};$script:ApplicationSdStates.Remove($Session.Id)}
 }
 
+function Resolve-ApplicationSdInput([string]$Text) {
+    $choice=[pscustomobject]@{Cancelled=$false;Path=$null;Error=$null}
+    $candidate=$Text.Trim().Trim('"')
+    if ($candidate -eq 'B') {$choice.Cancelled=$true;return $choice}
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $choice.Error='Enter your SD path, e.g. E:\, or B to go back.';return $choice
+    }
+    # IsPathRooted also accepts drive-relative B: and current-drive \folder.
+    # The SD prompt must never resolve those against the app's working folder.
+    $drive=($candidate -match '^[A-Za-z]:[\\/]')
+    $unc=($candidate -match '^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)')
+    if ((-not $drive -and -not $unc) -or $candidate.StartsWith('\\?\') -or $candidate.StartsWith('\\.\') -or
+        $candidate -match '[\x00-\x1f<>|"*?]' -or ($drive -and $candidate.Substring(2).Contains(':')) -or ($unc -and $candidate.Contains(':'))) {
+        $choice.Error='Use a full SD path, e.g. E:\, or B to go back.';return $choice
+    }
+    try {$choice.Path=[IO.Path]::GetFullPath($candidate)}
+    catch {$choice.Error='Check the SD path, or press B to go back.'}
+    return $choice
+}
+
 function Read-ApplicationSdConsolePath {
+    param([string]$InitialText='', [string]$ErrorMessage='')
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
     $title='Onion SD setup';$prompt='SD drive or folder (for example E:\)'
-    $rows=@(Get-OnionSetupMenuRows)+@('B. Back to main menu (Esc also goes back)');$text='';$dirty=$true
+    if ($ErrorMessage) {$prompt=$ErrorMessage}
+    $rows=@(Get-OnionSetupMenuRows)+@('B. Back to main menu (Esc also goes back)');$text=$InitialText;$dirty=$true
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
@@ -236,10 +258,21 @@ function Invoke-ApplicationSdFolderPrompt {
     try {
         [void]$Session.PauseRelay();if(-not $Session.IsRelayPaused){throw 'The application relay did not surrender the parent console.'};$paused=$true
         $script:DisplayEffect=$DisplayEffect
-        Initialize-Display;$display=$true;$selected=Read-ApplicationSdConsolePath
-        if($null -ne $selected) {
-            if([string]::IsNullOrWhiteSpace($selected) -or -not [IO.Path]::IsPathRooted($selected) -or $selected.StartsWith('\\?\') -or $selected.StartsWith('\\.\')){throw 'Choose an absolute SD card folder.'}
-            $selected=[IO.Path]::GetFullPath($selected)
+        Initialize-Display;$display=$true;$text='';$message=''
+        while ($true) {
+            $selected=Read-ApplicationSdConsolePath -InitialText $text -ErrorMessage $message
+            if ($null -eq $selected) {break}
+            $choice=Resolve-ApplicationSdInput $selected
+            if ($choice.Cancelled) {$selected=$null;break}
+            $text=$selected
+            if ($choice.Error) {$message=$choice.Error;continue}
+            if (-not [IO.Directory]::Exists($choice.Path)) {
+                $message='Folder not found. Check your SD path, or press B.';continue
+            }
+            if (-not [IO.Directory]::Exists((Join-Path $choice.Path 'RetroArch/.retroarch/cores'))) {
+                $message='No Onion cores folder here. Choose your SD root.';continue
+            }
+            $selected=$choice.Path;break
         }
     }finally {
         try{if($display){Restore-Display}}

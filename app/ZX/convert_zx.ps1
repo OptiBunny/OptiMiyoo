@@ -333,10 +333,6 @@ function Get-CapsRuntimeCandidateDirectories([string]$EnginePath) {
     $seen = @{}
 
     Add-RuntimeCandidate $list $seen (Split-Path -Parent $EnginePath)
-    $arch = Get-EngineArchitecture $EnginePath
-    if (-not [string]::IsNullOrWhiteSpace($arch)) {
-        Add-RuntimeCandidate $list $seen (Join-Path $script:AppRoot ('resources\caps-runtime\' + $arch))
-    }
 
     return $list.ToArray()
 }

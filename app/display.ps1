@@ -1276,8 +1276,9 @@ function Show-MioPreview([string]$Section='Tour') {
             while ($true) {
                 if (Update-DisplaySize -Throttled) {$dirty=$true}
                 $script:UiDemoPaused=$paused
-                $script:UiSay=('DEMO {0}/{1} | Space pause | N/P | R replay | F {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$script:DisplayEffect)
-                if ($paused) {$script:UiSay=('DEMO {0}/{1} PAUSED | Space resume | N/P | F {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$script:DisplayEffect)}
+                $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
+                $script:UiSay=('DEMO {0}/{1} | Space pause | N/P | R replay | F CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)
+                if ($paused) {$script:UiSay=('DEMO {0}/{1} PAUSED | Space resume | N/P | F CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)}
                 $frameInterval=250; $periodic=$true
                 if ($scene.Menu) {$periodic=$false}
                 elseif ($scene.Status -or $scene.Complete) {$frameInterval=1000}

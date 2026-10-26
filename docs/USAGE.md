@@ -12,7 +12,7 @@ the displayed default. Use the back and exit keys shown on each screen.
 | **Z** | [ZX Spectrum converter](#zx-converter-z). |
 | **S** | [Enable supported file types in Onion's game list](#sd-setup). |
 | **D** | [Demo](#demo). |
-| **F** | Switch the bunny and logo between CRT and Smooth. |
+| **F** | Turn the CRT effect on or off. |
 | **Q** | Exit. |
 
 ## Prepare a batch

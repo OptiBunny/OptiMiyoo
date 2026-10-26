@@ -1062,7 +1062,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Show-MenuTitle 'Main menu'
             Write-MenuLine '  S. Onion SD setup: playlist visibility / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
-            Write-MenuLine ('  F. Display effect: '+$script:DisplayEffect+' / toggle')
+            $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
+            Write-MenuLine ('  F. CRT effect: '+$crtState+' / turn on or off')
             Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
             Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB -> G64'
             Write-MenuLine '  Q. Exit'

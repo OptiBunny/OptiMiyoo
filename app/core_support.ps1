@@ -272,16 +272,24 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
 
 function Get-OnionSetupMenuRows {
     @(
-        'Show playlists in Onion''s game list.',
-        'Checks each system''s selected emulator core.',
-        'Only edits config.json''s visible file types:',
-        '  adds supported .m3u / .m3u8 playlists',
-        '  and supported C64 tape formats.',
-        'Backs up each config before editing it:',
-        '  SD card: OptiMiyoo_Backup_<ID>/',
+        'Shows supported playlists and C64 tapes.',
+        'Only edits config.json''s file-type list.',
+        'Adds .m3u / .m3u8 and supported tape types.',
+        'Backs up configs on SD before changes:',
+        '  OptiMiyoo_Backup_<ID>/',
         'Games, saves and cores stay unchanged.',
-        'Cannot add playlist support to a core.',
-        'Refresh Onion''s game list after setup.'
+        'Cannot add playback support to a core.',
+        'Refresh Onion''s game list after setup.',
+        'Supported cores (checked on your SD):',
+        '1. Amiga: PUAE2021 / PUAE',
+        '2. C64: VICE x64 / x64sc',
+        '3. PlayStation: PCSX ReARMed',
+        '4. Sega CD: PicoDrive / Genesis Plus GX',
+        '5. CPC: Caprice32 [different core required]',
+        '6. MSX / MSX2: blueMSX',
+        '7. VIC-20: VICE xvic',
+        '8. MS-DOS: DOSBox Pure',
+        '9. ZX: Fuse [newer M3U build required]'
     )
 }
 

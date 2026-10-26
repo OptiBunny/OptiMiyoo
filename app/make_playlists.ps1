@@ -1,4 +1,5 @@
 ﻿#requires -Version 5.1
+[CmdletBinding()]
 param(
     [Parameter(Position=0)][string]$Root,
     [string]$System,
@@ -16,7 +17,6 @@ param(
     [switch]$ZXConvert,
     [switch]$C64Convert,
     [ValidateSet('Keep','Remove','Folders')][string]$C64Mode='Keep',
-    [ValidateSet('Ask','LooseDSK','ZipDSK')][string]$ZXFormat='Ask',
     [ValidateSet('Main','C64','ZX')][string]$StartPage='Main'
 )
 . (Join-Path $PSScriptRoot 'application_entry.ps1')
@@ -1275,11 +1275,10 @@ function Invoke-OptiMenu([object[]]$Profiles) {
         }
         if ($page -in 'Storage','C64','ZX') {
             if (Test-ApplicationWorker) {
-                $operation='Playlist';$chosenStorage=$workerArgs.Storage;$chosenFormat='LooseDSK'
-                if ($chosenStorage -eq 'Zip') {$chosenFormat='ZipDSK'}
+                $operation='Playlist';$chosenStorage=$workerArgs.Storage
                 if ($page -eq 'ZX') {$operation='ZX'}
                 elseif ($page -eq 'C64') {$operation='C64'}
-                $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage $chosenFormat
+                $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage
             } else {$policyChoice=Read-SourcePolicy $pageName}
             if ($policyChoice -eq 'Back') {continue}
             if ($policyChoice -eq 'Exit') {return $lastCode}
@@ -1320,7 +1319,7 @@ try {
         Restore-Display
         $policyArgs=@{}; if ($PSBoundParameters.ContainsKey('SourcePolicy')) {$policyArgs.SourcePolicy=$SourcePolicy}
         if ($PSBoundParameters.ContainsKey('Storage')) {$policyArgs.Storage=$Storage}
-        & (Join-Path $ScriptDir 'ZX/convert_zx.ps1') @policyArgs -Root $Root -Format $ZXFormat -Existing $Existing -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
+        & (Join-Path $ScriptDir 'ZX/convert_zx.ps1') @policyArgs -Root $Root -Existing $Existing -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
         $resultCode=$LASTEXITCODE
         if (-not $NoPause) {[void](Read-Host 'Press Enter to exit')}
         exit $resultCode

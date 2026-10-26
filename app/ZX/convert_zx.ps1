@@ -1,12 +1,12 @@
 ﻿#requires -Version 5.1
-param([string]$Root,[ValidateSet('Ask','LooseDSK','ZipDSK')][string]$Format='Ask',
+[CmdletBinding()]
+param([string]$Root,
       [ValidateSet('Zip','Loose','Folders')][string]$Storage,
       [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
       [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
       [switch]$NoAnimation,[switch]$NoColor,
       [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
-# Based on ZX converter v2.3; OptiMiyoo integration keeps its conversion engine.
-# ZX IPF / ZIP -> DSK Converter v2.3 - console edition
+# ZX conversion uses the shared output layouts and source policy.
 # Windows PowerShell 5.1 compatible. No GUI. Keep originals is the default.
 
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'application_entry.ps1')
@@ -27,13 +27,10 @@ $script:HxCX86 = Join-Path $script:ToolsRoot 'x86\hxcfe.exe'
 $script:HxCExe = $null
 $script:HxCFallback = $null
 $script:EngineRuntimeDirs = @{}
-$script:OverwriteMode = 'Ask'   # Ask | OverwriteAll | SkipAll
-$script:OutputMode = 'LooseDSK' # LooseDSK | ZipDSK
 $script:Converted = 0
 $script:Skipped = 0
 $script:Failed = 0
 $script:Total = 0
-$script:ScanFailures = @()
 $script:LogPath = $null; $script:LogWriter=$null
 $script:LogDisabled=$false
 $script:ReportProblem=$false
@@ -48,11 +45,8 @@ $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'archive_sandbox.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'overwrite_prompt.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'conversion_layout.ps1')
-$script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
 Initialize-Display
 $script:UiSystem='ZXS / IPF -> DSK'
-if ($Existing -eq 'Overwrite') {$script:OverwriteMode='OverwriteAll'}
-elseif ($Existing -eq 'Skip') {$script:OverwriteMode='SkipAll'}
 function Write-Log([string]$Message) {Write-LogFile $Message}
 function Format-Duration([double]$Seconds) {
     $t=[TimeSpan]::FromSeconds([Math]::Max(0,$Seconds))
@@ -88,7 +82,6 @@ function Invoke-ZXExplicitOutputs([string]$Root,[string]$Storage,[string]$Source
     }
 }
 
-
 function Assert-PlainOutputParents([string]$Path, [string]$Root) {
     if (Get-Command Get-ApplicationValidationRoot -ErrorAction SilentlyContinue) {$Root=Get-ApplicationValidationRoot $Path $Root}
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -104,7 +97,6 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
         $parent = [IO.Path]::GetDirectoryName($parent)
     }
 }
-
 
 Assert-PlainOutputParents (Join-Path $script:SourceRoot 'placeholder') $Root
 Assert-PlainOutputParents (Join-Path $script:DestinationRoot 'placeholder') $Root
@@ -129,7 +121,7 @@ function Start-Log {
     Write-LogFile ('Date: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
     Write-LogFile ('Source: ' + $script:SourceRoot)
     Write-LogFile ('Destination: ' + $script:DestinationRoot)
-    Write-LogFile ('Output mode: ' + $script:OutputMode)
+    Write-LogFile ('Output storage: ' + $Storage)
     Write-LogFile ('Source policy: ' + $SourcePolicy)
     Write-LogFile ''
 }
@@ -448,7 +440,6 @@ function Prompt-CapsRuntimeDirectory {
 }
 
 function Ensure-CapsIPFReady($ProbeItem) {
-    $script:CapsPreflightGlobalFailure=$false
     $probePath = [string]$ProbeItem.InputPath
     $probeTempRoot = $null
     try {
@@ -502,7 +493,6 @@ function Ensure-CapsIPFReady($ProbeItem) {
         }
 
         if ($working.Count -eq 0) {
-            $script:CapsPreflightGlobalFailure=$capsRuntimeProblem
             Write-Status 'WARN' 'This source did not pass CAPS/IPF preflight.'
             return $false
         }
@@ -558,161 +548,7 @@ function Ensure-HxC {
     return $true
 }
 
-function Get-RelativePathCompat([string]$BaseDirectory,[string]$TargetPath) {
-    $prefix=[IO.Path]::GetFullPath($BaseDirectory).TrimEnd([char]92,[char]47)+[IO.Path]::DirectorySeparatorChar
-    $full=[IO.Path]::GetFullPath($TargetPath)
-    if (-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Source is outside SRC.'}
-    return $full.Substring($prefix.Length).Replace([char]92,[char]47)
-}
-
-function Join-RelativePath([string]$Left, [string]$Right) {
-    if ([string]::IsNullOrWhiteSpace($Left)) { return $Right }
-    if ([string]::IsNullOrWhiteSpace($Right)) { return $Left }
-    return (($Left -replace '[\\/]+$', '') + '/' + ($Right -replace '^[\\/]+', ''))
-}
-
-function Get-SafeZipRelativePath([string]$EntryName) {
-    $normalized = $EntryName.Replace('\', '/')
-    $parts = @()
-    $invalidChars = [IO.Path]::GetInvalidFileNameChars()
-    foreach ($part in ($normalized -split '/')) {
-        if ([string]::IsNullOrWhiteSpace($part) -or $part -eq '.' -or $part -eq '..') { continue }
-        $clean = $part
-        foreach ($bad in $invalidChars) { $clean = $clean.Replace([string]$bad, '_') }
-        $clean = ($clean -replace '[. ]+$', '')
-        if ([string]::IsNullOrWhiteSpace($clean)) { $clean = '_' }
-        $stem = [IO.Path]::GetFileNameWithoutExtension($clean)
-        if ($stem -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') { $clean = '_' + $clean }
-        $parts += $clean
-    }
-    if ($parts.Count -eq 0) { return 'disk.ipf' }
-    return [string]::Join('/', $parts)
-}
-
-function Get-ZipIPFEntryNames([string]$ZipPath) {
-    $zip = $null
-    try {
-        $zip = (Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy)
-        $entries = New-Object 'System.Collections.Generic.List[string]'
-        $extraCount=0
-        foreach ($entry in $zip.Entries) {
-            if ([string]::IsNullOrWhiteSpace($entry.Name)) {continue}
-            if ([IO.Path]::GetExtension($entry.FullName) -in '.ipf','.dsk') {$entries.Add($entry.FullName)}
-            else {$extraCount++}
-        }
-        $hash=$null
-        if ($SourcePolicy -eq 'Remove') {
-            $onHash={param($done,$total) Show-PreparationProgress 'Reading source ZIP' ([IO.Path]::GetFileName($ZipPath)) $done $total 'bytes'}.GetNewClosure()
-            $hash=Get-SourcePolicyHash $ZipPath $onHash
-        }
-        return [PSCustomObject]@{ Success=$true; Entries=$entries.ToArray(); OtherFiles=$extraCount; Hash=$hash; Error='' }
-    } catch {
-        return [PSCustomObject]@{ Success=$false; Entries=@(); Error=$_.Exception.Message }
-    } finally {
-        if ($zip) { $zip.Dispose() }
-    }
-}
-
-function Get-ConversionItems {
-    $script:ScanFailures = New-Object 'System.Collections.Generic.List[object]'
-    $script:UntouchedSources = New-Object 'System.Collections.Generic.List[object]'
-    # Appending to PowerShell arrays recopies every prior job. Grow lists instead.
-    $results = New-Object 'System.Collections.Generic.List[object]'
-    [long]$discovered=0
-    $sourceFiles = @(Get-ChildItem -LiteralPath $script:SourceRoot -Recurse -File -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            if (-not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($_.Extension -in '.ipf','.dsk','.zip')) {
-                $discovered++; $_
-            }
-            Show-PreparationProgress 'Scanning SRC' $_.Name $discovered -1 'inputs'
-        } | Sort-Object FullName)
-    Show-PreparationProgress 'Scanning SRC' 'Source input list collected.' $sourceFiles.Count $sourceFiles.Count 'inputs' -Force
-    $checked=0
-    Show-PreparationProgress 'Reading disk inputs' 'Reading loose files and archive directories.' 0 $sourceFiles.Count 'inputs'
-
-    foreach ($file in $sourceFiles) {
-        Show-PreparationProgress 'Reading disk inputs' $file.Name $checked $sourceFiles.Count 'inputs'
-        try {
-            $relative = Get-RelativePathCompat $script:SourceRoot $file.FullName
-            if ($file.Extension -in '.ipf','.dsk') {
-                $results.Add([PSCustomObject]@{
-                    Type='Loose'; InputPath=$file.FullName; EntryName=$null; SourceBlockReason=''; SourceHash=$null
-                    Converter=$(if ($file.Extension -ieq '.ipf') {'HxC'} else {''})
-                    RelativeOutput=[IO.Path]::ChangeExtension($relative, '.dsk')
-                    DisplayName=$relative
-                })
-                continue
-            }
-
-            $zipResult = Get-ZipIPFEntryNames $file.FullName
-            if (-not $zipResult.Success) {
-                $script:ScanFailures.Add([PSCustomObject]@{ DisplayName=$relative; InputPath=$file.FullName; Error=$zipResult.Error })
-                continue
-            }
-            $entries = @($zipResult.Entries)
-            if ($entries.Count -eq 0) {
-                $script:UntouchedSources.Add([pscustomobject]@{InputPath=$file.FullName; Reason='ZIP has no IPF or DSK images; original kept.'})
-                continue
-            }
-            $sourceBlockReason=''
-            if ($zipResult.OtherFiles -gt 0) {$sourceBlockReason='ZIP includes files that are not copied to output; original kept to preserve them.'}
-
-            if ($entries.Count -eq 1) {
-                $results.Add([PSCustomObject]@{
-                    Type='Zip'; InputPath=$file.FullName; EntryName=$entries[0]; SourceBlockReason=$sourceBlockReason; SourceHash=$zipResult.Hash
-                    Converter=$(if ([IO.Path]::GetExtension($entries[0]) -ieq '.ipf') {'HxC'} else {''})
-                    RelativeOutput=[IO.Path]::ChangeExtension($relative, '.dsk')
-                    DisplayName=($relative + ' :: ' + $entries[0])
-                })
-            } else {
-                $relativeDir = Split-Path -Parent $relative
-                if ($relativeDir -eq '.') { $relativeDir = '' }
-                $archiveFolder = [IO.Path]::GetFileNameWithoutExtension($file.Name)
-                $base = Join-RelativePath $relativeDir $archiveFolder
-                foreach ($entry in $entries) {
-                    $safeEntry = Get-SafeZipRelativePath $entry
-                    $results.Add([PSCustomObject]@{
-                        Type='Zip'; InputPath=$file.FullName; EntryName=$entry; SourceBlockReason=$sourceBlockReason; SourceHash=$zipResult.Hash
-                        Converter=$(if ([IO.Path]::GetExtension($entry) -ieq '.ipf') {'HxC'} else {''})
-                        RelativeOutput=(Join-RelativePath $base ([IO.Path]::ChangeExtension($safeEntry, '.dsk')))
-                        DisplayName=($relative + ' :: ' + $entry)
-                    })
-                }
-            }
-        } finally {
-            $checked++; Show-PreparationProgress 'Reading disk inputs' $file.Name $checked $sourceFiles.Count 'inputs'
-        }
-    }
-    return $results.ToArray()
-}
-
-function Get-FinalRelativeOutput([string]$RelativeDsk) {
-    if ($script:OutputMode -eq 'ZipDSK') {
-        return [IO.Path]::ChangeExtension($RelativeDsk, '.zip')
-    }
-    return $RelativeDsk
-}
-
-function Get-OutputCollisions([object[]]$Items) {
-    $seen = @{}
-    $collisions = New-Object 'System.Collections.Generic.List[object]'; $checked=0
-    Show-PreparationProgress 'Checking output path conflicts' 'Checking converted-image destinations.' 0 $Items.Count 'images'
-    foreach ($item in $Items) {
-        $key = Get-FinalRelativeOutput ([string]$item.RelativeOutput)
-        if ($seen.ContainsKey($key)) {
-            $collisions.Add([PSCustomObject]@{ RelativeOutput=$key; First=[string]$seen[$key]; Second=[string]$item.DisplayName })
-        } else {
-            $seen[$key] = [string]$item.DisplayName
-        }
-        $checked++; Show-PreparationProgress 'Checking output path conflicts' $item.DisplayName $checked $Items.Count 'images'
-    }
-    return $collisions.ToArray()
-}
-
 function Remove-ZXWorkPath([string]$Path,[string]$Root) {
-    # A failed verification cannot identify a replacement file safely. Keep
-    # anything returned to staging during rollback for the user to recover.
-    if ($Path -and $Path -eq $script:PreservedZXWorkPath) {return}
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {return}
     try {Remove-SourcePolicyOwnedPath -Path $Path -Root $Root}
     catch {
@@ -746,7 +582,6 @@ function Stage-LooseIPF([string]$InputPath) {
         }
     }
 }
-
 
 function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
     $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_'+[Guid]::NewGuid().ToString('N'))
@@ -847,126 +682,6 @@ function Test-DSK([string]$Path) {
     finally {if ($stream) {$stream.Dispose()}}
 }
 
-function Test-ZipDskPackage([string]$ZipPath,[string]$ExpectedEntryName) {
-    $zip=$null;$stream=$null;$tempRoot=$null
-    try {
-        if(-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)){return $false}
-        $zip=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
-        $entries=@($zip.Entries | Where-Object {-not [string]::IsNullOrWhiteSpace($_.Name)})
-        if($entries.Count -ne 1){return $false}
-        $entry=$entries[0]
-        if($entry.Name -ne $ExpectedEntryName -or [IO.Path]::GetExtension($entry.Name) -ine '.dsk'){return $false}
-        $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('ZX_CHECK_'+[Guid]::NewGuid().ToString('N'))
-        [void][IO.Directory]::CreateDirectory($tempRoot)
-        $tempFile=Join-Path $tempRoot 'disk.dsk'
-        $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $zip.Entries.IndexOf($entry) -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 0 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
-        $stream=[IO.File]::OpenRead($tempFile)
-        return (Test-DskStream $stream $entry.Length)
-    } catch {return $false}
-    finally {
-        if($stream){$stream.Dispose()};if($zip){$zip.Dispose()}
-        if($tempRoot -and (Test-Path -LiteralPath $tempRoot)){Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())}
-    }
-}
-
-function New-DskZipPackage([string]$DskPath, [string]$ZipPath, [string]$EntryName) {
-    if (-not (Test-DSK $DskPath)) { throw 'Refusing to ZIP output because DSK validation failed.' }
-    $zipStream=$null; $archive=$null; $source=$null; $entryStream=$null; $created=$false
-    try {
-        # Reserve a new file exclusively. An unexpectedly occupied staging name
-        # belongs to somebody else and must never be deleted or overwritten.
-        $zipStream=[IO.File]::Open($ZipPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
-        $created=$true
-        $archive=New-Object IO.Compression.ZipArchive($zipStream,[IO.Compression.ZipArchiveMode]::Create,$true)
-        $entry=$archive.CreateEntry($EntryName,[IO.Compression.CompressionLevel]::Optimal)
-        $source=[IO.File]::OpenRead($DskPath); $entryStream=$entry.Open()
-        $source.CopyTo($entryStream)
-        $entryStream.Dispose(); $entryStream=$null; $source.Dispose(); $source=$null
-        $archive.Dispose(); $archive=$null; $zipStream.Flush()
-        $zipStream.Dispose(); $zipStream=$null
-        if (-not (Test-ZipDskPackage $ZipPath $EntryName)) {throw 'ZIP package validation failed.'}
-    } catch {
-        if ($entryStream) {$entryStream.Dispose();$entryStream=$null}
-        if ($source) {$source.Dispose();$source=$null}
-        if ($archive) {$archive.Dispose();$archive=$null}
-        if ($zipStream) {$zipStream.Dispose();$zipStream=$null}
-        if ($created) {Remove-ZXWorkPath $ZipPath ([IO.Path]::GetDirectoryName($ZipPath))}
-        throw
-    } finally {
-        if ($entryStream) {$entryStream.Dispose()}; if ($source) {$source.Dispose()}
-        if ($archive) {$archive.Dispose()}; if ($zipStream) {$zipStream.Dispose()}
-    }
-}
-
-function Commit-FileSafely([string]$WorkPath, [string]$FinalPath, [string]$Kind) {
-    $backupPath = $null
-    $installed=$false
-    $parentLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
-    try {
-        $parents=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-        [void]$parents.Add([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($WorkPath)))
-        [void]$parents.Add([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($FinalPath)))
-        foreach ($parent in $parents) {$parentLocks.Add((Open-SourcePolicyDirectoryLease -Path $parent))}
-        $hadPrevious=Test-Path -LiteralPath $FinalPath
-        if ($hadPrevious) {
-            $old=Get-Item -LiteralPath $FinalPath -Force
-            if ($old.PSIsContainer -or ($old.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Destination is not a regular file; output left alone.'}
-        }
-        $expectedHash=Get-SourcePolicyHash $WorkPath
-    try {
-        if ($hadPrevious) {
-            $outDir = Split-Path -Parent $FinalPath
-            $ext = [IO.Path]::GetExtension($FinalPath)
-            if ([string]::IsNullOrWhiteSpace($ext)) { $ext = '.bak' }
-            $backupPath = Join-Path $outDir ('.zxbackup_' + [Guid]::NewGuid().ToString('N') + $ext)
-            [IO.File]::Move($FinalPath, $backupPath)
-        }
-        [IO.File]::Move($WorkPath, $FinalPath)
-        $installed=$true
-        $locks=Open-SourcePolicyOutputs @([pscustomobject]@{Destination=$FinalPath;Folder=$false;Hash=$expectedHash})
-        foreach ($lock in $locks) {$lock.Dispose()}
-        if ($backupPath -and (Test-Path -LiteralPath $backupPath)) {
-            try {Remove-SourcePolicyOwnedPath -Path $backupPath -Root ([IO.Path]::GetDirectoryName($backupPath))}
-            catch {Write-Status 'WARN' ('Previous output backup remains at: '+$backupPath)}
-        }
-        return $expectedHash
-    } catch {
-        $commitError = $_.Exception.Message
-        if ($backupPath -and (Test-Path -LiteralPath $backupPath)) {
-            try {
-                if (Test-Path -LiteralPath $FinalPath) {
-                    if (-not $installed) {throw 'A different file appeared at the destination; it was left alone.'}
-                    # Return only an installed output to staging. Never delete a
-                    # destination merely because an attempted install failed.
-                    $script:PreservedZXWorkPath=$WorkPath
-                    [IO.File]::Move($FinalPath,$WorkPath)
-                }
-                [IO.File]::Move($backupPath, $FinalPath)
-            } catch {
-                throw ("New {0} install failed and old output restore also failed. Backup kept at: {1}. Commit: {2}. Restore: {3}" -f $Kind, $backupPath, $commitError, $_.Exception.Message)
-            }
-            throw ("New {0} install failed; previous output was restored. Unverified output kept at: {1}. {2}" -f $Kind, $WorkPath, $commitError)
-        }
-        if ($installed -and (Test-Path -LiteralPath $FinalPath)) {
-            $script:PreservedZXWorkPath=$WorkPath
-            try {[IO.File]::Move($FinalPath,$WorkPath)}
-            catch {throw ("New {0} install failed and incomplete output could not be returned to staging: {1}. Commit: {2}. Cleanup: {3}" -f $Kind,$FinalPath,$commitError,$_.Exception.Message)}
-        }
-        throw ("New {0} install failed; no previous destination file was changed. Unverified output kept at: {1}. {2}" -f $Kind, $WorkPath, $commitError)
-    }
-    } finally {foreach ($parentLock in $parentLocks) {$parentLock.Dispose()}}
-}
-
-function Commit-DskSafely([string]$WorkPath, [string]$FinalPath) {
-    if (-not (Test-DSK $WorkPath)) { throw 'Refusing to install output because DSK validation failed.' }
-    Commit-FileSafely $WorkPath $FinalPath 'DSK'
-}
-
-function Commit-ZipSafely([string]$WorkPath, [string]$FinalPath, [string]$ExpectedEntryName) {
-    if (-not (Test-ZipDskPackage $WorkPath $ExpectedEntryName)) { throw 'Refusing to install output because ZIP validation failed.' }
-    Commit-FileSafely $WorkPath $FinalPath 'ZIP'
-}
-
 function Invoke-HxCOnce([string]$EnginePath, [string]$InputPath, [string]$OutputPath) {
     if (Test-Path -LiteralPath $OutputPath) {Remove-SourcePolicyOwnedPath -Path $OutputPath -Root ([IO.Path]::GetDirectoryName($InputPath))}
     $arguments = ('-verbose -finput:"{0}" -conv:AMSTRADCPC_DSK -foutput:"{1}"' -f $InputPath, $OutputPath)
@@ -1058,290 +773,11 @@ function Get-UsefulFailureSummary([string]$Detail) {
     return $summary
 }
 
-function Ask-Overwrite([string]$RelativeOutput) {
-    $warnings=@('Skipped originals stay in SRC.')
-    $choices=@(Get-OverwriteChoiceRows)
-    $invalid=$false
-    while ($true) {
-        $shownWarnings=$warnings
-        if ($invalid) {$shownWarnings+='Please enter Y, N, A or S.'}
-        $choice=ConvertFrom-OverwriteAnswer (Read-OverwriteChoice 'ZX Spectrum / existing output' @($RelativeOutput) $shownWarnings $choices (Get-OverwriteInputPrompt))
-        if ($choice) {return $choice}
-        $invalid=$true
-    }
-}
-
-function Show-Summary {
-    $script:Processed=$script:Total; $script:Ok=$script:Converted
-    $sourceSummary=Get-SourcePolicySummary $script:SourcePlan
-    Show-ClosingPanel -RemovalFailures $sourceSummary.Failed
-    Write-Host ''
-    Write-Host '  +---------------------- RESULTS ----------------------+' -ForegroundColor Cyan
-    Write-Host ('  Converted : {0}' -f $script:Converted) -ForegroundColor Cyan
-    Write-Host ('  Skipped   : {0}' -f $script:Skipped) -ForegroundColor Yellow
-    Write-Host ('  Failed    : {0}' -f $script:Failed) -ForegroundColor Magenta
-    Write-Host ('  Total     : {0}' -f $script:Total) -ForegroundColor White
-    if (-not (Test-ApplicationWorker)) {
-        Write-Host ('  Source policy: '+$SourcePolicy.ToUpperInvariant())
-        Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
-    }
-    Write-LogFile ('Originals: {0} removed; {1} kept; {2} removal failures' -f $sourceSummary.Removed,$sourceSummary.Kept,$sourceSummary.Failed)
-    Write-Host '  +-----------------------------------------------------+' -ForegroundColor Cyan
-    if (-not (Test-ApplicationWorker)) {Write-Host ('  Log: ' + $script:LogPath) -ForegroundColor DarkGray} else {Write-Host '  Waiting for independent verification and publication.'}
-    Write-Host ''
-    Write-LogFile ''
-    Write-LogFile ('Converted: ' + $script:Converted)
-    Write-LogFile ('Skipped: ' + $script:Skipped)
-    Write-LogFile ('Failed: ' + $script:Failed)
-    Write-LogFile ('Total: ' + $script:Total)
-}
-
 function Main {
+    if (-not $Storage) {throw 'Output choice is missing. Choose ZIPs, folders or loose files.'}
     Write-Banner
-    if ($Storage) {Start-Log;return (Invoke-ZXExplicitOutputs $Root $Storage $SourcePolicy $Existing)}
-    if ($Format -eq 'Ask') {throw 'Output choice is missing. Start OptiMiyoo again and choose ZIPs, folders or loose files.'}
-    $script:OutputMode=$Format
-    $script:SourcePlan=New-SourcePolicyPlan $script:SourceRoot $SourcePolicy
-    $script:Clock.Restart()
     Start-Log
-    if (Test-ApplicationWorker) {Write-Status 'INFO' 'Working on staged copies. Originals are handled after verification.'}
-    else {Write-Status 'INFO' ('Source policy: '+$SourcePolicy.ToUpperInvariant()+'. Skipped/failed inputs stay in SRC.')}
-    if ($script:OutputMode -eq 'ZipDSK') {
-        Write-Status 'INFO' 'Output mode: one ZIP per DSK.'
-    } else {
-        Write-Status 'INFO' 'Output mode: loose DSK files.'
-    }
-
-    Write-Status 'INFO' ('Scanning ' + $script:SourceRoot)
-    Show-ConversionStart 'ZX Spectrum / IPF -> DSK'
-    $items = @(Get-ConversionItems)
-    $sourceIndex=0
-    $sourceTotal=$items.Count+$script:ScanFailures.Count+$script:UntouchedSources.Count
-    Show-PreparationProgress 'Checking source dependencies' 'Recording input ownership.' 0 $sourceTotal 'inputs'
-    foreach ($item in $items) {
-        $item | Add-Member -NotePropertyName SourceId -NotePropertyValue ([string]$sourceIndex)
-        Add-SourcePolicyJob $script:SourcePlan ([string]$sourceIndex) @($item.InputPath) $item.SourceBlockReason
-        $sourceIndex++
-        Show-PreparationProgress 'Checking source dependencies' $item.InputPath $sourceIndex $sourceTotal 'inputs'
-    }
-    foreach ($item in $script:ScanFailures) {
-        Add-SourcePolicyJob $script:SourcePlan ('scan-'+$sourceIndex) @($item.InputPath) 'Unreadable ZIP; original kept.'
-        $sourceIndex++
-        Show-PreparationProgress 'Checking source dependencies' $item.InputPath $sourceIndex $sourceTotal 'inputs'
-    }
-    foreach ($item in $script:UntouchedSources) {
-        Add-SourcePolicyJob $script:SourcePlan ('untouched-'+$sourceIndex) @($item.InputPath) $item.Reason
-        $sourceIndex++
-        Show-PreparationProgress 'Checking source dependencies' $item.InputPath $sourceIndex $sourceTotal 'inputs'
-    }
-
-    foreach ($scanFailure in $script:ScanFailures) {
-        $script:Failed++
-        Write-Status 'FAIL' ($scanFailure.DisplayName + ' | ZIP could not be read: ' + $scanFailure.Error)
-    }
-
-    if ($items.Count -eq 0 -and $script:ScanFailures.Count -gt 0) {
-        $script:Total=$script:ScanFailures.Count
-        Write-Status 'WARN' 'No readable disk inputs remain. The conversion engine was not started.'
-        Show-Summary
-        return 1
-    }
-    if ($items.Count -eq 0 -and $script:ScanFailures.Count -eq 0) {
-        Write-Status 'WARN' 'No IPF or DSK files were found, loose or inside ZIP archives.'
-        Write-Status 'INFO' 'Put your files in SRC and run the BAT again.'
-        $script:Total = 0
-        Show-Summary
-        return 0
-    }
-
-    $collisions = @(Get-OutputCollisions $items)
-    Complete-PreparationProgress
-    if ($collisions.Count -gt 0) {
-        Write-Status 'FAIL' 'Two or more source images would map to the same destination output. Nothing was converted.'
-        foreach ($collision in $collisions) {
-            Write-Status 'FAIL' ('Collision: ' + $collision.RelativeOutput + ' <= [' + $collision.First + '] / [' + $collision.Second + ']')
-        }
-        $script:Failed += $items.Count
-        $script:Total = $items.Count + $script:ScanFailures.Count
-        Show-Summary
-        return 2
-    }
-
-    $script:Total = $items.Count + $script:ScanFailures.Count
-    $looseCount = @($items | Where-Object { $_.Type -eq 'Loose' }).Count
-    $zipCount = @($items | Where-Object { $_.Type -eq 'Zip' }).Count
-    Write-Status 'INFO' ("Found {0} disk image(s): {1} loose, {2} inside ZIP(s)." -f $items.Count, $looseCount, $zipCount)
-    if ($script:OutputMode -eq 'ZipDSK') {
-        Write-Status 'INFO' 'ZIP inputs are extracted temporarily; each validated DSK is re-packed as its own ZIP in DST.'
-    } else {
-        Write-Status 'INFO' 'ZIP inputs are extracted temporarily; DST receives loose .DSK files.'
-    }
-
-    $probeItems=@($items | Where-Object {$_.Converter -eq 'HxC'})
-    if ($script:OverwriteMode -eq 'SkipAll') {
-        $probeItems=@($probeItems | Where-Object {
-            -not (Test-Path -LiteralPath (Join-Path $script:DestinationRoot (Get-FinalRelativeOutput $_.RelativeOutput)))
-        })
-    }
-    if ($probeItems.Count -gt 0) {
-        if (-not (Ensure-HxC)) {
-            Write-Status 'FAIL' 'Bundled HxC engine could not start. See the full log.'
-            $script:Failed += $probeItems.Count
-            $script:Skipped += $items.Count-$probeItems.Count
-            Show-Summary
-            return 3
-        }
-
-        $capsReady=$false
-        foreach ($probeItem in $probeItems) {
-            try {
-                if (Ensure-CapsIPFReady $probeItem) {$capsReady=$true; break}
-                if ($script:CapsPreflightGlobalFailure) {break}
-            } catch {
-                Write-Status 'WARN' ($probeItem.DisplayName+' | preflight input failed: '+$_.Exception.Message)
-                Write-Diagnostic ('PREFLIGHT EXCEPTION: '+($_ | Out-String))
-            }
-        }
-        if (-not $capsReady) {
-            Write-Status 'FAIL' 'No input passed CAPS/IPF preflight. Originals were kept.'
-            $script:Failed += $probeItems.Count
-            $script:Skipped += $items.Count-$probeItems.Count
-            Show-Summary
-            return 4
-        }
-    }
-
-    $index = 0
-    foreach ($item in $items) {
-        Set-ApplicationCurrentJob $item.DisplayName
-        $index++
-        $tempRoot=$null; $workOutPath=$null; $workZipPath=$null; $sourceLease=$null
-        $script:PreservedZXWorkPath=$null
-        try {
-            $relativeDsk = [string]$item.RelativeOutput
-            $relativeOutput = Get-FinalRelativeOutput $relativeDsk
-            $outPath = Join-Path $script:DestinationRoot $relativeOutput
-            Assert-PlainOutputParents $outPath $Root
-            if ((Test-Path -LiteralPath $outPath) -and ((Get-Item -LiteralPath $outPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Destination is a link; output left alone.'}
-            $outDir = Split-Path -Parent $outPath
-            if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
-
-            $script:CurrentZXItem=$item.DisplayName; $script:UiGame=$item.DisplayName
-            Write-Event 'GAME' ('{0}/{1} | {2}' -f $index,$items.Count,$item.DisplayName)
-
-            if (Test-Path -LiteralPath $outPath) {
-                $choice = $script:OverwriteMode
-                if ($choice -eq 'Ask') { $choice = Ask-Overwrite $relativeOutput }
-                if ($choice -eq 'OverwriteAll') { $script:OverwriteMode = 'OverwriteAll'; $choice = 'Overwrite' }
-                if ($choice -eq 'SkipAll') { $script:OverwriteMode = 'SkipAll'; $choice = 'Skip' }
-                if ($choice -eq 'Skip') {
-                    $script:Skipped++
-                    Write-Status 'SKIP' ($item.DisplayName + ' -> output already exists')
-                    continue
-                }
-            }
-
-            $inputPath = [string]$item.InputPath
-            $tempRoot = $null
-            $workOutPath = Join-Path $outDir ('.zxconv_' + [Guid]::NewGuid().ToString('N') + '.dsk')
-            $workZipPath = $null
-            $sourceHashes=@{}
-            if ($SourcePolicy -eq 'Remove') {
-                # Keep one pinned read handle across hashing and staging, so a
-                # source cannot be swapped out and restored between those reads.
-                $sourceLease=Open-SourcePolicyReadLease $item.InputPath $script:SourceRoot
-                Assert-SourcePolicyPath $item.InputPath $script:SourceRoot
-                $sourceHash=Get-SourcePolicyHash $item.InputPath
-                if ($item.Type -eq 'Zip' -and $sourceHash -ne $item.SourceHash) {throw 'Source ZIP changed since scanning; original kept.'}
-                $sourceHashes[[IO.Path]::GetFullPath($item.InputPath)]=$sourceHash
-            }
-            if ($item.Type -eq 'Zip') {
-                Write-Status 'INFO' ('Extracting temporarily: ' + $item.DisplayName)
-                Show-Stage 0 'Preparing disk from ZIP' $item.DisplayName
-                $expanded = Expand-OneZipIPF $item.InputPath $item.EntryName
-            } else {
-                Write-Status 'INFO' ('Staging source read-only: ' + $item.DisplayName)
-                Show-Stage 0 'Preparing a read-only disk copy' $item.DisplayName
-                $expanded = Stage-LooseIPF $item.InputPath
-            }
-            $inputPath = $expanded.Path
-            $tempRoot = $expanded.TempRoot
-            if ($SourcePolicy -eq 'Remove') {
-                if ((Get-SourcePolicyHash $item.InputPath) -ne $sourceHash) {throw 'Source changed during staging; original kept.'}
-                if ($item.Type -eq 'Loose' -and (Get-SourcePolicyHash $inputPath) -ne $sourceHash) {throw 'Staged disk differs from source; original kept.'}
-                $sourceLease.Dispose(); $sourceLease=$null
-            }
-
-            Write-Diagnostic ('##### SOURCE ITEM: ' + $item.DisplayName + ' #####')
-            Write-Diagnostic ('Source container: ' + $item.InputPath)
-            if ($item.EntryName) { Write-Diagnostic ('ZIP entry: ' + $item.EntryName) }
-            Write-Diagnostic ('Final destination: ' + $outPath)
-            Write-Diagnostic ('Output mode: ' + $script:OutputMode)
-            Write-Diagnostic ('Transactional DSK work output: ' + $workOutPath)
-
-            # Keep native output and unchanged DSK bytes on the same verified
-            # transaction path. Native tools never receive the final destination.
-            if ($item.Converter -eq 'HxC') {
-                $engineOutPath=Join-Path $tempRoot 'disk.dsk'
-                $result=Invoke-HxCConversion $inputPath $engineOutPath
-            } else {
-                if (-not (Test-DSK $inputPath)) {throw 'Existing DSK image is invalid; original kept.'}
-                $engineOutPath=$inputPath
-                $result=[pscustomobject]@{Success=$true;NonZeroExit=$false}
-            }
-            if ($result.Success) {
-                [IO.File]::Copy($engineOutPath,$workOutPath)
-                if ((Get-SourcePolicyHash $engineOutPath) -ne (Get-SourcePolicyHash $workOutPath)) {
-                    throw 'Staged DSK differs from verified input; original kept.'
-                }
-                if ($script:OutputMode -eq 'ZipDSK') {
-                    $entryName = [IO.Path]::GetFileName($relativeDsk)
-                    $workZipPath = Join-Path $outDir ('.zxconv_' + [Guid]::NewGuid().ToString('N') + '.zip')
-                    Show-Stage 0 'Packaging verified DSK as ZIP' $relativeOutput
-                    New-DskZipPackage $workOutPath $workZipPath $entryName
-                    Show-Stage 0 'Verifying and installing ZIP output' $relativeOutput
-                    $outputHash=Commit-ZipSafely $workZipPath $outPath $entryName
-                    if (Test-Path -LiteralPath $workOutPath) { Remove-ZXWorkPath $workOutPath $script:DestinationRoot }
-                } else {
-                    Show-Stage 0 'Verifying and installing DSK output' $relativeOutput
-                    $outputHash=Commit-DskSafely $workOutPath $outPath
-                }
-                Complete-SourcePolicyJob $script:SourcePlan $item.SourceId $sourceHashes @([pscustomobject]@{Destination=$outPath;Folder=$false;Hash=$outputHash})
-                Complete-ApplicationCurrentJob
-                $script:Converted++
-                $note = ''
-                if ($result.PSObject.Properties['UsedFallback'] -and $result.UsedFallback) { $note = ' (fallback engine succeeded)' }
-                elseif ($result.NonZeroExit) { $note = ' (valid DSK; HxC returned a warning exit code)' }
-                Write-Status 'OK' ($item.DisplayName + ' -> ' + $relativeOutput + $note)
-            } else {
-                $script:Failed++
-                if (Test-Path -LiteralPath $workOutPath) { Remove-ZXWorkPath $workOutPath $script:DestinationRoot }
-                Write-Status 'FAIL' ($item.DisplayName + ' | ' + (Get-UsefulFailureSummary $result.Detail))
-            }
-        } catch {
-            $script:Failed++
-            if ($workOutPath -and (Test-Path -LiteralPath $workOutPath)) { Remove-ZXWorkPath $workOutPath $script:DestinationRoot }
-            if ($workZipPath -and (Test-Path -LiteralPath $workZipPath)) { Remove-ZXWorkPath $workZipPath $script:DestinationRoot }
-            Write-Status 'FAIL' ($item.DisplayName + ' | processing error: ' + ($_.Exception.Message -replace '[\r\n]+', ' '))
-            Write-Diagnostic ('PROCESSING EXCEPTION: ' + ($_ | Out-String))
-        } finally {
-            if ($sourceLease) {$sourceLease.Dispose()}
-            if ($tempRoot -and (Test-Path -LiteralPath $tempRoot)) {
-                Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())
-            }
-            if ($workOutPath -and (Test-Path -LiteralPath $workOutPath)) {
-                Remove-ZXWorkPath $workOutPath $script:DestinationRoot
-            }
-            if ($workZipPath -and (Test-Path -LiteralPath $workZipPath)) {
-                Remove-ZXWorkPath $workZipPath $script:DestinationRoot
-            }
-        }
-    }
-
-    Invoke-SourcePolicyCleanup $script:SourcePlan {param($kind,$message) Write-Status $kind $message} {param($stage,$detail,$done,$total) Show-SourceCleanupProgress $stage $detail $done $total}
-    Show-Summary
-    if ($script:Failed -gt 0 -or (Get-SourcePolicySummary $script:SourcePlan).Failed -gt 0 -or $script:ReportProblem) { return 1 }
-    return 0
+    return (Invoke-ZXExplicitOutputs $Root $Storage $SourcePolicy $Existing)
 }
 
 try {
@@ -1353,9 +789,10 @@ try {
 } catch {
     try {
         if (-not $script:LogPath) { Start-Log }
+        $script:Failed++
         Write-Status 'FAIL' ('Fatal error: ' + $_.Exception.Message)
         Write-Diagnostic ('FATAL EXCEPTION: ' + ($_ | Out-String))
-        Show-Summary
+        Show-ClosingPanel
     } catch {}
     exit 99
 } finally {if ($script:LogWriter) {$script:LogWriter.Dispose()};Restore-Display}

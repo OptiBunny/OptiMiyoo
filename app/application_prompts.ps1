@@ -5,8 +5,7 @@
 
 function Get-ApplicationPromptTitle {
     param([Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
-          [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK')
+          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto')
     $systems=@{AMIGA='Amiga';COMMODORE='Commodore 64';PS='PlayStation';SEGACD='Sega CD';
         CPC='Amstrad CPC';MSX='MSX';VIC20='VIC-20';DOS='MS-DOS';ZXS='ZX Spectrum'}
     if($Storage -eq 'LegacyFolders' -and $Operation -ne 'C64'){throw 'Legacy folder storage is only valid for C64.'}
@@ -23,7 +22,7 @@ function Get-ApplicationPromptTitle {
         }
         'ZX' {
             if($System -and $System -cne 'ZXS'){throw 'Invalid ZX prompt system.'}
-            if($Storage -eq 'Auto'){$storageName='ZIP output';if($Format -eq 'LooseDSK'){$storageName='Loose DSK output'}}
+            if($Storage -notin 'Zip','Loose','Folders'){throw 'Choose ZIPs, folders or loose files for ZX conversion.'}
             return ('ZX Spectrum / '+$storageName)
         }
         'SD' {
@@ -46,9 +45,8 @@ function Get-ApplicationPromptModel {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
-          [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
-    $title=Get-ApplicationPromptTitle $Operation $System $Storage $Format
+    $title=Get-ApplicationPromptTitle $Operation $System $Storage
     if($Kind -eq 'SourcePolicy' -and $Operation -eq 'SD'){throw 'SD setup cannot remove source media.'}
     if($Kind -ne 'Overwrite' -and $ConflictPaths.Count){throw 'Unexpected conflict paths in a policy prompt.'}
     if($Kind -eq 'SourcePolicy') {
@@ -133,13 +131,12 @@ function Invoke-ApplicationPolicyPrompt {
           [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Auto','Zip','Loose','Folders','LegacyFolders')][string]$Storage='Auto',
-          [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
           [switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     # Validate before taking terminal ownership. Callers must resolve conflict
     # capabilities through the host broker; never pass child-supplied filenames.
-    $parameters=@{Kind=$Kind;Operation=$Operation;System=$System;Storage=$Storage;Format=$Format;ConflictPaths=$ConflictPaths;Folder=$Folder}
+    $parameters=@{Kind=$Kind;Operation=$Operation;System=$System;Storage=$Storage;ConflictPaths=$ConflictPaths;Folder=$Folder}
     $model=Get-ApplicationPromptModel @parameters
     $paused=$false;$display=$false;$result=$null;$previousEffect=$script:DisplayEffect
     try {
@@ -163,7 +160,7 @@ function Invoke-ApplicationPolicyPrompt {
                 $choice=ConvertFrom-OverwriteAnswer $answer
             }
             if($choice) {
-                $result=[pscustomobject]@{Kind=$Kind;Answer=$answer;Choice=$choice;SourcePolicy=$policy;Storage=$selectedStorage;Format=$Format;Navigation=$navigation}
+                $result=[pscustomobject]@{Kind=$Kind;Answer=$answer;Choice=$choice;SourcePolicy=$policy;Storage=$selectedStorage;Navigation=$navigation}
                 break
             }
             $invalid=$true

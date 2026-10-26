@@ -28,13 +28,13 @@ function ConvertFrom-ApplicationPayload([string]$Json) {
 function Get-ApplicationSelection {
     param($Payload)
     $operation=[string]$Payload.Operation;$system=[string]$Payload.System
-    $storage=[string]$Payload.Storage;$format=[string]$Payload.Format
-    if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Auto','Zip','Loose','Folders','LegacyFolders' -or $format -notin 'LooseDSK','ZipDSK') {throw 'Unknown application selection.'}
+    $storage=[string]$Payload.Storage
+    if ($operation -notin 'Playlist','C64','ZX' -or $storage -notin 'Auto','Zip','Loose','Folders','LegacyFolders') {throw 'Unknown application selection.'}
     if ($operation -eq 'Playlist' -and $system -notin 'AMIGA','COMMODORE','PS','SEGACD','CPC','MSX','VIC20','DOS','ZXS') {throw 'Unknown playlist system.'}
     if ($operation -eq 'C64') {$system='COMMODORE'}
     if ($operation -eq 'ZX') {$system='ZXS'}
-    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $storage -Format $format
-    return @{Operation=$operation;System=$system;Storage=$output.Storage;Format=$output.Format}
+    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $storage
+    return @{Operation=$operation;System=$system;Storage=$output.Storage}
 }
 
 function Invoke-ApplicationHostRequest {
@@ -53,7 +53,7 @@ function Invoke-ApplicationHostRequest {
         'Batch.Begin' {
             if (-not $State.Grant -or $State.Completed) {throw 'Select the batch policy in the trusted prompt first.'}
             $selection=Get-ApplicationSelection $payload
-            foreach ($key in 'Operation','System','Storage','Format') {if ($selection[$key] -cne $State.Grant[$key]) {throw 'Batch does not match the approved selection.'}}
+            foreach ($key in 'Operation','System','Storage') {if ($selection[$key] -cne $State.Grant[$key]) {throw 'Batch does not match the approved selection.'}}
             $selection.SourcePolicy=$State.Grant.SourcePolicy;$State.Grant=$null
             $State.BatchView=Start-ApplicationBrokerBatch -Session $State.Broker @selection -Existing $State.Existing
             return @{BatchId=$State.BatchView.BatchId;WorkRoot=$State.BatchView.WorkRoot;Operation=$State.BatchView.Operation;JobCount=$State.BatchView.Jobs.Count}
@@ -79,7 +79,7 @@ function Invoke-ApplicationHostRequest {
             $conflict=Get-ApplicationBrokerConflict $State.Broker $batch.BatchId ([string]$payload.ConflictId)
             $choice=$conflict.Decision
             if ($choice -eq 'Pending') {
-                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -Format $batch.Format -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
+                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
                 $choice=$prompt.Choice
                 Set-ApplicationBrokerOverwrite $State.Broker $batch.BatchId $conflict.ConflictId $choice
             }
@@ -211,13 +211,13 @@ function Invoke-ApplicationHost {
     $originalArguments=$Arguments.Clone()
     $menu=($Entry -eq 'Playlist' -and -not $Arguments.System -and -not $Arguments.C64Convert -and -not $Arguments.ZXConvert -and -not $Arguments.PrepareOnion -and -not $Arguments.Preview)
     if ($Arguments.C64Convert) {$Entry='C64';$Arguments.Mode='Keep';if ($Arguments.C64Mode) {$Arguments.Mode=$Arguments.C64Mode}}
-    elseif ($Arguments.ZXConvert) {$Entry='ZX';$Arguments.Format='Ask';if ($Arguments.ZXFormat) {$Arguments.Format=$Arguments.ZXFormat}}
+    elseif ($Arguments.ZXConvert) {$Entry='ZX'}
     elseif ($Arguments.PrepareOnion) {$Entry='SD'}
     Initialize-ApplicationSession
     $startPage='Main'
     if ($Arguments.StartPage) {$startPage=[string]$Arguments.StartPage}
     $explicitStorage=($Arguments.ContainsKey('Storage') -and $Arguments.Storage -in 'Zip','Loose','Folders')
-    if (-not $explicitStorage -and (($Entry -eq 'C64' -and -not $Arguments.Mode) -or ($Entry -eq 'ZX' -and (-not $Arguments.Format -or $Arguments.Format -eq 'Ask')))) {
+    if (-not $explicitStorage -and (($Entry -eq 'C64' -and -not $Arguments.Mode) -or ($Entry -eq 'ZX'))) {
         $startPage=$Entry;$Entry='Playlist';$menu=$true
     }
     $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
@@ -243,13 +243,13 @@ function Invoke-ApplicationHost {
             if ($sd) {$worker.OnionRoot=$sd.StagedRoot}
             $batch=$null
             if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
-                $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -Format $Arguments.Format -Mode $Arguments.Mode
-                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;Format=$output.Format})
+                $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -Mode $Arguments.Mode
+                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage})
                 $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove' -or ($Entry -eq 'C64' -and $Arguments.Mode -eq 'Remove' -and -not $Arguments.ContainsKey('SourcePolicy'))) {$policy='Remove'}
                 $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
                 if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.Storage=$selection.Storage;$worker.NoPause=$true}
                 elseif ($Entry -eq 'C64') {$worker.Mode=$(if ($selection.Storage -eq 'LegacyFolders') {'Folders'}else{'Keep'});$worker.NoPause=$true}
-                else {$worker.Format=$selection.Format;[void]$worker.Remove('NoPause');[void]$worker.Remove('Preview')}
+                else {[void]$worker.Remove('NoPause');[void]$worker.Remove('Preview')}
                 if ($Entry -in 'C64','ZX' -and $selection.Storage -in 'Zip','Loose','Folders') {$worker.Storage=$selection.Storage}
             }
             if ($Entry -eq 'SD') {

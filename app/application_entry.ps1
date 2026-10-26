@@ -27,29 +27,24 @@ function Enter-ApplicationHost {
 
 function Resolve-ApplicationOutputSelection {
     param([ValidateSet('Playlist','C64','ZX')][string]$Operation,
-          [string]$Storage,[string]$Format,[string]$Mode)
+          [string]$Storage,[string]$Mode)
     if ($Storage -and $Storage -notin 'Auto','Zip','Loose','Folders','LegacyFolders') {throw 'Unknown output storage.'}
-    if ($Format -and $Format -notin 'Ask','LooseDSK','ZipDSK') {throw 'Unknown output format.'}
     if ($Mode -and $Mode -notin 'Keep','Remove','Folders') {throw 'Unknown C64 mode.'}
     if ($Storage) {$Storage=@{Auto='Auto';Zip='Zip';Loose='Loose';Folders='Folders';LegacyFolders='LegacyFolders'}[$Storage]}
-    if ($Format) {$Format=@{Ask='Ask';LooseDSK='LooseDSK';ZipDSK='ZipDSK'}[$Format]}
     if ($Storage -eq 'LegacyFolders' -and $Operation -ne 'C64') {throw 'Legacy folder storage is only valid for C64.'}
-    if (-not $Storage) {
+    if ($Operation -eq 'ZX' -and (-not $Storage -or $Storage -eq 'Auto')) {$Storage='Folders'}
+    elseif (-not $Storage) {
         if ($Operation -eq 'Playlist') {$Storage='Zip'}
-        elseif ($Operation -eq 'C64' -and $Mode -eq 'Folders') {$Storage='LegacyFolders'}
+        elseif ($Mode -eq 'Folders') {$Storage='LegacyFolders'}
         else {$Storage='Auto'}
     }
-    if ($Storage -eq 'Zip') {$Format='ZipDSK'}
-    elseif ($Storage -in 'Loose','Folders','LegacyFolders') {$Format='LooseDSK'}
-    elseif ($Operation -ne 'ZX') {$Format='LooseDSK'}
-    elseif (-not $Format -or $Format -eq 'Ask') {$Format='ZipDSK'}
-    return @{Storage=$Storage;Format=$Format}
+    return @{Storage=$Storage}
 }
 
 function Read-ApplicationSourcePolicy {
-    param([string]$Operation,[string]$System,[string]$Storage='Zip',[string]$Format='ZipDSK')
-    $output=Resolve-ApplicationOutputSelection -Operation $Operation -Storage $Storage -Format $Format
-    $reply=Invoke-ApplicationRpc -Operation Policy.Source -Payload @{Operation=$Operation;System=$System;Storage=$output.Storage;Format=$output.Format}
+    param([string]$Operation,[string]$System,[string]$Storage='Zip')
+    $output=Resolve-ApplicationOutputSelection -Operation $Operation -Storage $Storage
+    $reply=Invoke-ApplicationRpc -Operation Policy.Source -Payload @{Operation=$Operation;System=$System;Storage=$output.Storage}
     return [string]$reply.Choice
 }
 
@@ -91,8 +86,8 @@ function Set-ApplicationBatchContext($Batch) {
 function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     $name=[IO.Path]::GetFileName($Path)
     $operation=switch ($name) {'make_playlists.ps1' {'Playlist'} 'convert_c64.ps1' {'C64'} 'convert_zx.ps1' {'ZX'} default {throw 'Unknown application worker.'}}
-    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $Arguments.Storage -Format $Arguments.Format -Mode $Arguments.Mode
-    $batch=Invoke-ApplicationRpc -Operation Batch.Begin -Payload @{Operation=$operation;System=$Arguments.System;Storage=$output.Storage;Format=$output.Format}
+    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $Arguments.Storage -Mode $Arguments.Mode
+    $batch=Invoke-ApplicationRpc -Operation Batch.Begin -Payload @{Operation=$operation;System=$Arguments.System;Storage=$output.Storage}
     $jobs=New-Object 'System.Collections.Generic.List[object]';$offset=0
     do {
         $page=Invoke-ApplicationRpc -Operation Batch.Jobs -Payload @{BatchId=$batch.BatchId;Offset=$offset}
@@ -107,7 +102,6 @@ function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     if ($operation -eq 'Playlist' -or $output.Storage -in 'Zip','Loose','Folders') {$Arguments.Storage=$output.Storage}
     else {[void]$Arguments.Remove('Storage')}
     if ($operation -eq 'C64') {$Arguments.Mode=$(if ($output.Storage -eq 'LegacyFolders') {'Folders'}else{'Keep'})}
-    if ($operation -eq 'ZX') {$Arguments.Format=$output.Format}
     Restore-Display
     try {& $Path @Arguments | Out-Host;$code=$LASTEXITCODE}
     catch {$code=1;Write-Host ('  ERROR: '+(ConvertTo-SafeExternalText $_.Exception.Message))}

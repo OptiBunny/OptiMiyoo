@@ -344,8 +344,8 @@ function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
 function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
           [string]$System,[ValidateSet('Auto','LegacyFolders','Zip','Loose','Folders')][string]$Storage='Auto',
-          [ValidateSet('LooseDSK','ZipDSK')][string]$Format='ZipDSK',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask')
+    if($Operation -eq 'ZX' -and $Storage -notin 'Zip','Loose','Folders'){throw 'Choose ZIPs, folders or loose files for ZX conversion.'}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
@@ -467,30 +467,6 @@ function Start-ApplicationBrokerBatch {
             } catch {$job.BlockedReason=$_.Exception.Message}
             $jobs.Add($job)
         }
-    } else {
-        $System='ZXS';$rawResult=& $module {param($src,$policy,$format)$script:SourceRoot=$src;$script:SourcePolicy=$policy;$script:OutputMode=$format;$items=@(Get-ConversionItems);[pscustomobject]@{Items=$items;Failures=$script:ScanFailures.ToArray();Untouched=$script:UntouchedSources.ToArray();Collisions=@(Get-OutputCollisions $items)}} $src $SourcePolicy $Format
-        if(@($rawResult.Items).Count+@($rawResult.Failures).Count+@($rawResult.Untouched).Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
-        $archives=@{}
-        foreach($sourceJob in $rawResult.Items){
-            $relative=$sourceJob.RelativeOutput.Replace('\','/');if($Format -eq 'ZipDSK'){$relative=[IO.Path]::ChangeExtension($relative,'.zip').Replace('\','/')}
-            Assert-ApplicationBrokerRelative $relative
-            $plan=[pscustomobject]@{Destination=(Join-Path $dst $relative);RelativeData=$relative;Folder=$false}
-            $job=New-ApplicationBrokerJob $sourceJob.DisplayName $sourceJob $plan;$job.Paths=@($sourceJob.InputPath);$job.SourceBlockReason=$sourceJob.SourceBlockReason
-            try {
-                $key=Get-ApplicationBrokerRelative $sourceJob.InputPath $src
-                $input=$state.SourceSnapshot.Files[$key]
-                if($sourceJob.Type -eq 'Zip'){if(-not $archives.ContainsKey($sourceJob.InputPath)){$archives[$sourceJob.InputPath]=Get-ApplicationBrokerArchive $module $sourceJob.InputPath};$input=$archives[$sourceJob.InputPath][$sourceJob.EntryName]}
-                if(-not $input){throw 'Disk input was not present in the frozen source manifest.'}
-                $name=[IO.Path]::GetFileName($sourceJob.RelativeOutput)
-                Add-ApplicationBrokerExpectedFile $job.Files $name $input
-                if($sourceJob.Converter){$job.Files[$name].Converter=$sourceJob.Converter;$job.Files[$name].Hash='';$job.Files[$name].Length=-1L}
-                $job.Writes=@([pscustomobject]@{Destination=$plan.Destination;Folder=$false});$job.DataKind='File';if($Format -eq 'ZipDSK'){$job.DataKind='Zip'}
-                if(Test-Path -LiteralPath $plan.Destination){$job.Conflicts=@($job.Writes)}
-                if(@($rawResult.Collisions | Where-Object {$_.First -eq $sourceJob.DisplayName -or $_.Second -eq $sourceJob.DisplayName}).Count){throw 'Several disk inputs share one output destination.'}
-            } catch {$job.BlockedReason=$_.Exception.Message}
-            $jobs.Add($job)
-        }
-        foreach($skipped in @($rawResult.Failures)+@($rawResult.Untouched)){$job=New-ApplicationBrokerJob (Get-ApplicationBrokerRelative $skipped.InputPath $src) $skipped $null;$job.Paths=@($skipped.InputPath);$job.BlockedReason='Input was not converted.';if($skipped.PSObject.Properties['Reason']){$job.BlockedReason=$skipped.Reason;$job.BlockedResult='Skipped'}else{$job.BlockedReason=$skipped.Error};$job.SourceBlockReason=$job.BlockedReason;$jobs.Add($job)}
     }
     if($jobs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
     $sourcePlan=& $sourceModule {param($src,$policy)New-SourcePolicyPlan $src $policy} $src $SourcePolicy
@@ -504,9 +480,9 @@ function Start-ApplicationBrokerBatch {
     }
     Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
     Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
-    $batch=[pscustomobject]@{BatchId=[Guid]::NewGuid().ToString('N');WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;Format=$Format;SourcePolicy=$SourcePolicy;Existing=$Existing;Module=$module;SourceModule=$sourceModule;SourcePlan=$sourcePlan;Profile=$profile;Jobs=$jobMap;Conflicts=$conflicts;Completed=$false;OverwriteAll=''}
+    $batch=[pscustomobject]@{BatchId=[Guid]::NewGuid().ToString('N');WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SourcePolicy=$SourcePolicy;Existing=$Existing;Module=$module;SourceModule=$sourceModule;SourcePlan=$sourcePlan;Profile=$profile;Jobs=$jobMap;Conflicts=$conflicts;Completed=$false;OverwriteAll=''}
     $state.Batch=$batch
-    $view=[pscustomobject]@{BatchId=$batch.BatchId;WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;Format=$Format;SourcePolicy=$SourcePolicy;Existing=$Existing;Jobs=@($jobs | ForEach-Object {[pscustomobject]@{JobId=$_.JobId;SourceKey=$_.SourceKey;ConflictId=$_.ConflictId;BlockedReason=$_.BlockedReason}})}
+    $view=[pscustomobject]@{BatchId=$batch.BatchId;WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SourcePolicy=$SourcePolicy;Existing=$Existing;Jobs=@($jobs | ForEach-Object {[pscustomobject]@{JobId=$_.JobId;SourceKey=$_.SourceKey;ConflictId=$_.ConflictId;BlockedReason=$_.BlockedReason}})}
     $Session.ActiveBatch=$view
     return $view
     } finally {foreach($sourcePin in $sourcePins){$sourcePin.Dispose()}}
@@ -569,17 +545,7 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot)
         & $Batch.Module {param($group,$dst)Assert-ConversionGroupOwnership $group $dst} $Job.SourceJob $DestinationRoot
     } elseif($Batch.Operation -eq 'C64'){
         & $Batch.Module {param($job,$dst)Assert-C64OwnedOutputs $job.Plan $job.DiskNames $dst @($job.Files.Keys)} $Job $DestinationRoot
-    } else {
-        & $Batch.Module {param($job,$dst)
-            # Legacy ZX still writes one disk at a time, with the same output
-            # ownership checks as grouped converter batches.
-            $group=[pscustomobject]@{
-                Items=@($job.Files.Keys | ForEach-Object {[pscustomobject]@{Name=$_}})
-                Plan=[pscustomobject]@{DataWrites=$job.Writes;LooseFiles=($job.DataKind -eq 'File')}
-            }
-            Assert-ConversionGroupOwnership $group $dst
-        } $Job $DestinationRoot
-    }
+    } else {throw 'Unknown converter output storage.'}
 }
 
 function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
@@ -651,12 +617,6 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
                     $name=@($expected.Keys)[0];$actual[$name]=$copied
                 }
                 Assert-ApplicationBrokerManifest $expected $actual $Batch $ReceiptStore
-                # Grouped ZX outputs are byte-matched above to original DSK
-                # inputs or host-owned HxC receipts for validated conversions.
-                if($Batch.Operation -eq 'ZX' -and $Batch.Storage -notin 'Zip','Loose','Folders'){
-                    $valid=& $Batch.Module {param($path,$kind,$name)if($kind -eq 'Zip'){Test-ZipDskPackage $path $name}else{Test-DSK $path}} $stage $Job.DataKind @($Job.Files.Keys)[0]
-                    if(-not $valid){throw 'Converted DSK structure is invalid.'}
-                }
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$false;Hash=$copied.Hash})
             }
         }

@@ -622,7 +622,7 @@ function Get-GameMediaNames($Job,[ValidateSet('Zip','Loose','Folders')][string]$
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
-            if ($Storage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
+            if ($diskNames.Count -gt 1 -and $Storage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
         } finally {$archive.Dispose()}
     } else {
@@ -677,17 +677,25 @@ function Set-PlaylistOutputConflicts([object[]]$Jobs) {
 function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,$Media) {
     if ($Storage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage choice.'}
     $profile=$Job.Profile
+    $isMulti=$Media.DiskNames.Count -gt 1
+    # Output choices apply to hidden multi-disc media. Singles keep their input form.
+    if (-not $isMulti) {$Storage=if ($Job.Zip) {'Zip'} else {'Loose'}}
     $zipMode=$Storage -eq 'Zip'
     $looseFiles=$Storage -eq 'Loose'
-    $isMulti=$Media.DiskNames.Count -gt 1
     $hasPlaylist=$isMulti
     $dataFolder=$Storage -eq 'Folders'
     $relativeData=$Job.Stem
     if ($hasPlaylist) {$relativeData='.hidden/'+$Job.Stem}
     if ($zipMode) {$relativeData+='.zip'}
+    $sourcePrefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    if (-not $isMulti -and $Job.Zip) {
+        $sourceZip=[IO.Path]::GetFullPath($Job.Zip)
+        if (-not $sourceZip.StartsWith($sourcePrefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Source ZIP is outside SRC.'}
+        $relativeData=$sourceZip.Substring($sourcePrefix.Length).Replace('\','/')
+    }
     $flatBase=([string][IO.Path]::GetDirectoryName($Job.Stem.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     if ($flatBase) {$flatBase+='/'}
-    if ($isMulti) {$flatBase='.hidden/'+$flatBase}
+    $flatBase='.hidden/'+$flatBase
     $flatWrites=New-Object 'System.Collections.Generic.List[object]'
     $members=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in $Media.ContentNames) {
@@ -702,7 +710,28 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     $m3uPath=Join-Path $DestinationRoot ($Job.Stem+$profile.Playlist).Replace('/',[IO.Path]::DirectorySeparatorChar)
     if ($looseFiles) {
         if ($flatWrites.Count -eq 0) {throw 'No files were found for loose output.'}
-        $dataWrites=@($flatWrites.ToArray());$dataPath=$dataWrites[0].Destination
+        $dataWrites=@($flatWrites.ToArray())
+        if (-not $isMulti) {
+            # Keep visible single-game paths separate from historical hidden-media ownership.
+            $disk=$Job.Disks[0]
+            $memberPrefix=[IO.Path]::GetDirectoryName($disk.Path)+[IO.Path]::DirectorySeparatorChar
+            $sourceMembers=@{}
+            foreach ($source in @(Get-JobSourcePaths $Job)) {
+                $full=[IO.Path]::GetFullPath($source)
+                if (-not $full.StartsWith($sourcePrefix,[StringComparison]::OrdinalIgnoreCase) -or
+                    -not $full.StartsWith($memberPrefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Single-game source is outside its source folder.'}
+                $member=$full.Substring($memberPrefix.Length).Replace('\','/')
+                if ($full.Equals($disk.Path,[StringComparison]::OrdinalIgnoreCase)) {$member=$disk.Name}
+                $relative=$full.Substring($sourcePrefix.Length).Replace('\','/')
+                Assert-RelativeName $relative
+                $sourceMembers[$member]=$relative
+            }
+            $dataWrites=@(foreach ($write in $flatWrites) {
+                if (-not $sourceMembers.ContainsKey($write.MemberName)) {throw 'A single-game output has no matching original file.'}
+                [pscustomobject]@{Destination=(Join-Path $DestinationRoot $sourceMembers[$write.MemberName].Replace('/',[IO.Path]::DirectorySeparatorChar));Folder=$false;Role='Data';MemberName=$write.MemberName}
+            })
+        }
+        $dataPath=$dataWrites[0].Destination
         $relativeData=$dataPath.Substring($DestinationRoot.TrimEnd('\','/').Length+1).Replace('\','/')
     } else {
         $dataWrites=@([pscustomobject]@{Destination=$dataPath;Folder=$dataFolder;Role='Data';MemberName=$null})
@@ -746,7 +775,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         Stem=$Job.Stem;Root=$DestinationRoot;Writes=$writes;Retired=@();VisibleCandidates=$visible.ToArray()}
     # Only an owning playlist can authorize retirement of old loose media.
     # Unknown side files and outputs with changed names are left alone.
-    if (-not $looseFiles -and (Test-Path -LiteralPath $m3uPath -PathType Leaf)) {
+    if ((-not $looseFiles -or -not $isMulti) -and (Test-Path -LiteralPath $m3uPath -PathType Leaf)) {
         $owned=@{}
         try {$owned=Get-PlaylistOwnedMedia $m3uPath $Job.Stem $DestinationRoot $plan} catch {
             # Ownership is checked after an overwrite choice. Skip never needs
@@ -1167,7 +1196,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 Write-MenuLine ('  Tape swapping: '+$tapeFormats+$tapeLabel)
                 if (-not $tapeSupport.CanBuild) {Write-MenuLine ('  '+$tapeSupport.Reason)}
             }
-            Write-MenuLine '  Single media stays visible; playlists need 2+ images.'
+            Write-MenuLine '  Single games are copied unchanged.'
+            Write-MenuLine '  Choose how playlist media is stored in .hidden.'
             Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
             $defaultOutput='1'; if ($profile.Folder -in 'PS','CPC','MSX','ZXS') {$defaultOutput='2'}
             $zipNotice=Get-ZipOutputNotice $profile $support
@@ -1253,7 +1283,7 @@ try {
     Write-Host '  Existing outputs: Y / N / A / S. Skipping keeps the original.'
     Write-Host '  Single media stays visible in DST. Playlists require 2+ images.'
     Write-Host '  Working on staged copies. Originals are handled after verification.'
-    Write-Host ('  Output: '+$Storage+'.')
+    Write-Host ('  Playlist media storage: '+$Storage+'. Single games keep their original form.')
     Write-Host '  Support follows Onion defaults or the selected core on the supplied SD card.' -ForegroundColor Yellow
     Show-ConversionStart $System
     $jobs=New-Object 'System.Collections.Generic.List[object]'

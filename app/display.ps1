@@ -1183,34 +1183,34 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
     $scenes=@(
         @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB/NBZ -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
         @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding disk sets, companion files and existing outputs.'},
-        @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','ZX IPF-to-DSK conversion remains available.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
-        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Read launcher and core support. Keep selected cores.'},
-        @{Group='Setup';Mood='check';Stage='Playlist visibility setup';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up config; add needed playlist extensions only.'},
+        @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','ZX IPF-to-DSK conversion remains available.','S also enables C64 tapes and Lynx .lyx.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
+        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Check selected cores and supported file types.'},
+        @{Group='Setup';Mood='check';Stage='Enabling a supported file type';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up config; add .m3u. No cores are installed or switched.'},
         @{Group='C64';Mood='idle';Stage='Commodore 64 settings';System='MENU';Menu=@('DEMO / conversion only','Convert NIB/NBZ to G64.','1. ZIPs (default) / one per game','2. Folders / one per game','3. Loose G64 files','Next: Keep / Remove originals.','B. Back to main menu');Detail='C converts NIB/NBZ to G64; it creates no playlists.'},
         @{Group='C64';Mood='scan';Stage='Reading NIB and NBZ images';System='COMMODORE 64';Game='Demo disk set.zip';Detail='2 disk sides found. G64 files need no conversion.'},
         @{Group='C64';Mood='work';Stage='Converting NIB to G64';System='COMMODORE 64';Game='Demo disk set / Side A.nib';Detail='Simulated nibconv track activity';Progress=$true;Tracks=$true},
         @{Group='C64';Mood='check';Stage='Preserving an existing G64';System='COMMODORE 64';Game='Demo disk set / Side B.g64';Detail='Existing G64 bytes are copied and verified.';Progress=$true},
-        @{Group='C64';Mood='check';Stage='Verifying the converted images';System='COMMODORE 64';Game='Demo disk set';Detail='G64 structure, image hashes and ZIP contents.';Progress=$true;CompleteSet=$true},
-        @{Group='C64';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo game.zip','Folders: DST/Demo game/','Loose: DST/Demo game (Side A).g64','Converted G64 images stay visible.','No playlists are created.');Detail='Finished G64 output is ready in DST.'},
+        @{Group='C64';Mood='check';Stage='Verifying and saving G64 output';System='COMMODORE 64';Game='Demo disk set';Detail='Final checks, then save the selected output in DST.';Progress=$true;CompleteSet=$true},
+        @{Group='C64';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo disk set.zip','Folders: DST/Demo disk set/','Loose: DST/Side A.g64, Side B.g64','Converted G64 images stay visible.','No playlists are created.');Detail='Finished G64 output is ready in DST.'},
         @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','Convert IPF to DSK.','1. ZIPs [unsupported by default Onion OS core]','2. Folders (default) / one per game','3. Loose DSK files','Next: Keep / Remove originals.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
         @{Group='ZX';Mood='scan';Stage='Reading IPF and DSK images';System='ZX SPECTRUM';Game='Demo Spectrum.zip';Detail='2 disk sides found. DSK files need no conversion.'},
         @{Group='ZX';Mood='work';Stage='Converting IPF to DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='Engine activity is shown without a guessed percentage.'},
         @{Group='ZX';Mood='check';Stage='Preserving an existing DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 2.dsk';Detail='Existing DSK bytes are copied and verified.';Progress=$true},
-        @{Group='ZX';Mood='check';Stage='Verifying DSK and ZIP output';System='ZX SPECTRUM';Game='Demo Spectrum.zip';Detail='Check DSK structure, archive contents and source policy.';Progress=$true;CompleteSet=$true},
-        @{Group='ZX';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo Spectrum.zip','Folders: DST/Demo Spectrum/','Loose: DST/Demo Spectrum (Disk 1).dsk','Converted DSK images stay visible.','No playlists are created.');Detail='Finished DSK output is ready in DST.'},
+        @{Group='ZX';Mood='check';Stage='Verifying and saving DSK output';System='ZX SPECTRUM';Game='Demo Spectrum';Detail='Final checks, then save the selected output in DST.';Progress=$true;CompleteSet=$true},
+        @{Group='ZX';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo Spectrum.zip','Folders: DST/Demo Spectrum/','Loose: DST/Disk 1.dsk, Disk 2.dsk','Converted DSK images stay visible.','No playlists are created.');Detail='Finished DSK output is ready in DST.'},
         @{Group='Playlists';Mood='scan';Stage='Amiga IPF and ADF disk sets';System='AMIGA';Game='Demo Amiga / Disk 1.ipf';Detail='Keep IPF/ADF images; choose ZIPs, a folder per game or loose files.'},
         @{Group='Playlists';Mood='scan';Stage='C64 disk and tape-side playlists';System='COMMODORE 64';Game='Demo C64 / Side A.nib';Detail='Original formats are kept. Choose C separately for G64.'},
         @{Group='Playlists';Mood='scan';Stage='PlayStation multi-disc sets';System='PLAYSTATION';Game='Demo PlayStation / Disc 1.chd';Detail='Keep CHD files. CUE sets retain referenced tracks.'},
         @{Group='Playlists';Mood='idle';Stage='Other supported playlist systems';System='MENU';Menu=@('DEMO / supported default cores','Sega CD / Mega-CD: disc sets','MSX / MSX2: floppy disk sets','VIC-20: floppy disk sets','MS-DOS: DOSBox Pure M3U8 disk sets','Choose one system for the shared SRC folder.');Detail='Use the system profile that matches your input set.'},
         @{Group='Playlists';Mood='scan';Stage='Ordering multiple disks';System='PLAYLISTS';Game='Demo Adventure';Detail='Natural disk order: Disk 1, Disk 2, Disk 10.'},
-        @{Group='Playlists';Mood='work';Stage='Preparing hidden media';System='PLAYLISTS';Game='Demo Adventure';Detail='DST/.hidden/Demo Adventure / disk images';Progress=$true},
+        @{Group='Playlists';Mood='work';Stage='Preparing hidden media';System='PLAYLISTS';Game='Demo Adventure';Detail='Folder output: DST/.hidden/Demo Adventure/';Progress=$true},
         @{Group='Playlists';Mood='check';Stage='Writing and verifying the playlist';System='PLAYLISTS';Game='Demo Adventure.m3u';Detail='Relative paths point to .hidden. Companion files stay.';Progress=$true;CompleteSet=$true},
-        @{Group='Results';Mood='wait';Stage='Waiting for an overwrite choice';System='EXISTING OUTPUT';Game='Demo Adventure.m3u';Detail='Y: overwrite / N: skip / A: yes to all / S: no to all';Status='Waiting for your choice';Total=0},
+        @{Group='Results';Mood='wait';Stage='Waiting for an overwrite choice';System='EXISTING OUTPUT';Game='Demo Adventure.m3u';Detail='Y overwrite / N or Enter skip / A overwrite all / S skip all';Status='Waiting for your choice';Total=0},
         @{Group='Results';Mood='wait';Stage='Skipped: overwrite declined';System='RESULT';Game='Demo Adventure.m3u';Detail='Existing output and original source are both kept.';Skipped=1;Status='Skipped / originals kept'},
-        @{Group='Results';Mood='oops';Stage='Failed: a CUE track is missing';System='RESULT';Game='Demo Disc 2.cue';Detail='No incomplete playlist is installed. Source is kept.';Failed=1;Status='Stopped / source kept'},
-        @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='Simulated retry: validate tracks and verify outputs.';Progress=$true;CompleteSet=$true},
+        @{Group='Results';Mood='oops';Stage='Failed: a CUE track is missing';System='RESULT';Game='Demo Disc 2.cue';Detail='This set fails; its originals are kept. Other sets continue.';Failed=1;Status='Failed / originals kept'},
+        @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='New batch: check tracks, then verify and save output.';Progress=$true;CompleteSet=$true},
         @{Group='Results';Mood='happy';Stage='Batch complete';System='SUMMARY';Game='Demo collection';Detail='Review outputs, originals removed/kept and failures.';Progress=$true;Complete=$true;Ok=3;Skipped=1},
-        @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Return to settings, add inputs and run the batch again.';Status='No matching inputs';Total=0}
+        @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Add files to SRC, then start a new batch.';Status='No matching inputs';Total=0}
     )
     foreach ($pose in 'idle','blink','scanleft','scanright','work','check','happy','happyturn','oops','wait') {
         $scenes+=@{Group='Bunny';Mood='idle';Pose=$pose;Stage=('Bunny animation / '+$pose);System='ANIMATION GALLERY';Game='Mio';Detail='The same pixel bunny is used in menus and converters.';Status='Bunny preview';Total=0}
@@ -1244,7 +1244,7 @@ function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[
     elseif ($Scene.CompleteSet -and $fraction -ge 1) {$script:Ok++}
     $script:Processed=$script:Ok+$script:Skipped+$script:Failed
     if ($Scene.Tracks) {
-        $script:UiDetail=('Simulated track {0}/84 / no converter is running' -f [Math]::Min(84,[int](84*$elapsed/[Math]::Max(1,$Duration))))
+        $script:UiDetail=('Simulated track {0}/84 / no converter is running' -f [Math]::Min(84,[int][Math]::Floor(84*$fraction)))
     }
 }
 function Show-MioPreview([string]$Section='Tour') {

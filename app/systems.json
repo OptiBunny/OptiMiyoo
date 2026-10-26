@@ -53,6 +53,47 @@
     "EmuFolder": "COMMODORE"
   },
   {
+    "Folder": "DOS",
+    "Name": "MS-DOS",
+    "Core": "DOSBox Pure",
+    "Extensions": [
+      ".iso",
+      ".cue",
+      ".img",
+      ".ima"
+    ],
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Documented",
+    "Playlist": ".m3u8",
+    "Note": "Disk-image sets only. Installation and game startup may still be required inside DOSBox.",
+    "DefaultCore": "dosbox_pure_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "dosbox_pure_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "DOS"
+  },
+  {
+    "Folder": "MSX",
+    "Name": "MSX / MSX2",
+    "Core": "blueMSX",
+    "Extensions": [
+      ".dsk"
+    ],
+    "ZipMemberPlaylist": false,
+    "DefaultZipSupport": "Documented",
+    "Playlist": ".m3u",
+    "Note": "The default blueMSX core supports disk playlists; its Databases and Machines BIOS folders are required.",
+    "DefaultCore": "bluemsx_libretro.so",
+    "DefaultSupported": true,
+    "SupportedCores": [
+      "bluemsx_libretro.so"
+    ],
+    "DefaultReason": "",
+    "EmuFolder": "MSX"
+  },
+  {
     "Folder": "PS",
     "Name": "Sony PlayStation",
     "Core": "PCSX ReARMed",
@@ -95,44 +136,6 @@
     "EmuFolder": "SEGACD"
   },
   {
-    "Folder": "CPC",
-    "Name": "Amstrad CPC",
-    "Core": "CrocoDS",
-    "Extensions": [
-      ".dsk"
-    ],
-    "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Unlisted",
-    "Playlist": ".m3u",
-    "Note": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
-    "DefaultCore": "crocods_libretro.so",
-    "DefaultSupported": false,
-    "SupportedCores": [
-      "cap32_libretro.so"
-    ],
-    "DefaultReason": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
-    "EmuFolder": "CPC"
-  },
-  {
-    "Folder": "MSX",
-    "Name": "MSX / MSX2",
-    "Core": "blueMSX",
-    "Extensions": [
-      ".dsk"
-    ],
-    "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Documented",
-    "Playlist": ".m3u",
-    "Note": "The default blueMSX core supports disk playlists; its Databases and Machines BIOS folders are required.",
-    "DefaultCore": "bluemsx_libretro.so",
-    "DefaultSupported": true,
-    "SupportedCores": [
-      "bluemsx_libretro.so"
-    ],
-    "DefaultReason": "",
-    "EmuFolder": "MSX"
-  },
-  {
     "Folder": "VIC20",
     "Name": "Commodore VIC-20",
     "Core": "VICE xvic",
@@ -158,26 +161,23 @@
     "EmuFolder": "VIC20"
   },
   {
-    "Folder": "DOS",
-    "Name": "MS-DOS",
-    "Core": "DOSBox Pure",
+    "Folder": "CPC",
+    "Name": "Amstrad CPC",
+    "Core": "CrocoDS",
     "Extensions": [
-      ".iso",
-      ".cue",
-      ".img",
-      ".ima"
+      ".dsk"
     ],
     "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Documented",
-    "Playlist": ".m3u8",
-    "Note": "Disk-image sets only. Installation and game startup may still be required inside DOSBox.",
-    "DefaultCore": "dosbox_pure_libretro.so",
-    "DefaultSupported": true,
+    "DefaultZipSupport": "Unlisted",
+    "Playlist": ".m3u",
+    "Note": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
+    "DefaultCore": "crocods_libretro.so",
+    "DefaultSupported": false,
     "SupportedCores": [
-      "dosbox_pure_libretro.so"
+      "cap32_libretro.so"
     ],
-    "DefaultReason": "",
-    "EmuFolder": "DOS"
+    "DefaultReason": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
+    "EmuFolder": "CPC"
   },
   {
     "Folder": "ZXS",

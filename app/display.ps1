@@ -1181,7 +1181,7 @@ function Get-MioPreviewTourBar([int]$Width) {
 function Get-MioPreviewScenes([string]$Section='Tour') {
     # Entirely synthetic data: never call workers, file scanners or log writers.
     $scenes=@(
-        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. PlayStation playlists','C. Commodore 64 / NIB/NBZ -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
+        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. MS-DOS playlists','C. Commodore 64 / NIB/NBZ -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
         @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding game files, companions and existing outputs.'},
         @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','ZX IPF-to-DSK conversion remains available.','S also enables C64 tapes and Lynx .lyx.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
         @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Check selected cores and supported file types.'},

@@ -251,7 +251,7 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
         foreach ($output in $staged) {if ($output.Folder) {[IO.Directory]::Move($output.Staged,$output.Destination)} else {[IO.File]::Move($output.Staged,$output.Destination)};$installed.Add($output)}
         # Preserve the returned List itself, not an array containing that List.
         $locks=Open-SourcePolicyOutputs $staged.ToArray()
-        foreach ($backup in $backups) {try {Remove-SourcePolicyOwnedPath -Path $backup.Path -Root $DestinationRoot} catch {Write-Notice 'WARNING' ('Previous output backup remains at '+$backup.Path)}}
+        foreach ($backup in $backups) {try {Remove-SourcePolicyOwnedPath -Path $backup.Path -Root $DestinationRoot} catch {Write-Notice 'WARNING' ('Could not remove previous output backup: '+$backup.Path)}}
         return [pscustomobject]@{Outputs=$staged.ToArray();Locks=$locks;Replaced=($backups.Count -gt 0)}
     } catch {
         $message=$_.Exception.Message
@@ -263,10 +263,10 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
             $output.Preserve=$true
             try {
                 if ($output.Folder) {[IO.Directory]::Move($output.Destination,$output.Staged)} else {[IO.File]::Move($output.Destination,$output.Staged)}
-                $message+=' Recovery output retained at: '+$output.Staged+'.'
+                $message+=' New output moved back to: '+$output.Staged+'.'
             } catch {$message+=' Could not move output back from: '+$output.Destination+'.'}
         }
-        for ($i=$backups.Count-1;$i -ge 0;$i--) {try {if ($backups[$i].Folder) {[IO.Directory]::Move($backups[$i].Path,$backups[$i].Destination)} else {[IO.File]::Move($backups[$i].Path,$backups[$i].Destination)}} catch {Write-Notice 'WARNING' ('Previous output retained at '+$backups[$i].Path)}}
+        for ($i=$backups.Count-1;$i -ge 0;$i--) {try {if ($backups[$i].Folder) {[IO.Directory]::Move($backups[$i].Path,$backups[$i].Destination)} else {[IO.File]::Move($backups[$i].Path,$backups[$i].Destination)}} catch {Write-Notice 'WARNING' ('Could not restore previous output from: '+$backups[$i].Path)}}
         throw $message
     } finally {
         foreach ($parent in $parents) {$parent.Dispose()}

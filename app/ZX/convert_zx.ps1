@@ -485,7 +485,7 @@ function Ensure-HxC {
     }
 
     if ($valid.Count -eq 0) {
-        Write-Status 'FAIL' 'Neither bundled HxC engine passed the module check.'
+        Write-Status 'FAIL' 'No bundled HxC engine passed the module check.'
         return $false
     }
     $script:HxCExe = $valid[0]
@@ -503,8 +503,8 @@ function Remove-ZXWorkPath([string]$Path,[string]$Root) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {return}
     try {Remove-SourcePolicyOwnedPath -Path $Path -Root $Root}
     catch {
-        Write-Diagnostic ('Temporary output left in place: '+$Path+' / '+$_.Exception.Message)
-        Write-Status 'WARN' ('Temporary output left in place: '+$Path)
+        Write-Diagnostic ('Temporary output cleanup failed: '+$Path+' / '+$_.Exception.Message)
+        Write-Status 'WARN' ('Temporary output cleanup failed: '+$Path)
     }
 }
 

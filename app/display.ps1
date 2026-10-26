@@ -1331,7 +1331,7 @@ function Show-ClosingPanel([int]$RemovalFailures=0) {
     $script:UiMood='happy'; $script:UiSay='Files prepared. Waiting for final verification.'
     if ($script:Failed -gt 0) {$script:UiMood='oops'; $script:UiSay='Preparation finished with errors. Review the results.'}
     elseif ($RemovalFailures -gt 0) {$script:UiMood='oops'; $script:UiSay='Source cleanup needs attention. Review the warnings.'}
-    elseif ($script:ReportProblem) {$script:UiMood='oops'; $script:UiSay='A log or report could not be saved. Review the warnings.'}
+    elseif ($script:ReportProblem) {$script:UiMood='oops'; $script:UiSay='A temporary log or report could not be saved. Check warnings.'}
     elseif ($script:Ok -eq 0) {$script:UiMood='wait'; $script:UiSay='No files prepared. Source files are unchanged.'}
     Draw-DisplayPanel -Force
     # Leave the last panel visible above the summary instead of erasing it.

@@ -156,14 +156,14 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
                 $item | Add-Member -NotePropertyName PreserveStaging -NotePropertyValue $true -Force
                 try {
                     Move-OutputPath $item.Destination $item.Staged ([bool]$item.Folder)
-                    $message += " Recovery output retained at: $($item.Staged)."
+                    $message += " New output moved back to: $($item.Staged)."
                 }
                 catch { $message += " Could not move back new output: $($item.Destination)." }
             }
             for ($i = $backups.Count - 1; $i -ge 0; $i--) {
                 $item = $backups[$i]
                 try { Move-OutputPath $item.Backup $item.Path ([bool]$item.Folder) }
-                catch { $message += " Previous output preserved at: $($item.Backup)." }
+                catch { $message += " Could not restore previous output from: $($item.Backup)." }
             }
             throw $message
         }
@@ -171,7 +171,7 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
             try {if($item.Guard){$item.Guard.Remove()}else{Remove-SourcePolicyOwnedPath $item.Backup ([IO.Path]::GetDirectoryName($item.Backup))}}
             catch {
                 Write-Log ('Previous output backup could not be removed: ' + $item.Backup)
-                Write-Notice 'WARNING' ('Previous output backup remains at: ' + $item.Backup)
+                Write-Notice 'WARNING' ('Could not remove previous output backup: ' + $item.Backup)
             }
         }
         return [pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
@@ -1405,8 +1405,8 @@ try {
             if ($conflicts.Count -gt 0) {
                 $overwrite=Confirm-Overwrite
                 if (-not $overwrite) {
-                    $result.Result='Skipped'; $result.Detail='Overwrite declined; no media content copied or compared.'; $script:Skipped++
-                    Write-Event 'SKIP' ($job.System+'/'+$job.Source+' - original kept; output not compared or copied.'); continue
+                    $result.Result='Skipped'; $result.Detail='Overwrite declined; existing output and originals kept.'; $script:Skipped++
+                    Write-Event 'SKIP' ($job.System+'/'+$job.Source+' - existing output and original kept.'); continue
                 }
             }
             $expectedNames=@($contentNames)
@@ -1503,10 +1503,10 @@ try {
             if($stageContainer -and $stageIdentity -and (Test-Path -LiteralPath $stageContainer)){
                 $retain=$false
                 foreach($item in $items){if($item.PreserveStaging){$retain=$true;break}}
-                if($retain){Write-Event 'WARNING' ('Recovery output retained: '+$stageContainer)}
+                if($retain){Write-Event 'WARNING' ('Unverified temporary output left for session cleanup: '+$stageContainer)}
                 else{
                     try{Remove-SourcePolicyOwnedPath -Path $stageContainer -Root $destinationRoot -Identity $stageIdentity -MaximumEntries 400005}
-                    catch{Write-Event 'WARNING' ('Temporary output retained: '+$stageContainer+' / '+$_.Exception.Message)}
+                    catch{Write-Event 'WARNING' ('Temporary output cleanup failed: '+$stageContainer+' / '+$_.Exception.Message)}
                 }
             }
             foreach ($directoryLock in $outputDirectoryLocks) {$directoryLock.Dispose()}

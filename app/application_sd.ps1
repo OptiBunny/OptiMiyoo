@@ -184,7 +184,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
     $candidate=$Text.Trim().Trim('"')
     if ($candidate -eq 'B') {$choice.Cancelled=$true;return $choice}
     if ([string]::IsNullOrWhiteSpace($candidate)) {
-        $choice.Error='Enter your SD path, e.g. E:\, or B to go back.';return $choice
+        $choice.Error='Enter your SD path, e.g. E:\, or press Esc to go back.';return $choice
     }
     # IsPathRooted also accepts drive-relative B: and current-drive \folder.
     # The SD prompt must never resolve those against the app's working folder.
@@ -192,7 +192,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
     $unc=($candidate -match '^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)')
     if ((-not $drive -and -not $unc) -or $candidate.StartsWith('\\?\') -or $candidate.StartsWith('\\.\') -or
         $candidate -match '[\x00-\x1f<>|"*?]' -or ($drive -and $candidate.Substring(2).Contains(':')) -or ($unc -and $candidate.Contains(':'))) {
-        $choice.Error='Use a full SD path, e.g. E:\, or B to go back.';return $choice
+        $choice.Error='Use a full SD path, e.g. E:\, or press Esc to go back.';return $choice
     }
     try {$choice.Path=[IO.Path]::GetFullPath($candidate)}
     catch {$choice.Error='Check the SD path, or press Esc to go back.'}

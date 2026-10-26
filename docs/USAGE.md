@@ -53,9 +53,9 @@ Keep different versions of the same disc in separate batches.
 Choose your [system number](#systems-and-rom-folders), then
 [how to save the files](#choose-how-to-save).
 
-For games with multiple discs or tape sides, the playlist stays visible and the
-game files go into `.hidden`. With ZIP output, this means `Game.m3u` beside
-`.hidden/Game.zip`. Games with one disc or tape side don't need a playlist.
+For games with multiple discs or tape sides, the ZIP, game folder or loose files
+go in `.hidden`. The playlist stays outside it, visible in Onion's game list.
+Games with one disc or tape side stay visible without a playlist.
 
 ## Convert disk images
 

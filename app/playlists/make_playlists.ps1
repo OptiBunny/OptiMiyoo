@@ -1128,14 +1128,15 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
             $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
-            $defaultOutput='1'; if ($page -eq 'ZX') {$defaultOutput='2'}
+            $defaultOutput='1'; if ($page -eq 'ZX') {$defaultOutput='3'}
             $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -Conversion
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            $zipDefault=' (default)'; $folderDefault=''
-            if ($defaultOutput -eq '2') {$zipDefault=''; $folderDefault=' (default)'}
+            $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
+            $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
+            $looseDefault=if ($defaultOutput -eq '3') {' (default)'} else {''}
             Write-MenuLine ('  1. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('1. ZIPs'+$zipDefault+$zipLabel)
             Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine ('  3. Loose '+$outputName+' files')
+            Write-MenuLine ('  3. Loose '+$outputName+' files'+$looseDefault)
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')

@@ -331,24 +331,24 @@ function Get-OnionSetupExtensions($Profile,[string]$SdRoot,$Support) {
 
 function Get-OnionSetupMenuRows {
     @(
-        'Enables supported files in Onion''s list.',
+        'Enables supported files in Onion''s game list.',
         'Only edits config.json''s file-type list.',
-        'Adds playlists, C64 tapes and Lynx .lyx.',
         'SD config backups: OptiMiyoo_Backup_<ID>/',
         'Does not install or switch emulator cores.',
         'Refresh Onion''s game list after setup.',
-        '1. Amiga: PUAE2021 / PUAE',
-        '2. C64: VICE x64 / x64sc',
-        '3. PlayStation: PCSX ReARMed',
-        '4. Sega CD: PicoDrive / Genesis Plus GX',
-        '5. CPC: use Caprice32 instead of CrocoDS.',
+        '1. Amiga: enables .m3u playlists / PUAE2021, PUAE',
+        '2. C64: enables .m3u playlists + .tap/.t64 tapes',
+        '   VICE x64 / x64sc; supported file types only.',
+        '3. PlayStation: enables .m3u playlists / PCSX ReARMed',
+        '4. Sega CD: enables .m3u playlists / PicoDrive, Genesis Plus GX',
+        '5. CPC: enables .m3u playlists / Caprice32',
         '   Default CrocoDS cannot load playlists.',
-        '6. MSX / MSX2: blueMSX',
-        '7. VIC-20: VICE xvic',
-        '8. MS-DOS: DOSBox Pure',
-        '9. ZX: needs newer Fuse with M3U support.',
+        '6. MSX / MSX2: enables .m3u playlists / blueMSX',
+        '7. VIC-20: enables .m3u playlists / VICE xvic',
+        '8. MS-DOS: enables .m3u8 playlists / DOSBox Pure',
+        '9. ZX: enables .m3u playlists / newer Fuse with M3U support',
         '   Default Onion Fuse cannot load playlists.',
-        'Lynx .lyx: Handy / Beetle Lynx'
+        'Lynx: enables .lyx games / Handy, Beetle Lynx'
     )
 }
 

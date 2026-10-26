@@ -167,7 +167,7 @@ catch {Write-Host ('ERROR: '+$_.Exception.Message);$code=1}
 if ($config.Batch) {
     try {
         $null=Invoke-ApplicationRpc -Operation Batch.Complete -Payload @{BatchId=$config.Batch.BatchId;CompletedJobIds=$global:OptiMiyooApplicationContext.Completed.ToArray()}
-    } catch {Write-Host 'The broker kept unpublished outputs and original files.';$code=1}
+    } catch {Write-Host 'The batch could not be completed. Check DST before retrying.';$code=1}
 }
 
 

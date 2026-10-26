@@ -401,7 +401,7 @@ function Test-CapsIPFEngine([string]$EnginePath, [string]$InputPath) {
         return [PSCustomObject]@{ Success=$true; CapsLoadFailure=$false; Detail='' }
     }
     if ($sourceLoadFailure) {
-        return [PSCustomObject]@{ Success=$false; CapsLoadFailure=$false; Detail=($label + ' recognized IPF but could not load the probe image.') }
+        return [PSCustomObject]@{ Success=$false; CapsLoadFailure=$false; Detail=($label + ' could not load the IPF image.') }
     }
     return [PSCustomObject]@{ Success=$false; CapsLoadFailure=$false; Detail=($label + ' did not recognize the probe file as an IPF image.') }
 }
@@ -702,9 +702,9 @@ function Invoke-HxCConversion([string]$InputPath, [string]$OutputPath) {
 }
 
 function Get-UsefulFailureSummary([string]$Detail) {
-    if ([string]::IsNullOrWhiteSpace($Detail)) { return 'HxC returned no diagnostic text. See the log.' }
+    if ([string]::IsNullOrWhiteSpace($Detail)) { return 'HxC returned no diagnostic text; original kept.' }
     if ($Detail -match "(?i)Can't load CAPSImg\.dll|No Caps lib available|Failed to load CAPS library") {
-        return 'CAPSImg.dll or one of its dependencies could not load. See the CAPS preflight section in the log.'
+        return 'CAPSImg.dll or one of its dependencies could not load. Restore the complete bundled converter files, then retry.'
     }
     $lines = @($Detail -split '[\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object {
         $_ -and
@@ -716,7 +716,7 @@ function Get-UsefulFailureSummary([string]$Detail) {
         $_ -notmatch '^libhxcfe version' -and
         $_ -notmatch '^Input file\s*:'
     })
-    if ($lines.Count -eq 0) { return 'HxC failed. See the full log for details.' }
+    if ($lines.Count -eq 0) { return 'HxC failed without a usable diagnostic message; original kept.' }
     $start = [Math]::Max(0, $lines.Count - 3)
     $summary = [string]::Join(' | ', @($lines[$start..($lines.Count - 1)]))
     if ($summary.Length -gt 500) { $summary = $summary.Substring(0, 500) + '...' }

@@ -1375,7 +1375,7 @@ try {
             }
             $result.DiskImages=$diskNames.Count
             if ($diskNames.Count -eq 0) {
-                $script:Skipped++; $result.Result='Skipped'; $result.Playlist=''; $result.Detail='No supported media images for this system. Use one game per ZIP.'
+                $script:Skipped++; $result.Result='Skipped'; $result.Playlist=''; $result.Detail='No supported media images for the selected system. Check the file formats and system choice.'
                 Write-Event 'SKIP' ($job.System+'/'+$job.Source+' - no supported media images.'); continue
             }
             $isMulti=$diskNames.Count -gt 1
@@ -1542,7 +1542,7 @@ try {
     Write-Event 'DONE' ('{0} written | {1} skipped/unsupported | {2} failed' -f $script:Ok,$script:Skipped,$script:Failed)
     if ($script:Failed -eq 0 -and $sourceSummary.Failed -eq 0 -and -not $script:ReportProblem -and $script:Ok -gt 0) {Write-Host ('  '+(Color-Text 'MIO > Processing complete. All queued sets were handled.' '249;172;204'))}
     Write-Host ('  Elapsed: '+(Format-Duration $script:Clock.Elapsed.TotalSeconds))
-    if ($jobs.Count -eq 0) {Write-Host '  No matching input images/ZIPs found in the selected SRC folders.' -ForegroundColor Yellow}
+    if ($jobs.Count -eq 0) {Write-Host '  No matching input images found in SRC for the selected system.' -ForegroundColor Yellow}
     Write-Host '  Waiting for independent verification and publication.'
     Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'

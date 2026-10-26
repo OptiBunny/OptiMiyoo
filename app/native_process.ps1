@@ -117,6 +117,6 @@ function Close-NativeSandboxJob($Job) {
     if (-not $Job) {return}
     $Job.Dispose()
     if ($Job.CleanupWarning) {
-        Write-Warning ('Temporary sandbox files were kept at '+$Job.RootPath+'. '+$Job.CleanupWarning)
+        Write-Warning ('Sandbox cleanup warning: '+$Job.CleanupWarning)
     }
 }

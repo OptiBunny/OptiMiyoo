@@ -59,15 +59,20 @@ function Invoke-ApplicationNativeRequest {
         if ($job.BatchId -cne [string]$batch.BatchId) {throw 'Native task belongs to another batch.'}
         if ($Operation -eq 'Native.Stop') {Close-ApplicationNativeJob $State $job;return @{Stopped=$true}}
         if (-not $job.Done) {
-            if ($job.Timer.Elapsed.TotalSeconds -gt $job.Timeout -or $job.Out.LimitExceeded -or $job.Err.LimitExceeded) {
+            $job.TimedOut=($job.Timer.Elapsed.TotalSeconds -gt $job.Timeout)
+            $job.LimitExceeded=($job.Out.LimitExceeded -or $job.Err.LimitExceeded)
+            if ($job.TimedOut -or $job.LimitExceeded) {
                 $job.Native.Kill();[void]$job.Native.WaitForExit(5000)
-                $job.TimedOut=($job.Timer.Elapsed.TotalSeconds -gt $job.Timeout)
-                $job.Failure='Native time or diagnostic limit exceeded.'
+                $job.Failure=if ($job.TimedOut) {'Native converter exceeded its time limit.'} else {'Native diagnostic-output limit exceeded.'}
             }
             if ($job.Native.HasExited) {
                 $job.Done=$true;$job.ExitCode=$job.Native.ExitCode
-                if (-not $job.Out.Wait(5000) -or -not $job.Err.Wait(5000) -or $job.Out.Failure -or $job.Err.Failure -or $job.Out.LimitExceeded -or $job.Err.LimitExceeded) {
-                    $job.Failure='Native diagnostic capture failed or exceeded its limit.'
+                $stdoutReady=$job.Out.Wait(5000);$stderrReady=$job.Err.Wait(5000)
+                $job.LimitExceeded=($job.LimitExceeded -or $job.Out.LimitExceeded -or $job.Err.LimitExceeded)
+                $job.CaptureFailed=(-not $stdoutReady -or -not $stderrReady -or [bool]$job.Out.Failure -or [bool]$job.Err.Failure)
+                if (-not $job.Failure) {
+                    if ($job.LimitExceeded) {$job.Failure='Native diagnostic-output limit exceeded.'}
+                    elseif ($job.CaptureFailed) {$job.Failure='Native diagnostic capture failed or did not finish.'}
                 }
                 if ($job.ExitCode -eq 0 -and -not $job.Failure -and $job.Destination) {
                     # Hash the inaccessible native output BEFORE giving any copy
@@ -110,7 +115,7 @@ function Invoke-ApplicationNativeRequest {
             $lines.Add($line);$size+=$line.Length
         }
         return @{TaskId=$job.Id;Done=$job.Done;Drained=($job.Done -and $size -eq 0);ExitCode=$job.ExitCode;
-            Lines=$lines.ToArray();TimedOut=$job.TimedOut;Failure=$job.Failure}
+            Lines=$lines.ToArray();TimedOut=$job.TimedOut;LimitExceeded=$job.LimitExceeded;CaptureFailed=$job.CaptureFailed;Failure=$job.Failure}
     }
     if ($State.Jobs.Count -ge 1) {throw 'Finish the active native task before starting another.'}
     $kind=[string]$Payload.Kind;$mode=[string]$Payload.Mode
@@ -120,7 +125,7 @@ function Invoke-ApplicationNativeRequest {
     $job=[pscustomobject]@{Id=[Guid]::NewGuid().ToString('N');BatchId=[string]$batch.BatchId;Native=$null;
         Out=$null;Err=$null;InputLease=$null;ParentLease=$null;InputHash=$null;Destination=$null;
         ReceiptKind=$(if($kind -eq 'Nib'){'Nib'}else{'HxC'});Timer=[Diagnostics.Stopwatch]::StartNew();
-        Timeout=120;Done=$false;ExitCode=-1;TimedOut=$false;Failure=$null}
+        Timeout=120;Done=$false;ExitCode=-1;TimedOut=$false;LimitExceeded=$false;CaptureFailed=$false;Failure=$null}
     try {
         $inputFile=$null;$outputName=$null
         if ($mode -ne 'Modules') {
@@ -181,7 +186,7 @@ function New-ApplicationNativeCapture {
     if ($OutputPath) {$payload.Output=ConvertTo-ApplicationWorkRelative $OutputPath}
     $reply=Invoke-ApplicationRpc -Operation Native.Start -Payload $payload
     $proxy=[pscustomobject]@{TaskId=$reply.TaskId;BatchId=$payload.BatchId;Queue=(New-Object 'System.Collections.Generic.Queue[string]');
-        Done=$false;Drained=$false;Code=-1;Failure=$null;TimedOut=$false;Disposed=$false;Child=$null}
+        Done=$false;Drained=$false;Code=-1;Failure=$null;TimedOut=$false;LimitExceeded=$false;CaptureFailed=$false;Disposed=$false;Child=$null}
     $proxy.Child=$proxy
     $proxy | Add-Member ScriptMethod Poll {
         if ($this.Disposed -or $this.Drained) {return}
@@ -189,11 +194,10 @@ function New-ApplicationNativeCapture {
         foreach ($line in $r.Lines) {$this.Queue.Enqueue([string]$line)}
         $this.Done=[bool]$r.Done;$this.Drained=[bool]$r.Drained;$this.Code=[int]$r.ExitCode
         $this.Failure=$r.Failure;$this.TimedOut=[bool]$r.TimedOut
+        $this.LimitExceeded=[bool]$r.LimitExceeded;$this.CaptureFailed=[bool]$r.CaptureFailed
     }
     $proxy | Add-Member ScriptProperty HasExited {$this.Poll();return $this.Done}
     $proxy | Add-Member ScriptProperty ExitCode {return $this.Code}
-    $proxy | Add-Member ScriptProperty LimitExceeded {return [bool]$this.Failure}
-    $proxy | Add-Member ScriptProperty CaptureFailed {return $this.Failure}
     $proxy | Add-Member ScriptMethod NextLine {if ($this.Queue.Count) {return $this.Queue.Dequeue()};return $null}
     $proxy | Add-Member ScriptMethod WaitOutput {
         param([int]$Milliseconds)

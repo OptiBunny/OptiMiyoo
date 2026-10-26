@@ -84,7 +84,7 @@ function Assert-G64([string]$Path) {
     $reader = New-Object IO.BinaryReader($stream)
     try {
         if ($stream.Length -gt 64MB) {throw 'G64 output exceeds the supported image-size limit.'}
-        if ($stream.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)) -ne 'GCR-1541') { throw 'nibconv did not produce a G64 image.' }
+        if ($stream.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)) -ne 'GCR-1541') { throw 'G64 image header is invalid.' }
         if ($reader.ReadByte() -ne 0) { throw 'Unsupported G64 version.' }
         $tracks = [int]$reader.ReadByte()
         $maxLength = [int]$reader.ReadUInt16()
@@ -114,6 +114,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
         do {
             $finished = $capture.Child.HasExited
             if ($diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
+            if ($capture.PSObject.Properties['Failure'] -and $capture.Failure) {throw ('nibconv failed: '+$capture.Failure+' Original kept.')}
             if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
             if ($finished -and -not $capture.WaitOutput(5000)) {throw 'nibconv diagnostic capture did not complete. Original kept.'}
             if ($capture.CaptureFailed) {throw 'nibconv diagnostic capture failed. Original kept.'}
@@ -137,7 +138,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
         if ($capture.Child.ExitCode -ne 0) { throw "nibconv exit code $($capture.Child.ExitCode)." }
         if ($conversionProblem) { throw $conversionProblem }
         $capture.Export()
-        if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output. See the log for its messages.' }
+        if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { throw 'nibconv produced no G64 output; original kept.' }
         Assert-G64 $OutputPath
         Show-Progress 'Converting disk images' `
             ('Disk {0}/{1} complete: {2}' -f ($Index + 1), $Count, $DisplayName) 100 -Force

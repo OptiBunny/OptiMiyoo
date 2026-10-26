@@ -54,8 +54,8 @@ Choose your [system number](#systems-and-rom-folders), then
 [how to save the files](#choose-how-to-save).
 
 For games with multiple discs or tape sides, the playlist stays visible and the
-game files go into `.hidden`, except when packaged together in a ZIP for
-unpacking. Games with one disc or tape side don't need a playlist.
+game files go into `.hidden`. With ZIP output, this means `Game.m3u` beside
+`.hidden/Game.zip`. Games with one disc or tape side don't need a playlist.
 
 ## Convert disk images
 

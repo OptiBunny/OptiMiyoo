@@ -388,12 +388,6 @@ function Start-ApplicationBrokerBatch {
                 $sourceJob.OutputPlan=$plan;$job.Plan=$plan;$job.Writes=@($plan.Writes);$job.Retired=@($plan.Retired)
                 $job.Files=Get-ApplicationBrokerExpectedFiles $state $module $sourceJob
                 if($plan.PreserveZip){$job.ContainerHash=$state.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $sourceJob.Zip $src)].Hash}
-                if($plan.InternalPlaylistName){
-                    if($job.Files.ContainsKey($plan.InternalPlaylistName)){throw 'Generated playlist collides with an existing source member.'}
-                    $bytes=(New-Object Text.UTF8Encoding($false)).GetBytes($plan.InternalPlaylistText)
-                    $sha=[Security.Cryptography.SHA256]::Create();try{$hash=[BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','')}finally{$sha.Dispose()}
-                    $job.Files[$plan.InternalPlaylistName]=[pscustomobject]@{Hash=$hash;Length=[long]$bytes.Length;Converter='';InputHash=''}
-                }
                 $job.DiskNames=@($media.DiskNames)
                 $job.DataKind='Folder';if($plan.ZipMode){$job.DataKind='Zip'}elseif($plan.LooseFiles){$job.DataKind='Files'}elseif($plan.SingleFile){$job.DataKind='File'}
                 if($plan.HasPlaylist){$job.PlaylistText=$plan.PlaylistText}
@@ -765,7 +759,6 @@ function Complete-ApplicationBrokerBatch {
                 if($batch.Operation -eq 'Playlist'){
                     $diskImages=@($job.Plan.DiskNames).Count;$destination=$job.Plan.RelativeData
                     if($job.Plan.HasPlaylist){$playlist=Get-ApplicationBrokerRelative $job.Plan.M3uPath $dst}
-                    elseif($job.Plan.InternalPlaylistName){$playlist=$destination+'#'+$job.Plan.InternalPlaylistName}
                 }
                 elseif($batch.Storage -in 'Zip','Loose','Folders'){$diskImages=@($job.SourceJob.Items | Where-Object {$_.Media}).Count;$destination=$job.Plan.RelativeData}
                 elseif($batch.Operation -eq 'C64'){$diskImages=$job.SourceJob.Images;$destination=$job.Plan.RelativeData}

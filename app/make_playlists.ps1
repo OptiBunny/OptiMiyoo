@@ -335,6 +335,8 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
             $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
             foreach ($track in @(Get-CueReferences @($lines) $name)) {
                 $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
+                $trackEntry=$Archive.GetEntry($relative)
+                if ($null -eq $trackEntry -or $trackEntry.FullName.EndsWith('/')) {throw ('Missing CUE track or spelling/case mismatch: '+$relative)}
                 [void]$tracks.Add($relative)
             }
         } finally {if ($cueStream) {$cueStream.Dispose()}}
@@ -634,7 +636,7 @@ function Get-GameMediaNames($Job,[string]$Storage='Auto') {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
-            if ($Storage -in 'Loose','Folders' -or (-not $Job.Profile.ZipMemberPlaylist -and ($Storage -eq 'Auto' -or $diskNames.Count -gt 1))) {Assert-ZipExtractionNames $archive}
+            if ($Storage -in 'Loose','Folders' -or (-not $Job.Profile.ZipMemberPlaylist -and $Storage -eq 'Auto')) {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
         } finally {$archive.Dispose()}
     } else {
@@ -701,15 +703,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     $zipMode=($Storage -eq 'Zip' -or ([bool]$profile.ZipMemberPlaylist -and $Storage -eq 'Auto' -and [bool]$Job.Zip))
     $looseFiles=$Storage -eq 'Loose'
     $isMulti=$Media.DiskNames.Count -gt 1
-    $internalPlaylist=($zipMode -and -not $profile.ZipMemberPlaylist -and $isMulti)
-    $hasPlaylist=($isMulti -and -not $internalPlaylist)
-    $internalName=$null;$internalText=$null
-    if($internalPlaylist){
-        $internalName=[IO.Path]::GetFileName($Job.Stem)+$profile.Playlist
-        Assert-PlaylistName $internalName
-        if($internalName -in $Media.ContentNames){throw 'The source already contains a file with the name needed for the packaged playlist. Rename that file or choose loose files/folders; original kept.'}
-        $internalText=($Media.DiskNames -join "`n")+"`n"
-    }
+    $hasPlaylist=$isMulti
     $singleFile=($Storage -eq 'Auto' -and -not $isMulti -and -not $zipMode -and $Media.ContentNames.Count -eq 1)
     $dataFolder=(-not $zipMode -and -not $singleFile -and -not $looseFiles)
     $relativeData=$Job.Stem
@@ -774,8 +768,8 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         if ($seen.Add($candidate)) {$visible.Add([pscustomobject]@{Destination=$candidate;Folder=($relative -eq $Job.Stem)})}
     }
     $plan=[pscustomobject]@{DiskNames=$Media.DiskNames;ContentNames=$Media.ContentNames;IsMulti=$isMulti;ZipMode=$zipMode;
-        Storage=$Storage;LooseFiles=$looseFiles;PreserveZip=($zipMode -and [bool]$Job.Zip -and -not $internalPlaylist);DataWrites=$dataWrites;
-        HasPlaylist=$hasPlaylist;PackageZip=($zipMode -and -not $profile.ZipMemberPlaylist);InternalPlaylistName=$internalName;InternalPlaylistText=$internalText;
+        Storage=$Storage;LooseFiles=$looseFiles;PreserveZip=($zipMode -and [bool]$Job.Zip);DataWrites=$dataWrites;
+        HasPlaylist=$hasPlaylist;
         PlaylistLines=$lines;PlaylistText=$playlistText;FlatPlaylistLines=$flatLines;FlatDataWrites=@($flatWrites.ToArray());
         SingleFile=$singleFile;DataFolder=$dataFolder;RelativeData=$relativeData;DataPath=$dataPath;M3uPath=$m3uPath;
         Stem=$Job.Stem;Root=$DestinationRoot;Writes=$writes;Retired=@();VisibleCandidates=$visible.ToArray()}
@@ -1246,6 +1240,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
             Write-MenuLine '  3. Loose files'
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
+            if (-not $profile.ZipMemberPlaylist -and $zipNotice.Hint -notlike 'Choose Folders*') {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
             if ($answer -eq 'B') {$page='Main'; continue}
@@ -1508,6 +1503,9 @@ try {
             }
             $isMulti=$diskNames.Count -gt 1
             if ($isMulti) {
+                if ($zipMode -and -not $profile.ZipMemberPlaylist) {
+                    Write-Event 'NOTE' 'ZIP playlists: use a compatible core, or choose Folders / Loose.'
+                }
                 $tapeIssue=Get-TapeSupportIssue $diskNames $job.TapeSupport
                 if ($tapeIssue) {
                     Write-Event 'PLAYBACK NOTE' ($job.Source+' / '+$tapeIssue)
@@ -1579,13 +1577,6 @@ try {
                 Assert-CueTargets $diskNames $stageData
             }
             if($zipMode -and -not $plan.PreserveZip){
-                if($plan.InternalPlaylistName){
-                    $internalPath=Join-Path $stageData $plan.InternalPlaylistName
-                    $encoded=(New-Object Text.UTF8Encoding($false)).GetBytes($plan.InternalPlaylistText)
-                    $output=$null
-                    try{$output=[IO.File]::Open($internalPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$output.Write($encoded,0,$encoded.Length)}finally{if($output){$output.Dispose()}}
-                    $manifest[$plan.InternalPlaylistName]=@{Length=$encoded.Length;Hash=(Get-VerifiedHash -LiteralPath $internalPath).Hash}
-                }
                 $stageContent=$stageData
                 $stageData=Join-Path $stageContainer 'media.zip'
                 $dataHash=New-PlaylistZip $stageContent $stageData $manifest
@@ -1615,18 +1606,7 @@ try {
             Complete-ApplicationCurrentJob
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}
             $script:Ok++; $script:UiMood='happy'; $script:UiPercent=100
-            if ($plan.PackageZip) {
-                $result.Playlist='';$result.Detail='ZIP game verified.'
-                $script:UiSay='ZIP game verified and installed in DST.';$script:UiStage='ZIP ready'
-                if ($plan.InternalPlaylistName) {
-                    $result.Detail='ZIP playlist package verified [unpack before playing].'
-                    $script:UiSay='ZIP playlist ready [unpack before playing].'
-                } elseif ($job.ZipOutputNotice.Label -and -not $job.ZipOutputNotice.PlaylistOnly) {
-                    $result.Detail='ZIP game verified '+$job.ZipOutputNotice.Label+'. Unpack before playing.'
-                    $script:UiSay='ZIP game ready [unpack before playing].'
-                }
-                Write-Event 'READY' ($job.System+'/'+$relativeData+' - '+$result.Detail)
-            } elseif ($plan.HasPlaylist) {
+            if ($plan.HasPlaylist) {
                 $result.Detail='Playlist and hidden media verified.'
                 $script:UiSay='Playlist and disk images installed. Verification complete.'; $script:UiStage='Playlist ready'
                 Write-Event 'READY' ('{0}/{1}{2} - {3} image(s)' -f $job.System,$job.Stem,$profile.Playlist,$diskNames.Count)
@@ -1697,7 +1677,6 @@ try {
     if ($jobs.Count -eq 0) {Write-Host '  No matching input images/ZIPs found in the selected SRC folders.' -ForegroundColor Yellow}
     if (-not (Test-ApplicationWorker) -and $reportSaved) {Write-Host ('  Report: '+$reportPath)}
     if (-not (Test-ApplicationWorker)) {Write-Host ('  Log: '+$logPath)} else {Write-Host '  Waiting for independent verification and publication.'}
-    if (@($jobs | Where-Object {$_.OutputPlan -and $_.OutputPlan.InternalPlaylistName}).Count -gt 0) {Write-Host '  ZIP playlist packages [unpack before playing].' -ForegroundColor Yellow}
     Write-Host ('  Copy the CONTENTS of DST into the SD card Roms/'+$System+' folder.')
     Write-Host '  Include .hidden, then refresh the game list in Onion.'
     if ($script:Failed -gt 0 -or $script:ReportProblem -or $sourceSummary.Failed -gt 0) {$exitCode=1}

@@ -361,13 +361,17 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
         if ($Profile.Folder -in 'CPC','ZXS') {$notice.Label='[unsupported by default Onion OS core]'}
         $notice.Hint='ZIP loading is not listed in Onion docs for this core.'
     } elseif (-not $Conversion -and -not $Profile.ZipMemberPlaylist) {
-        $notice.Label='[unpack for playlists]'
-        $notice.Hint='The core loads ZIPs; unpack OptiMiyoo playlist ZIPs.'
+        $notice.Label='[ZIP playlists unsupported]'
+        $notice.Hint='The core loads ZIPs, but not ZIP playlists.'
         $notice.PlaylistOnly=$true
         if ($Profile.Folder -eq 'MSX') {
             $notice.Label='[unsupported by default Onion OS core]'
-            $notice.Hint='ZIP games work; unpack multi-disc playlist ZIPs.'
+            $notice.Hint='ZIP games work; ZIP playlists are unsupported.'
         }
+    }
+    if (-not $Conversion) {
+        if ($notice.Label -eq '[unpack before playing]') {$notice.Label='[ZIP playlists unsupported]'}
+        if ($notice.Hint -match '(?i)unpack') {$notice.Hint='Choose Folders or Loose files for playlists.'}
     }
     return $notice
 }

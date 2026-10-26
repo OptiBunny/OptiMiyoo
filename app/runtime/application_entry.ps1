@@ -34,19 +34,27 @@ function Enter-ApplicationHost {
 
 function Resolve-ApplicationOutputSelection {
     param([ValidateSet('Playlist','C64','ZX')][string]$Operation,
-          [string]$Storage)
+          [string]$Storage,[string]$SingleStorage)
     if ($Storage -and $Storage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage.'}
     if ($Storage) {$Storage=@{Zip='Zip';Loose='Loose';Folders='Folders'}[$Storage]}
     if (-not $Storage) {
         $Storage='Zip';if ($Operation -eq 'ZX') {$Storage='Folders'}
     }
-    return @{Storage=$Storage}
+    $selection=@{Storage=$Storage}
+    if ($Operation -eq 'Playlist') {
+        if (-not $SingleStorage) {$SingleStorage='Zip'}
+        if ($SingleStorage -notin 'Zip','Loose','Folders') {throw 'Unknown single-game storage.'}
+        $selection.SingleStorage=@{Zip='Zip';Loose='Loose';Folders='Folders'}[$SingleStorage]
+    }
+    return $selection
 }
 
 function Read-ApplicationSourcePolicy {
-    param([string]$Operation,[string]$System,[string]$Storage='Zip')
-    $output=Resolve-ApplicationOutputSelection -Operation $Operation -Storage $Storage
-    $reply=Invoke-ApplicationRpc -Operation Policy.Source -Payload @{Operation=$Operation;System=$System;Storage=$output.Storage}
+    param([string]$Operation,[string]$System,[string]$Storage='Zip',[string]$SingleStorage='Zip')
+    $output=Resolve-ApplicationOutputSelection -Operation $Operation -Storage $Storage -SingleStorage $SingleStorage
+    $selection=@{Operation=$Operation;System=$System;Storage=$output.Storage}
+    if ($Operation -eq 'Playlist') {$selection.SingleStorage=$output.SingleStorage}
+    $reply=Invoke-ApplicationRpc -Operation Policy.Source -Payload $selection
     return [string]$reply.Choice
 }
 
@@ -88,8 +96,10 @@ function Set-ApplicationBatchContext($Batch) {
 function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     $name=[IO.Path]::GetFileName($Path)
     $operation=switch ($name) {'make_playlists.ps1' {'Playlist'} 'convert_c64.ps1' {'C64'} 'convert_zx.ps1' {'ZX'} default {throw 'Unknown application worker.'}}
-    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $Arguments.Storage
-    $batch=Invoke-ApplicationRpc -Operation Batch.Begin -Payload @{Operation=$operation;System=$Arguments.System;Storage=$output.Storage}
+    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
+    $selection=@{Operation=$operation;System=$Arguments.System;Storage=$output.Storage}
+    if ($operation -eq 'Playlist') {$selection.SingleStorage=$output.SingleStorage}
+    $batch=Invoke-ApplicationRpc -Operation Batch.Begin -Payload $selection
     $jobs=New-Object 'System.Collections.Generic.List[object]';$offset=0
     do {
         $page=Invoke-ApplicationRpc -Operation Batch.Jobs -Payload @{BatchId=$batch.BatchId;Offset=$offset}
@@ -102,6 +112,8 @@ function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     # All source removal happens in the parent after verified publication.
     $Arguments.Root=$batch.WorkRoot;$Arguments.SourcePolicy='Keep'
     $Arguments.Storage=$output.Storage
+    if ($operation -eq 'Playlist') {$Arguments.SingleStorage=$output.SingleStorage}
+    else {[void]$Arguments.Remove('SingleStorage')}
     Restore-Display
     try {& $Path @Arguments | Out-Host;$code=$LASTEXITCODE}
     catch {$code=1;Write-Host ('  ERROR: '+(ConvertTo-SafeExternalText $_.Exception.Message))}

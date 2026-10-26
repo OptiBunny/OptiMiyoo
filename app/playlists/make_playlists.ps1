@@ -4,6 +4,7 @@ param(
     [Parameter(Position=0)][string]$Root,
     [string]$System,
     [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
+    [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip',
     [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
     [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
     [string]$OnionRoot,
@@ -616,13 +617,14 @@ function Assert-OwnedPlaylist([string]$Path,[string]$Stem,[string[]]$Lines=$null
     if ($count -eq 0) {throw 'Existing playlist is empty; output left alone.'}
 }
 
-function Get-GameMediaNames($Job,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip') {
+function Get-GameMediaNames($Job,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',[ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip') {
     $diskNames=@(); $contentNames=@()
     if ($Job.Zip) {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
-            if ($diskNames.Count -gt 1 -and $Storage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
+            $effectiveStorage=if ($diskNames.Count -gt 1) {$Storage} else {$SingleStorage}
+            if ($effectiveStorage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
         } finally {$archive.Dispose()}
     } else {
@@ -674,12 +676,12 @@ function Set-PlaylistOutputConflicts([object[]]$Jobs) {
     }
 }
 
-function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,$Media) {
-    if ($Storage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage choice.'}
+function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,$Media,[string]$SingleStorage='Zip') {
+    if ($Storage -notin 'Zip','Loose','Folders' -or $SingleStorage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage choice.'}
     $profile=$Job.Profile
     $isMulti=$Media.DiskNames.Count -gt 1
-    # Output choices apply to hidden multi-disc media. Singles keep their input form.
-    if (-not $isMulti) {$Storage=if ($Job.Zip) {'Zip'} else {'Loose'}}
+    # Visible single games and hidden playlist media have independent layouts.
+    if (-not $isMulti) {$Storage=$SingleStorage}
     $zipMode=$Storage -eq 'Zip'
     $looseFiles=$Storage -eq 'Loose'
     $hasPlaylist=$isMulti
@@ -688,7 +690,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     if ($hasPlaylist) {$relativeData='.hidden/'+$Job.Stem}
     if ($zipMode) {$relativeData+='.zip'}
     $sourcePrefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-    if (-not $isMulti -and $Job.Zip) {
+    if (-not $isMulti -and $Job.Zip -and $zipMode) {
         $sourceZip=[IO.Path]::GetFullPath($Job.Zip)
         if (-not $sourceZip.StartsWith($sourcePrefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Source ZIP is outside SRC.'}
         $relativeData=$sourceZip.Substring($sourcePrefix.Length).Replace('\','/')
@@ -712,23 +714,12 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         if ($flatWrites.Count -eq 0) {throw 'No files were found for loose output.'}
         $dataWrites=@($flatWrites.ToArray())
         if (-not $isMulti) {
-            # Keep visible single-game paths separate from historical hidden-media ownership.
-            $disk=$Job.Disks[0]
-            $memberPrefix=[IO.Path]::GetDirectoryName($disk.Path)+[IO.Path]::DirectorySeparatorChar
-            $sourceMembers=@{}
-            foreach ($source in @(Get-JobSourcePaths $Job)) {
-                $full=[IO.Path]::GetFullPath($source)
-                if (-not $full.StartsWith($sourcePrefix,[StringComparison]::OrdinalIgnoreCase) -or
-                    -not $full.StartsWith($memberPrefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Single-game source is outside its source folder.'}
-                $member=$full.Substring($memberPrefix.Length).Replace('\','/')
-                if ($full.Equals($disk.Path,[StringComparison]::OrdinalIgnoreCase)) {$member=$disk.Name}
-                $relative=$full.Substring($sourcePrefix.Length).Replace('\','/')
-                Assert-RelativeName $relative
-                $sourceMembers[$member]=$relative
-            }
+            # Visible loose files share the collection folder, not a new game folder.
+            # Historical flat ownership remains in .hidden via FlatDataWrites.
+            $visibleBase=$flatBase.Substring('.hidden/'.Length)
             $dataWrites=@(foreach ($write in $flatWrites) {
-                if (-not $sourceMembers.ContainsKey($write.MemberName)) {throw 'A single-game output has no matching original file.'}
-                [pscustomobject]@{Destination=(Join-Path $DestinationRoot $sourceMembers[$write.MemberName].Replace('/',[IO.Path]::DirectorySeparatorChar));Folder=$false;Role='Data';MemberName=$write.MemberName}
+                $relative=$visibleBase+$write.MemberName
+                [pscustomobject]@{Destination=(Join-Path $DestinationRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar));Folder=$false;Role='Data';MemberName=$write.MemberName}
             })
         }
         $dataPath=$dataWrites[0].Destination
@@ -765,6 +756,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     foreach ($relative in $relativeCandidates) {
         $candidate=Join-Path $DestinationRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
         if ($dataTargets.Contains($candidate) -or $dataParents.Contains($candidate)) {continue}
+        if ($dataFolder -and $candidate.StartsWith($dataPath+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {continue}
         if ($seen.Add($candidate)) {$visible.Add([pscustomobject]@{Destination=$candidate;Folder=($relative -eq $Job.Stem)})}
     }
     $plan=[pscustomobject]@{DiskNames=$Media.DiskNames;ContentNames=$Media.ContentNames;IsMulti=$isMulti;ZipMode=$zipMode;
@@ -1121,7 +1113,9 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq '') {$answer='1'}
             $number=0
             if ([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $Profiles.Count) {
-                $profile=$Profiles[$number-1]; $page='Storage'; continue
+                $profile=$Profiles[$number-1]
+                $singleOutput='1'; if ($profile.Folder -in 'PS','CPC','MSX','ZXS') {$singleOutput='2'}
+                $hiddenOutput=$singleOutput; $page='SingleStorage'; continue
             }
             Write-MenuLine '  Choose one of the numbers or letters shown.'
             continue
@@ -1180,47 +1174,65 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             } else {
                 $worker=Join-Path $ScriptDir 'ZX/convert_zx.ps1'
             }
-        } elseif ($page -eq 'Storage') {
-            $pageName=$profile.Name+' / playlist storage'
+        } elseif ($page -in 'SingleStorage','Storage') {
+            $singlePage=$page -eq 'SingleStorage'
+            $pageName=$profile.Name+' / playlist media'
+            if ($singlePage) {$pageName=$profile.Name+' / single games'}
             Show-MenuTitle $pageName
             $support=Get-PlaylistSupport $profile $menuOnionRoot
             $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
             Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
-            $playlistLabel=Get-PlaylistFeatureLabel $support
-            if ($playlistLabel) {Write-MenuLine ('  '+$playlistLabel)}
-            if ($profile.Folder -eq 'COMMODORE') {
-                $tapeSupport=Get-TapeSwapSupport $profile $menuOnionRoot $support
-                $tapeFormats='TAP, T64'
-                if ($tapeSupport.CanBuild) {$tapeFormats=(@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.').ToUpperInvariant()}) -join ', ')}
-                $tapeLabel=''; if (-not $tapeSupport.CanBuild) {$tapeLabel=' ['+$tapeSupport.Status.ToLowerInvariant()+']'}
-                Write-MenuLine ('  Tape swapping: '+$tapeFormats+$tapeLabel)
-                if (-not $tapeSupport.CanBuild) {Write-MenuLine ('  '+$tapeSupport.Reason)}
+            if ($singlePage) {
+                Write-MenuLine '  Games with one disc or tape side stay visible in DST.'
+                Write-MenuLine '  Choose how to store them.'
+            } else {
+                $playlistLabel=Get-PlaylistFeatureLabel $support
+                if ($playlistLabel) {Write-MenuLine ('  '+$playlistLabel)}
+                if ($profile.Folder -eq 'COMMODORE') {
+                    $tapeSupport=Get-TapeSwapSupport $profile $menuOnionRoot $support
+                    $tapeFormats='TAP, T64'
+                    if ($tapeSupport.CanBuild) {$tapeFormats=(@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.').ToUpperInvariant()}) -join ', ')}
+                    $tapeLabel=''; if (-not $tapeSupport.CanBuild) {$tapeLabel=' ['+$tapeSupport.Status.ToLowerInvariant()+']'}
+                    Write-MenuLine ('  Tape swapping: '+$tapeFormats+$tapeLabel)
+                    if (-not $tapeSupport.CanBuild) {Write-MenuLine ('  '+$tapeSupport.Reason)}
+                }
+                Write-MenuLine ('  Single games: '+@{'1'='ZIPs';'2'='Folders';'3'='Loose files'}[$singleOutput])
+                Write-MenuLine '  Choose how playlist media is stored in .hidden.'
+                Write-MenuLine '  Playlists stay outside .hidden.'
             }
-            Write-MenuLine '  Single games are copied unchanged.'
-            Write-MenuLine '  Choose how playlist media is stored in .hidden.'
-            Write-MenuLine '  Choose Keep or Remove originals on the next screen.'
-            $defaultOutput='1'; if ($profile.Folder -in 'PS','CPC','MSX','ZXS') {$defaultOutput='2'}
-            $zipNotice=Get-ZipOutputNotice $profile $support
+            $defaultOutput=if ($singlePage) {$singleOutput} else {$hiddenOutput}
+            $zipNotice=Get-ZipOutputNotice $profile $support -Conversion:$singlePage
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            $zipDefault=' (default)'; $folderDefault=''
-            if ($defaultOutput -eq '2') {$zipDefault=''; $folderDefault=' (default)'}
+            $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
+            $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
+            $looseDefault=if ($defaultOutput -eq '3') {' (default)'} else {''}
             Write-MenuLine ('  1. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('1. ZIPs'+$zipDefault+$zipLabel)
             Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine '  3. Loose files'
+            Write-MenuLine ('  3. Loose files'+$looseDefault)
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
-            if ($profile.Folder -in 'CPC','ZXS' -and $support.Core -eq $profile.DefaultCore -and $support.Status -eq 'UNSUPPORTED') {
-                Write-MenuLine '  Playlists are also unsupported by the default core.'
-            } elseif (-not $profile.ZipMemberPlaylist -and $zipNotice.Hint -notlike 'Choose Folders*') {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
-            Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
-            if ($answer -eq 'B') {$page='Main'; continue}
+            if ($singlePage) {
+                Write-MenuLine '  Next: storage for playlist media in .hidden.'
+                Write-MenuLine '  B. Back to main menu     Q. Exit'
+                $prompt='Choose single-game storage'
+            } else {
+                if ($profile.Folder -in 'CPC','ZXS' -and $support.Core -eq $profile.DefaultCore -and $support.Status -eq 'UNSUPPORTED') {
+                    Write-MenuLine '  Playlists are also unsupported by the default core.'
+                } elseif (-not $profile.ZipMemberPlaylist -and $zipNotice.Hint -notlike 'Choose Folders*') {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
+                Write-MenuLine '  Next: choose Keep or Remove originals.'
+                Write-MenuLine '  B. Back to single games     Q. Exit'
+                $prompt='Choose storage in .hidden'
+            }
+            $answer=Read-MenuChoice ($prompt+' [Enter = '+$defaultOutput+']')
+            if ($answer -eq 'B') {$page=if ($singlePage) {'Main'} else {'SingleStorage'}; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
             if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
-            $storageChoice=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
+            if ($singlePage) {$singleOutput=$answer; $page='Storage'; continue}
+            $hiddenOutput=$answer
             $worker=Join-Path $ScriptDir 'playlists/make_playlists.ps1'
             $workerArgs=$common.Clone(); $workerArgs.System=$profile.Folder
-            $workerArgs.Storage=$storageChoice
+            $workerArgs.SingleStorage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$singleOutput]
+            $workerArgs.Storage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$hiddenOutput]
             $workerArgs.OnionRoot=$menuOnionRoot
         } elseif ($page -eq 'SD') {
             $selected=Invoke-ApplicationRpc -Operation SD.Select -Payload @{}
@@ -1231,7 +1243,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $operation='Playlist';$chosenStorage=$workerArgs.Storage
             if ($page -eq 'ZX') {$operation='ZX'}
             elseif ($page -eq 'C64') {$operation='C64'}
-            $policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage
+            if ($operation -eq 'Playlist') {$policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage $workerArgs.SingleStorage}
+            else {$policyChoice=Read-ApplicationSourcePolicy $operation $workerArgs.System $chosenStorage}
             if ($policyChoice -eq 'Back') {continue}
             if ($policyChoice -eq 'Exit') {return $lastCode}
             $workerArgs.SourcePolicy=$policyChoice
@@ -1276,14 +1289,14 @@ try {
         $logParentLease.Dispose()
     }
     $script:Log.AutoFlush=$true
-    Write-Log ('OptiMiyoo v{0} | System: {1} | Storage: {2}' -f $script:AppVersion,$System,$Storage)
+    Write-Log ('OptiMiyoo v{0} | System: {1} | Single games: {2} | Playlist media: {3}' -f $script:AppVersion,$System,$SingleStorage,$Storage)
     Write-Log ('Source policy: '+$SourcePolicy)
     Write-Event 'SOURCE' (Join-Path $Root 'SRC')
     Write-Event 'OUTPUT' (Join-Path $Root 'DST')
     Write-Host '  Existing outputs: Y / N / A / S. Skipping keeps the original.'
     Write-Host '  Single media stays visible in DST. Playlists require 2+ images.'
     Write-Host '  Working on staged copies. Originals are handled after verification.'
-    Write-Host ('  Playlist media storage: '+$Storage+'. Single games keep their original form.')
+    Write-Host ('  Single games: '+$SingleStorage+'. Playlist media in .hidden: '+$Storage+'.')
     Write-Host '  Support follows Onion defaults or the selected core on the supplied SD card.' -ForegroundColor Yellow
     Show-ConversionStart $System
     $jobs=New-Object 'System.Collections.Generic.List[object]'
@@ -1354,8 +1367,8 @@ try {
         Show-PreparationProgress 'Planning game outputs' $job.Source $checked $jobs.Count 'sets'
         try {
             $script:DiskExtensions=@($job.Profile.Extensions)
-            $media=Get-GameMediaNames $job $Storage
-            if ($media.DiskNames.Count -gt 0) {$job.OutputPlan=Get-PlaylistOutputPlan $job $sourceRoot $destRoot $Storage $media}
+            $media=Get-GameMediaNames $job $Storage $SingleStorage
+            if ($media.DiskNames.Count -gt 0) {$job.OutputPlan=Get-PlaylistOutputPlan $job $sourceRoot $destRoot $Storage $media $SingleStorage}
         } catch {$job.Error=$_.Exception.Message}
         $checked++; Show-PreparationProgress 'Planning game outputs' $job.Source $checked $jobs.Count 'sets'
     }
@@ -1403,7 +1416,7 @@ try {
                 $diskNames=@(Get-ZipDisks $archive $job.Zip)
                 $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
             } else {
-                $media=Get-GameMediaNames $job $Storage
+                $media=Get-GameMediaNames $job $Storage $SingleStorage
                 $diskNames=@($media.DiskNames)
                 $contentNames=@($media.ContentNames)
             }

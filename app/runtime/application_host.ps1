@@ -33,8 +33,10 @@ function Get-ApplicationSelection {
     if ($operation -eq 'Playlist' -and $system -notin 'AMIGA','COMMODORE','PS','SEGACD','CPC','MSX','VIC20','DOS','ZXS') {throw 'Unknown playlist system.'}
     if ($operation -eq 'C64') {$system='COMMODORE'}
     if ($operation -eq 'ZX') {$system='ZXS'}
-    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $storage
-    return @{Operation=$operation;System=$system;Storage=$output.Storage}
+    $output=Resolve-ApplicationOutputSelection -Operation $operation -Storage $storage -SingleStorage ([string]$Payload.SingleStorage)
+    $selection=@{Operation=$operation;System=$system;Storage=$output.Storage}
+    if ($operation -eq 'Playlist') {$selection.SingleStorage=$output.SingleStorage}
+    return $selection
 }
 
 function Invoke-ApplicationHostRequest {
@@ -53,7 +55,7 @@ function Invoke-ApplicationHostRequest {
         'Batch.Begin' {
             if (-not $State.Grant -or $State.Completed) {throw 'Select the batch policy in the trusted prompt first.'}
             $selection=Get-ApplicationSelection $payload
-            foreach ($key in 'Operation','System','Storage') {if ($selection[$key] -cne $State.Grant[$key]) {throw 'Batch does not match the approved selection.'}}
+            foreach ($key in 'Operation','System','Storage','SingleStorage') {if ($selection[$key] -cne $State.Grant[$key]) {throw 'Batch does not match the approved selection.'}}
             $selection.SourcePolicy=$State.Grant.SourcePolicy;$State.Grant=$null
             $State.BatchView=Start-ApplicationBrokerBatch -Session $State.Broker @selection -Existing $State.Existing
             return @{BatchId=$State.BatchView.BatchId;WorkRoot=$State.BatchView.WorkRoot;Operation=$State.BatchView.Operation;JobCount=$State.BatchView.Jobs.Count}
@@ -79,7 +81,7 @@ function Invoke-ApplicationHostRequest {
             $conflict=Get-ApplicationBrokerConflict $State.Broker $batch.BatchId ([string]$payload.ConflictId)
             $choice=$conflict.Decision
             if ($choice -eq 'Pending') {
-                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
+                $prompt=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind Overwrite -Operation $batch.Operation -System $batch.System -Storage $batch.Storage -SingleStorage $batch.SingleStorage -ConflictPaths $conflict.Paths -Folder:$conflict.Folder -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
                 $choice=$prompt.Choice
                 Set-ApplicationBrokerOverwrite $State.Broker $batch.BatchId $conflict.ConflictId $choice
             }
@@ -264,11 +266,11 @@ function Invoke-ApplicationHost {
             if ($sd) {$worker.OnionRoot=$sd.StagedRoot}
             $batch=$null
             if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
-                $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage
-                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage})
+                $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
+                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;SingleStorage=$output.SingleStorage})
                 $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
                 $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
-                if ($Entry -eq 'Playlist') {$worker.System=$selection.System}
+                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.SingleStorage=$selection.SingleStorage}
                 else {[void]$worker.Remove('Preview');[void]$worker.Remove('OnionRoot')}
                 $worker.Storage=$selection.Storage
             }

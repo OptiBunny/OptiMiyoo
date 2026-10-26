@@ -344,7 +344,8 @@ function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
 function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
           [string]$System,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
-          [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask')
+          [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
+          [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip')
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
@@ -381,9 +382,9 @@ function Start-ApplicationBrokerBatch {
             try {
                 if($sourceJob.Error){throw $sourceJob.Error}
                 & $module {param($stem)Assert-GameStem $stem} $sourceJob.Stem
-                $media=& $module {param($job,$storage)Get-GameMediaNames $job $storage} $sourceJob $Storage
+                $media=& $module {param($job,$storage,$singleStorage)Get-GameMediaNames $job $storage $singleStorage} $sourceJob $Storage $SingleStorage
                 if(@($media.DiskNames).Count -eq 0){$job.BlockedResult='Skipped';throw 'No supported media images for this system.'}
-                $plan=& $module {param($job,$src,$dst,$storage,$media)Get-PlaylistOutputPlan $job $src $dst $storage $media} $sourceJob $src $dst $Storage $media
+                $plan=& $module {param($job,$src,$dst,$storage,$media,$singleStorage)Get-PlaylistOutputPlan $job $src $dst $storage $media $singleStorage} $sourceJob $src $dst $Storage $media $SingleStorage
                 $sourceJob.OutputPlan=$plan;$job.Plan=$plan;$job.Writes=@($plan.Writes);$job.Retired=@($plan.Retired)
                 $job.Files=Get-ApplicationBrokerExpectedFiles $state $module $sourceJob
                 if($plan.PreserveZip){$job.ContainerHash=$state.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $sourceJob.Zip $src)].Hash}
@@ -441,9 +442,9 @@ function Start-ApplicationBrokerBatch {
     }
     Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
     Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
-    $batch=[pscustomobject]@{BatchId=[Guid]::NewGuid().ToString('N');WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SourcePolicy=$SourcePolicy;Existing=$Existing;Module=$module;SourceModule=$sourceModule;SourcePlan=$sourcePlan;Profile=$profile;Jobs=$jobMap;Conflicts=$conflicts;Completed=$false;OverwriteAll=''}
+    $batch=[pscustomobject]@{BatchId=[Guid]::NewGuid().ToString('N');WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;SourcePolicy=$SourcePolicy;Existing=$Existing;Module=$module;SourceModule=$sourceModule;SourcePlan=$sourcePlan;Profile=$profile;Jobs=$jobMap;Conflicts=$conflicts;Completed=$false;OverwriteAll=''}
     $state.Batch=$batch
-    $view=[pscustomobject]@{BatchId=$batch.BatchId;WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SourcePolicy=$SourcePolicy;Existing=$Existing;Jobs=@($jobs | ForEach-Object {[pscustomobject]@{JobId=$_.JobId;SourceKey=$_.SourceKey;ConflictId=$_.ConflictId;BlockedReason=$_.BlockedReason}})}
+    $view=[pscustomobject]@{BatchId=$batch.BatchId;WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;SourcePolicy=$SourcePolicy;Existing=$Existing;Jobs=@($jobs | ForEach-Object {[pscustomobject]@{JobId=$_.JobId;SourceKey=$_.SourceKey;ConflictId=$_.ConflictId;BlockedReason=$_.BlockedReason}})}
     $Session.ActiveBatch=$view
     return $view
     } finally {foreach($sourcePin in $sourcePins){$sourcePin.Dispose()}}

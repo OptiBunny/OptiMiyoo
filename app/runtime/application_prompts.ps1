@@ -12,7 +12,7 @@ function Get-ApplicationPromptTitle {
     switch($Operation) {
         'Playlist' {
             if(-not $systems.ContainsKey($System)){throw 'Unknown playlist system in trusted prompt.'}
-            return ($systems[$System]+' / '+$storageName)
+            return ($systems[$System]+' / output settings')
         }
         'C64' {
             if($System -and $System -cne 'COMMODORE'){throw 'Invalid C64 prompt system.'}
@@ -42,12 +42,18 @@ function Get-ApplicationPromptModel {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
+          [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage
     if($Kind -eq 'SourcePolicy' -and $Operation -eq 'SD'){throw 'SD setup cannot remove source media.'}
     if($Kind -ne 'Overwrite' -and $ConflictPaths.Count){throw 'Unexpected conflict paths in a policy prompt.'}
     if($Kind -eq 'SourcePolicy') {
-        $lines=@('1. KEEP originals in SRC (default)','2. REMOVE originals after verified success',
+        $lines=@()
+        if ($Operation -eq 'Playlist') {
+            $names=@{Zip='ZIPs';Folders='Folders';Loose='Loose files'}
+            $lines+=@(('Single games: '+$names[$SingleStorage]),('Playlist media: '+$names[$Storage]))
+        }
+        $lines+=@('1. KEEP originals in SRC (default)','2. REMOVE originals after verified success',
             'Skipped or failed items keep their originals.','B. Back to output settings     Q. Exit')
         if($Invalid){$lines+='Choose 1, 2, B or Q.'}
         return [pscustomobject]@{Title=($title+' / originals');Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
@@ -128,12 +134,13 @@ function Invoke-ApplicationPolicyPrompt {
           [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
+          [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
           [switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     # Validate before taking terminal ownership. Callers must resolve conflict
     # capabilities through the host broker; never pass child-supplied filenames.
-    $parameters=@{Kind=$Kind;Operation=$Operation;System=$System;Storage=$Storage;ConflictPaths=$ConflictPaths;Folder=$Folder}
+    $parameters=@{Kind=$Kind;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;ConflictPaths=$ConflictPaths;Folder=$Folder}
     $model=Get-ApplicationPromptModel @parameters
     $paused=$false;$display=$false;$result=$null;$previousEffect=$script:DisplayEffect
     try {
@@ -157,7 +164,7 @@ function Invoke-ApplicationPolicyPrompt {
                 $choice=ConvertFrom-OverwriteAnswer $answer
             }
             if($choice) {
-                $result=[pscustomobject]@{Kind=$Kind;Answer=$answer;Choice=$choice;SourcePolicy=$policy;Storage=$selectedStorage;Navigation=$navigation}
+                $result=[pscustomobject]@{Kind=$Kind;Answer=$answer;Choice=$choice;SourcePolicy=$policy;Storage=$selectedStorage;SingleStorage=$SingleStorage;Navigation=$navigation}
                 break
             }
             $invalid=$true

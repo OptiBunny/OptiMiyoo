@@ -86,8 +86,8 @@ Both menus offer:
 | **3: Folders** | One folder per game. |
 | **4: Loose files** | Individual files, without adding a game folder. |
 
-**C** and **Z** ask once, for converted files: **1: ZIPs**, **2: Folders**,
-or **3: Loose files**.
+**C** and **Z** ask once, for converted files, using the same four choices.
+**2: ZIPs** is the default. Auto keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)
 to start processing.

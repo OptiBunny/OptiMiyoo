@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position=0)][string]$Root,
-    [ValidateSet('Zip','Loose','Folders')][string]$Storage,
+    [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage,
     [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
     [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
     [switch]$NoAnimation,
@@ -166,7 +166,7 @@ $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 $script:Total=0; $script:Processed=0; $script:Ok=0; $script:Skipped=0; $script:Failed=0
 . (Join-Path $ScriptDir 'ui/display.ps1')
 try {
-    if (-not $Storage) {throw 'Output choice is missing. Choose ZIPs, folders or loose files.'}
+    if (-not $Storage) {throw 'Output choice is missing. Choose Auto, ZIPs, folders or loose files.'}
     if ([string]::IsNullOrWhiteSpace($Root)) {$Root=Split-Path -Parent $ScriptDir}
     $Root=(Resolve-Path -LiteralPath $Root).ProviderPath
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) {throw 'Root must be the folder containing SRC and DST.'}

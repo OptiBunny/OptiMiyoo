@@ -236,7 +236,6 @@ function Invoke-ApplicationHost {
     if ($Arguments.C64Convert) {$Entry='C64'}
     elseif ($Arguments.ZXConvert) {$Entry='ZX'}
     elseif ($Arguments.PrepareOnion) {$Entry='SD'}
-    if ($Entry -in 'C64','ZX' -and $Arguments.Storage -eq 'Auto') {throw 'Auto storage is available only for playlists.'}
     Initialize-ApplicationSession
     $startPage='Main'
     if ($Arguments.StartPage) {$startPage=[string]$Arguments.StartPage}

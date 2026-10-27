@@ -1,7 +1,7 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param([string]$Root,
-      [ValidateSet('Zip','Loose','Folders')][string]$Storage,
+      [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage,
       [ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
       [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',
       [switch]$NoAnimation,[switch]$NoColor,
@@ -734,7 +734,7 @@ function Get-UsefulFailureSummary([string]$Detail) {
 }
 
 function Main {
-    if (-not $Storage) {throw 'Output choice is missing. Choose ZIPs, folders or loose files.'}
+    if (-not $Storage) {throw 'Output choice is missing. Choose Auto, ZIPs, folders or loose files.'}
     Write-Banner
     Start-Log
     return (Invoke-ZXExplicitOutputs $Root $Storage $SourcePolicy $Existing)

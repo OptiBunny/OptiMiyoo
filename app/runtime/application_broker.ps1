@@ -346,7 +346,6 @@ function Start-ApplicationBrokerBatch {
           [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto')
-    if ($Storage -eq 'Auto' -and $Operation -ne 'Playlist') {throw 'Auto storage is available only for playlists.'}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
@@ -425,7 +424,7 @@ function Start-ApplicationBrokerBatch {
                 if(-not $job.Files.Count){$job.BlockedResult='Skipped';throw 'No supported disk images.'}
                 $job.DiskNames=@($group.Items | Where-Object {$_.Media} | ForEach-Object {$_.Name} | Sort-Object)
                 $job.Writes=@($plan.DataWrites);$job.Retired=@()
-                $job.DataKind='Zip';if($Storage -eq 'Folders'){$job.DataKind='Folder'}elseif($Storage -eq 'Loose'){$job.DataKind='Files'}
+                $job.DataKind='Zip';if($plan.LooseFiles){$job.DataKind='Files'}elseif($plan.DataWrites[0].Folder){$job.DataKind='Folder'}
                 $job.Conflicts=@($plan.DataWrites | Where-Object {Test-Path -LiteralPath $_.Destination})
             } catch {$job.BlockedReason=$_.Exception.Message}
             $jobs.Add($job)

@@ -1,4 +1,4 @@
-﻿# Shared explicit ZIP, loose-file and per-game-folder layouts for C64 and ZX.
+﻿# Shared Auto, ZIP, loose-file and per-game-folder layouts for C64 and ZX.
 . (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 
 function Assert-ConversionRelativeName([string]$Name) {
@@ -71,14 +71,20 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
 }
 
 function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
-    if ($Storage -notin 'Zip','Loose','Folders') {throw 'Choose ZIPs, a folder per game or loose files.'}
+    if ($Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Choose Auto, ZIPs, a folder per game or loose files.'}
     if ($Items.Count -gt 100000) {throw 'Conversion batch exceeds the output member limit.'}
-    $prefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+'\';$groups=@{}
+    $prefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+'\';$groups=@{};$auto=$Storage -eq 'Auto'
     foreach ($item in $Items) {
         $full=[IO.Path]::GetFullPath($item.InputPath)
         if (-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Conversion source leaves SRC.'}
         $relative=$full.Substring($prefix.Length).Replace('\','/');$archive=$item.Type -eq 'Zip'
-        $identity=Get-ConversionGameIdentity $relative $archive
+        if ($auto) {
+            # Preserving the layout needs no inference from disk labels. Each
+            # loose input keeps its own path; each ZIP remains one container.
+            Assert-ConversionRelativeName $relative
+            foreach ($part in $relative.Split('/')) {if ($part.StartsWith('.')) {throw 'A game or collection name starts with a dot; rename the input.'}}
+            $identity=[pscustomobject]@{Stem=$relative;Tag='';Error=''}
+        } else {$identity=Get-ConversionGameIdentity $relative $archive}
         $key='files:'+ $identity.Stem;if ($archive) {$key='zip:'+$relative}
         if (-not $groups.ContainsKey($key)) {
             if ($groups.Count -ge 20000) {throw 'Conversion batch exceeds the game limit.'}
@@ -104,7 +110,7 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
                 }
             } catch {$group.Error=$_.Exception.Message}
         }
-        $folder=$Storage -eq 'Folders';$loose=$Storage -eq 'Loose';$relativeData=$group.Stem
+        $folder=$Storage -eq 'Folders';$loose=($Storage -eq 'Loose' -or ($auto -and $group.Items[0].Type -eq 'Loose'));$relativeData=$group.Stem
         if ($Storage -eq 'Zip') {$relativeData+='.zip'}
         $writes=New-Object 'System.Collections.Generic.List[object]'
         if ($loose) {

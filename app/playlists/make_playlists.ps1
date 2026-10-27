@@ -1262,24 +1262,25 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
-            $defaultOutput='1'
+            $defaultOutput='2'
             $zipNotice=Get-ZipOutputNotice $converterProfile -GameOutput
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
-            $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
-            $looseDefault=if ($defaultOutput -eq '3') {' (default)'} else {''}
-            Write-MenuLine ('  1. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('1. ZIPs'+$zipDefault+$zipLabel)
-            Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine ('  3. Loose '+$outputName+' files'+$looseDefault)
+            $zipDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
+            $folderDefault=if ($defaultOutput -eq '3') {' (default)'} else {''}
+            $looseDefault=if ($defaultOutput -eq '4') {' (default)'} else {''}
+            Write-MenuLine '  1. Auto / keep input layout'
+            Write-MenuLine ('  2. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('2. ZIPs'+$zipDefault+$zipLabel)
+            Write-MenuLine ('  3. Folders'+$folderDefault+' / one per game')
+            Write-MenuLine ('  4. Loose '+$outputName+' files'+$looseDefault)
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             Write-MenuLine '  B. Back to main menu     Q. Exit'
             $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
-            if ($answer -notin '1','2','3') {Write-MenuLine '  Choose 1, 2, 3, B or Q.'; continue}
+            if ($answer -notin '1','2','3','4') {Write-MenuLine '  Choose 1, 2, 3, 4, B or Q.'; continue}
             $workerArgs=$common.Clone()
-            $workerArgs.Storage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$answer]
+            $workerArgs.Storage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$answer]
             if ($page -eq 'C64') {
                 $worker=Join-Path $ScriptDir 'C64/convert_c64.ps1'
             } else {

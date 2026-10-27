@@ -372,9 +372,6 @@ function Get-ZipOutputNotice($Profile,[switch]$GameOutput) {
         } elseif (-not $memberSupport.Value) {
             $notice.Label='[ZIP playlists unsupported]'
             $notice.Hint=$coreName+' cannot follow playlist links inside ZIPs.'
-            if ($Profile.DefaultCore -eq 'dosbox_pure_libretro.so') {
-                $notice.Hint='DOSBox Pure mounts the whole ZIP, not individual discs.'
-            }
         }
         return $notice
     }

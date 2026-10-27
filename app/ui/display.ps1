@@ -778,7 +778,6 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $warningPatterns=@(
             '\[[^\[\]]*(?:unsupported|unverified|not\s+installed|unpack)[^\[\]]*\]',
             '^[^\r\n]*\bcannot\s+(?:follow\s+playlist\s+links\s+inside\s+ZIPs|load\s+(?:playlists|ZIPs(?:\s+through\s+RetroArch)?))\.',
-            '^DOSBox\s+Pure\s+mounts\s+the\s+whole\s+ZIP,\s+not\s+individual\s+discs\.',
             '^Choose\s+Folders\s+or\s+Loose\s+files\s+for\s+playlists\.',
             '^ZIP\s+games\s+are\s+not\s+supported\s+in\s+the\s+default\s+Onion\s+setup\.',
             '(?<UnverifiedHint>^Playlists\s+pointing\s+inside\s+ZIPs\s+are\s+unverified\s+for\s+[^.]+\.|^Onion''s\s+docs\s+do\s+not\s+list\s+ZIP\s+games\s+for\s+this\s+default\s+core\.)'

@@ -1114,7 +1114,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $number=0
             if ([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $Profiles.Count) {
                 $profile=$Profiles[$number-1]
-                $singleOutput='1'; if ($profile.Folder -in 'PS','CPC','MSX','ZXS') {$singleOutput='2'}
+                $singleOutput='1'; if ($profile.Folder -in 'DOS','MSX','PS','SEGACD','CPC','ZXS') {$singleOutput='2'}
                 $hiddenOutput=$singleOutput; $page='SingleStorage'; continue
             }
             Write-MenuLine '  Choose one of the numbers or letters shown.'

@@ -102,7 +102,7 @@
       ".cue"
     ],
     "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Unlisted",
+    "DefaultZipSupport": "UserVerified",
     "Playlist": ".m3u",
     "Note": "CUE files keep their referenced tracks and matching SBI files.",
     "DefaultCore": "pcsx_rearmed_libretro.so",
@@ -123,7 +123,7 @@
       ".iso"
     ],
     "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Unlisted",
+    "DefaultZipSupport": "UserVerified",
     "Playlist": ".m3u",
     "Note": "The current Onion PicoDrive build supports relative-path M3U playlists and disk swapping.",
     "DefaultCore": "picodrive_libretro.so",
@@ -168,7 +168,7 @@
       ".dsk"
     ],
     "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Unlisted",
+    "DefaultZipSupport": "Unsupported",
     "Playlist": ".m3u",
     "Note": "Playlist unsupported with the default CrocoDS core: no M3U disk-swap interface.",
     "DefaultCore": "crocods_libretro.so",
@@ -190,7 +190,7 @@
       ".scl"
     ],
     "ZipMemberPlaylist": false,
-    "DefaultZipSupport": "Unlisted",
+    "DefaultZipSupport": "UserVerified",
     "Playlist": ".m3u",
     "Note": "Playlist unsupported with the inspected default Onion Fuse build: M3U loading is unavailable. ZX IPF-to-DSK conversion remains available in menu Z.",
     "DefaultCore": "fuse_libretro.so",

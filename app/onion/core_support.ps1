@@ -362,6 +362,7 @@ function Get-PlaylistFeatureLabel($Support) {
 function Get-ZipOutputNotice($Profile,$Support,[switch]$GameOutput) {
     # General ZIP loading and archive#member playlist links are separate features.
     # Unlisted/false metadata means unverified, not proof of missing core support.
+    # UserVerified records reported ZIP-game playback, not archive-member playlists.
     $notice=[pscustomobject]@{Label='';Hint=''}
     $knownMemberCore=($Profile.ZipMemberPlaylist -and $Support.Core -in @($Profile.SupportedCores))
     $unknownCore=($Support.Status -in 'UNVERIFIED','NOT INSTALLED' -or
@@ -378,8 +379,8 @@ function Get-ZipOutputNotice($Profile,$Support,[switch]$GameOutput) {
         $notice.Hint='ZIP game loading is unverified for the selected core.'
     } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
         $notice.Label='[ZIP games unsupported]'
-        $notice.Hint='ZIP game loading is not supported by this core.'
-    } elseif ($Profile.DefaultZipSupport -ne 'Documented') {
+        $notice.Hint='ZIP games are not supported in the default Onion setup.'
+    } elseif ($Profile.DefaultZipSupport -notin 'Documented','UserVerified') {
         $notice.Label='[ZIP games unverified]'
         $notice.Hint='Onion''s docs do not list ZIP games for this default core.'
     }

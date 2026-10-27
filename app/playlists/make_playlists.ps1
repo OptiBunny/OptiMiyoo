@@ -1175,7 +1175,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
             $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
-            $defaultOutput='1'; if ($page -eq 'ZX') {$defaultOutput='3'}
+            $defaultOutput='1'
             $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -GameOutput
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}

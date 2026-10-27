@@ -1137,7 +1137,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $number=0
             if ([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $Profiles.Count) {
                 $profile=$Profiles[$number-1]
-                $singleOutput='0'
+                $singleOutput='1'
                 $hiddenOutput='1'; if ($profile.Folder -in 'DOS','MSX','PS','SEGACD','CPC','ZXS') {$hiddenOutput='2'}
                 $page='SingleStorage'; continue
             }
@@ -1220,23 +1220,25 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                     Write-MenuLine ('  Tape swapping: '+$tapeFormats+$tapeLabel)
                     if (-not $tapeSupport.CanBuild) {Write-MenuLine ('  '+$tapeSupport.Reason)}
                 }
-                Write-MenuLine ('  Single games: '+@{'0'='Auto / keep input layout';'1'='ZIPs';'2'='Folders';'3'='Loose files'}[$singleOutput])
+                Write-MenuLine ('  Single games: '+@{'1'='Auto / keep input layout';'2'='ZIPs';'3'='Folders';'4'='Loose files'}[$singleOutput])
                 Write-MenuLine '  Choose how playlist media is stored in .hidden.'
                 Write-MenuLine '  Playlists stay outside .hidden.'
             }
             $defaultOutput=if ($singlePage) {$singleOutput} else {$hiddenOutput}
             $zipNotice=Get-ZipOutputNotice $profile $support -GameOutput:$singlePage
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
+            $zipChoice='1'; $folderChoice='2'; $looseChoice='3'
             if ($singlePage) {
-                $autoDefault=if ($defaultOutput -eq '0') {' (default)'} else {''}
-                Write-MenuLine ('  0. Auto'+$autoDefault+' / keep input layout')
+                $autoDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
+                Write-MenuLine ('  1. Auto'+$autoDefault+' / keep input layout')
+                $zipChoice='2'; $folderChoice='3'; $looseChoice='4'
             }
-            $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
-            $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
-            $looseDefault=if ($defaultOutput -eq '3') {' (default)'} else {''}
-            Write-MenuLine ('  1. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('1. ZIPs'+$zipDefault+$zipLabel)
-            Write-MenuLine ('  2. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine ('  3. Loose files'+$looseDefault)
+            $zipDefault=if ($defaultOutput -eq $zipChoice) {' (default)'} else {''}
+            $folderDefault=if ($defaultOutput -eq $folderChoice) {' (default)'} else {''}
+            $looseDefault=if ($defaultOutput -eq $looseChoice) {' (default)'} else {''}
+            Write-MenuLine ('  '+$zipChoice+'. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ($zipChoice+'. ZIPs'+$zipDefault+$zipLabel)
+            Write-MenuLine ('  '+$folderChoice+'. Folders'+$folderDefault+' / one per game')
+            Write-MenuLine ('  '+$looseChoice+'. Loose files'+$looseDefault)
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             if ($singlePage) {
                 Write-MenuLine '  Next: storage for playlist media in .hidden.'
@@ -1254,8 +1256,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq 'B') {$page=if ($singlePage) {'Main'} else {'SingleStorage'}; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
-            if ($answer -notin '1','2','3' -and -not ($singlePage -and $answer -eq '0')) {
-                if ($singlePage) {Write-MenuLine '  Choose 0, 1, 2, 3, B or Q.'}
+            if ($answer -notin '1','2','3' -and -not ($singlePage -and $answer -eq '4')) {
+                if ($singlePage) {Write-MenuLine '  Choose 1, 2, 3, 4, B or Q.'}
                 else {Write-MenuLine '  Choose 1, 2, 3, B or Q.'}
                 continue
             }
@@ -1263,7 +1265,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $hiddenOutput=$answer
             $worker=Join-Path $ScriptDir 'playlists/make_playlists.ps1'
             $workerArgs=$common.Clone(); $workerArgs.System=$profile.Folder
-            $workerArgs.SingleStorage=@{'0'='Auto';'1'='Zip';'2'='Folders';'3'='Loose'}[$singleOutput]
+            $workerArgs.SingleStorage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$singleOutput]
             $workerArgs.Storage=@{'1'='Zip';'2'='Folders';'3'='Loose'}[$hiddenOutput]
             $workerArgs.OnionRoot=$menuOnionRoot
         } elseif ($page -eq 'SD') {

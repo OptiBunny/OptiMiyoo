@@ -343,9 +343,10 @@ function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
 
 function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
+          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto')
+    if ($Storage -eq 'Auto' -and $Operation -ne 'Playlist') {throw 'Auto storage is available only for playlists.'}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}

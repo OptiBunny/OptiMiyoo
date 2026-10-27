@@ -35,8 +35,8 @@ function Enter-ApplicationHost {
 function Resolve-ApplicationOutputSelection {
     param([ValidateSet('Playlist','C64','ZX')][string]$Operation,
           [string]$Storage,[string]$SingleStorage)
-    if ($Storage -and $Storage -notin 'Zip','Loose','Folders') {throw 'Unknown output storage.'}
-    if ($Storage) {$Storage=@{Zip='Zip';Loose='Loose';Folders='Folders'}[$Storage]}
+    if ($Storage -and ($Storage -notin 'Auto','Zip','Loose','Folders' -or ($Storage -eq 'Auto' -and $Operation -ne 'Playlist'))) {throw 'Unknown output storage.'}
+    if ($Storage) {$Storage=@{Auto='Auto';Zip='Zip';Loose='Loose';Folders='Folders'}[$Storage]}
     if (-not $Storage) {
         $Storage='Zip';if ($Operation -eq 'ZX') {$Storage='Folders'}
     }

@@ -5,7 +5,8 @@
 
 function Get-ApplicationPromptTitle {
     param([Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
-          [string]$System,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip')
+          [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip')
+    if ($Storage -eq 'Auto' -and $Operation -ne 'Playlist') {throw 'Auto storage is available only for playlists.'}
     $systems=@{AMIGA='Amiga';COMMODORE='Commodore 64';PS='PlayStation';SEGACD='Sega CD';
         CPC='Amstrad CPC';MSX='MSX';VIC20='VIC-20';DOS='MS-DOS';ZXS='ZX Spectrum'}
     $storageName=@{Zip='ZIP output';Loose='Loose files';Folders='Folder per game'}[$Storage]
@@ -41,7 +42,7 @@ function ConvertTo-ApplicationPromptPath([string]$Path) {
 function Get-ApplicationPromptModel {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
-          [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage
@@ -133,7 +134,7 @@ function Invoke-ApplicationPolicyPrompt {
     param([Parameter(Mandatory=$true)]$Session,
           [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
-          [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
           [switch]$NoAnimation,[switch]$NoColor,

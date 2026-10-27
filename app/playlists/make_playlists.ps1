@@ -1329,7 +1329,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 Write-MenuLine '  B. Back to main menu     Q. Exit'
                 $prompt='Choose single-game storage'
             } else {
-                if ($zipNotice.Label -and $support.CanBuild) {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
+                if ($support.Status -eq 'UNSUPPORTED') {Write-MenuLine ('  '+$coreName+' cannot load playlists.')}
+                elseif ($zipNotice.Label -and $support.CanBuild) {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
                 Write-MenuLine '  Next: choose Keep or Remove originals.'
                 Write-MenuLine '  B. Back to single games     Q. Exit'
                 $prompt='Choose storage in .hidden'

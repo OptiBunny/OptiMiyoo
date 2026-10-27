@@ -772,9 +772,19 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $channel='SRC -> DST / LOCAL DISK LINK'
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // READY' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
-    # Match before coloring so warning labels keep their color across wrapped rows.
+    # Match complete warnings before coloring, including explanations split across rows.
     $warnings=@()
-    if ($script:UiAnsi) {$warnings=@([regex]::Matches(($Rows -join "`n"),'(?i)\[[^\[\]]*(?:unsupported|unverified|not\s+installed|unpack)[^\[\]]*\]'))}
+    if ($script:UiAnsi) {
+        $warningPatterns=@(
+            '\[[^\[\]]*(?:unsupported|unverified|not\s+installed|unpack)[^\[\]]*\]',
+            '^[^\r\n]*\bcannot\s+(?:follow\s+playlist\s+links\s+inside\s+ZIPs|load\s+(?:playlists|ZIPs(?:\s+through\s+RetroArch)?))\.',
+            '^DOSBox\s+Pure\s+mounts\s+the\s+whole\s+ZIP,\s+not\s+individual\s+discs\.',
+            '^Choose\s+Folders\s+or\s+Loose\s+files\s+for\s+playlists\.',
+            '^ZIP\s+games\s+are\s+not\s+supported\s+in\s+the\s+default\s+Onion\s+setup\.',
+            '(?<UnverifiedHint>^Playlists\s+pointing\s+inside\s+ZIPs\s+are\s+unverified\s+for\s+[^.]+\.|^Onion''s\s+docs\s+do\s+not\s+list\s+ZIP\s+games\s+for\s+this\s+default\s+core\.)'
+        )
+        $warnings=@([regex]::Matches(($Rows -join "`n"),'(?im)(?:'+($warningPatterns -join '|')+')'))
+    }
     $rowOffset=0
     for ($i=0;$i -lt $bodyRows;$i++) {
         $text=''; if ($i -lt $Rows.Count) {$text=$Rows[$i]}
@@ -782,7 +792,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $warningRow=$false; $unverifiedRow=$false
         foreach ($warning in $warnings) {
             if ($warning.Index -lt $rowOffset+$text.Length -and $warning.Index+$warning.Length -gt $rowOffset) {
-                if ($warning.Value -match '(?i)unverified' -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$unverifiedRow=$true}
+                if (($warning.Groups['UnverifiedHint'].Success -or $warning.Value -match '(?i)unverified') -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$unverifiedRow=$true}
                 else {$warningRow=$true}
             }
         }

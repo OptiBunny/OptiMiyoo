@@ -1292,7 +1292,6 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Show-MenuTitle $pageName
             $support=Get-PlaylistSupport $profile ''
             $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
-            if ($profile.Folder -in 'CPC','ZXS') {$coreName+=' (Onion OS bundled build)'}
             Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
             if ($singlePage) {
                 Write-MenuLine '  Games with one disc or tape side stay visible in DST.'

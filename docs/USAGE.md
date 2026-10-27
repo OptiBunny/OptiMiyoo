@@ -2,8 +2,9 @@
 
 ## Menu guide
 
-Run **`OptiMiyoo.bat`**. Type a choice and press **Enter**; Enter alone accepts
-the displayed default. Use the back and exit keys shown on each screen.
+Open **`OptiMiyoo.bat`**. Type an option's number or letter and press **Enter**.
+Press **Enter** without typing anything to choose the default. Each menu shows
+how to go back or exit.
 
 | Choose | Task |
 | --- | --- |

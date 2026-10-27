@@ -17,7 +17,7 @@ function Remove-ArchiveSandboxScratch([string]$Path,[string]$Root,[string]$Ident
         try {if([IO.Directory]::Exists($Path)-or[IO.File]::Exists($Path)){Remove-SourcePolicyOwnedPath $Path $Root $Identity 50000};return}
         catch {$failure=$_;if(-not (Test-ArchiveSandboxSharingFailure $_)){break};Start-Sleep -Milliseconds 50}
     }
-    Write-Warning ('Temporary archive helper files were kept at '+$Path+'. '+$failure.Exception.Message)
+    Write-Warning (ConvertTo-SafeExternalText ('Temporary archive helper files were kept at '+$Path+'. '+$failure.Exception.Message))
 }
 
 function Get-ArchiveSandboxExecutableBytes {

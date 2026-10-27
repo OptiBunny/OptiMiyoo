@@ -1,4 +1,5 @@
 ﻿. (Join-Path $PSScriptRoot 'native_sandbox.ps1')
+. (Join-Path $PSScriptRoot 'output_safety.ps1')
 # Bound diagnostics before they reach PowerShell or a log. Read fixed chunks,
 # because line events and ReadToEndAsync can allocate without a size limit.
 function Initialize-NativeTextCapture {
@@ -117,6 +118,6 @@ function Close-NativeSandboxJob($Job) {
     if (-not $Job) {return}
     $Job.Dispose()
     if ($Job.CleanupWarning) {
-        Write-Warning ('Sandbox cleanup warning: '+$Job.CleanupWarning)
+        Write-Warning ('Sandbox cleanup warning: '+(ConvertTo-SafeExternalText $Job.CleanupWarning))
     }
 }

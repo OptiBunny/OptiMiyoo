@@ -122,7 +122,7 @@ function Read-ApplicationConsoleChoice($Model) {
                 continue
             }
             if($key.Key -eq [ConsoleKey]::Enter){if(-not $script:UiVT){[Console]::WriteLine()};return $text.Trim().ToUpperInvariant()}
-            if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,$text.Length-1)}
+            if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
             elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
             $caret=$text.Length;$dirty=$true
             if(-not $script:UiVT){[Console]::Write("`r"+$Model.Prompt+': '+$text+' ')}

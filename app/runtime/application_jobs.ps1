@@ -31,7 +31,7 @@ function Close-ApplicationNativeJob {
     param($State,$Job)
     if (-not $Job) {return}
     try {
-        if ($Job.Native) {$Job.Native.Dispose()}
+        if ($Job.Native) {Close-NativeSandboxJob $Job.Native}
     } finally {
         foreach ($resource in @($Job.Out,$Job.Err,$Job.InputLease,$Job.ParentLease)) {
             if ($resource) {$resource.Dispose()}

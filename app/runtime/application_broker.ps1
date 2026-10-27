@@ -583,7 +583,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
         }
         return [pscustomobject]@{Items=$items.ToArray();Owned=$owned.ToArray();Locks=$locks}
     } catch {
-        foreach($path in $owned){if(Test-Path -LiteralPath $path){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Unpublished broker staging retained: '+$path)}}}
+        foreach($path in $owned){if(Test-Path -LiteralPath $path){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalText $path))}}}
         foreach($lock in $locks){$lock.Dispose()}
         throw
     }
@@ -661,7 +661,7 @@ function Complete-ApplicationBrokerBatch {
                 if($sealed){
                     foreach($path in $sealed.Owned){
                         $preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path,[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0
-                        if(-not $preserve -and (Test-Path -LiteralPath $path)){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Broker staging retained: '+$path)}}
+                        if(-not $preserve -and (Test-Path -LiteralPath $path)){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalText $path))}}
                     }
                     foreach($lock in $sealed.Locks){$lock.Dispose()}
                 }
@@ -671,7 +671,7 @@ function Complete-ApplicationBrokerBatch {
         # Reject cleanup for the entire batch before considering any removals.
         try {Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'}
         catch {$batch.SourcePlan.BlockReason='Original source inventory changed; all originals kept.'}
-        & $batch.SourceModule {param($plan)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning $message}}} $batch.SourcePlan
+        & $batch.SourceModule {param($plan)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalText $message)}}} $batch.SourcePlan
         foreach($job in $batch.Jobs.Values){
             if(-not $ids.Contains($job.JobId)){
                 $detail='The worker did not complete this input; original kept.'

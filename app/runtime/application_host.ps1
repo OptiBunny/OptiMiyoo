@@ -199,9 +199,9 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
         }
         foreach ($row in $Result.Results) {$logWriter.WriteLine(((ConvertTo-SafeExternalText ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)) -replace '[\r\n]+',' '))}
         $csvWriter.Flush();$csvStream.Flush($true);$logWriter.Flush();$logStream.Flush($true)
-        Write-Host ('Report: '+$csv)
-        Write-Host ('Log: '+$log)
-    } catch {Write-Warning ('Could not save the verified result report: '+$_.Exception.Message)}
+        Write-Host ('Report: '+(ConvertTo-SafeExternalText $csv))
+        Write-Host ('Log: '+(ConvertTo-SafeExternalText $log))
+    } catch {Write-Warning ('Could not save the verified result report: '+(ConvertTo-SafeExternalText $_.Exception.Message))}
     finally {
         if ($csvWriter) {$csvWriter.Dispose()} elseif ($csvStream) {$csvStream.Dispose()}
         if ($logWriter) {$logWriter.Dispose()} elseif ($logStream) {$logStream.Dispose()}
@@ -303,7 +303,7 @@ function Invoke-ApplicationHost {
             if ($native) {Close-ApplicationJobBroker $native}
             if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
             if ($sd) {Close-ApplicationSdSession -Session $sd}
-            if ($session) {$session.Dispose();if ($session.CleanupWarning) {Write-Warning $session.CleanupWarning}}
+            if ($session) {$session.Dispose();if ($session.CleanupWarning) {Write-Warning (ConvertTo-SafeExternalText $session.CleanupWarning)}}
         }
         if ($state) {$displayEffect=$state.DisplayEffect}
         if ($state -and $state.Result) {
@@ -326,7 +326,7 @@ function Invoke-ApplicationHost {
         }
         if ($sdResult) {
             Write-Host ('SD setup updated: {0}; skipped: {1}; failed: {2}.' -f $sdResult.Changed,$sdResult.Skipped,$sdResult.Failed)
-            if ($sdResult.BackupRoot) {Write-Host ('Original configs: '+$sdResult.BackupRoot)}
+            if ($sdResult.BackupRoot) {Write-Host ('Original configs: '+(ConvertTo-SafeExternalText $sdResult.BackupRoot))}
             if ($sdResult.Changed) {Write-Host 'Refresh the Onion game list.'}
             if ($sdResult.Failed) {$exitCode=1}
             if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$true}

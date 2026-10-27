@@ -10,13 +10,13 @@ param(
     [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT'
 )
 
+$ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry C64 -Arguments $PSBoundParameters)
 }
 $script:AppVersion = '0.0.9'
 
-$ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $NibConv = Join-Path $ScriptDir 'C64/tools/nibconv.exe'
 . (Join-Path $ScriptDir 'shared/source_policy.ps1')

@@ -1,11 +1,11 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param([string]$OnionRoot)
+$ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry SD -Arguments $PSBoundParameters)
 }
-$ErrorActionPreference='Stop'
 $exitCode=0
 $ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $ScriptDir 'onion/core_support.ps1')

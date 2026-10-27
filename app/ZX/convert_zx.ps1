@@ -9,12 +9,11 @@ param([string]$Root,
 # ZX conversion uses the shared output layouts and source policy.
 # Windows PowerShell 5.1 compatible. No GUI. Keep originals is the default.
 
+$ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry ZX -Arguments $PSBoundParameters)
 }
-$ErrorActionPreference = 'Stop'
-
 $script:AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $Root) {$Root=Split-Path -Parent (Split-Path -Parent $script:AppRoot)}
 $Root=(Resolve-Path -LiteralPath $Root).ProviderPath
@@ -407,6 +406,7 @@ function Test-CapsIPFEngine([string]$EnginePath, [string]$InputPath) {
 
 function Ensure-CapsIPFReady($ProbeItem) {
     $probeTempRoot = $null
+    $expanded = $null
     try {
         Write-Status 'INFO' ('CAPS preflight using staged copy: ' + $ProbeItem.DisplayName)
         if ($ProbeItem.Type -eq 'Zip') {
@@ -458,8 +458,9 @@ function Ensure-CapsIPFReady($ProbeItem) {
         }
         return $true
     } finally {
+        if ($expanded -and $expanded.TempLease) {$expanded.TempLease.Dispose()}
         if ($probeTempRoot -and (Test-Path -LiteralPath $probeTempRoot)) {
-            Remove-ZXWorkPath $probeTempRoot ([IO.Path]::GetTempPath())
+            Remove-ZXWorkPath $probeTempRoot ([IO.Path]::GetTempPath()) $expanded.TempIdentity
         }
     }
 }
@@ -499,9 +500,12 @@ function Ensure-HxC {
     return $true
 }
 
-function Remove-ZXWorkPath([string]$Path,[string]$Root) {
+function Remove-ZXWorkPath([string]$Path,[string]$Root,[string]$Identity) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {return}
-    try {Remove-SourcePolicyOwnedPath -Path $Path -Root $Root}
+    try {
+        if (-not $Identity) {throw 'Temporary directory ownership was not captured; files retained.'}
+        Remove-SourcePolicyOwnedPath -Path $Path -Root $Root -Identity $Identity -MaximumEntries 4
+    }
     catch {
         Write-Diagnostic ('Temporary output cleanup failed: '+$Path+' / '+$_.Exception.Message)
         Write-Status 'WARN' ('Temporary output cleanup failed: '+$Path)
@@ -510,45 +514,52 @@ function Remove-ZXWorkPath([string]$Path,[string]$Root) {
 
 function Stage-LooseIPF([string]$InputPath) {
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_' + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     $input = $null
     $output = $null
+    $tempLease=$null;$tempIdentity=''
     $complete=$false
     try {
+        New-SourcePolicyOwnedDirectory $tempRoot
+        $tempLease=Open-SourcePolicyDirectoryLease $tempRoot;$tempIdentity=$tempLease.DirectoryIdentity
         $tempFile = Join-Path $tempRoot 'disk.ipf'
         # Open the preservation source explicitly read-only, then give HxC only the staged copy.
         $input = [IO.File]::Open($InputPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-        $output = [IO.File]::Create($tempFile)
+        $output = [IO.File]::Open($tempFile,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
         Initialize-ArchiveLimits
         if ($input.Length -gt 512MB) {throw 'Disk image exceeds the supported 512 MiB size limit; original kept.'}
         [void][OptiMiyoo.ArchiveLimits]::CopyBounded($input,$output,512MB)
         $output.Flush()
         $complete=$true
-        return [PSCustomObject]@{ Path=$tempFile; TempRoot=$tempRoot }
+        return [PSCustomObject]@{ Path=$tempFile; TempRoot=$tempRoot; TempLease=$tempLease; TempIdentity=$tempIdentity }
     } finally {
         if ($output) { $output.Dispose() }
         if ($input) { $input.Dispose() }
-        if (-not $complete -and (Test-Path -LiteralPath $tempRoot)) {
-            Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())
+        if (-not $complete) {
+            if ($tempLease) {$tempLease.Dispose()}
+            if ($tempIdentity) {Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath()) $tempIdentity}
         }
     }
 }
 
 function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
     $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_'+[Guid]::NewGuid().ToString('N'))
-    [void][IO.Directory]::CreateDirectory($tempRoot)
-    $zip=$null;$complete=$false
+    $zip=$null;$complete=$false;$tempLease=$null;$tempIdentity=''
     try {
+        New-SourcePolicyOwnedDirectory $tempRoot
+        $tempLease=Open-SourcePolicyDirectoryLease $tempRoot;$tempIdentity=$tempLease.DirectoryIdentity
         $zip=Open-ArchiveWithBudget -Path $ZipPath -Profile Floppy
         $matches=@();for($i=0;$i -lt $zip.Entries.Count;$i++){if($zip.Entries[$i].FullName -ceq $EntryName){$matches+=,$i}}
         if($matches.Count -ne 1){throw 'Missing or duplicate disk entry in ZIP.'}
         Show-Stage 'Preparing disk from ZIP in sandbox' $EntryName 0
         $tempFile=Join-Path $tempRoot 'disk.ipf'
         $null=Invoke-ArchiveSandbox -ZipPath $ZipPath -Archive $zip -Profile Floppy -Operation File -EntryIndex $matches[0] -MaximumBytes 512MB -Destination $tempFile -Progress {param($index,$count,$done,$length) Show-Stage 'Reading ZIP payload in sandbox' 'Checking decompressed disk bytes' (100*$done/[Math]::Max(1,$length))}
-        $complete=$true;return [pscustomobject]@{Path=$tempFile;TempRoot=$tempRoot}
+        $complete=$true;return [pscustomobject]@{Path=$tempFile;TempRoot=$tempRoot;TempLease=$tempLease;TempIdentity=$tempIdentity}
     } finally {
         if($zip){$zip.Dispose()}
-        if(-not $complete -and (Test-Path -LiteralPath $tempRoot)){Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath())}
+        if(-not $complete){
+            if($tempLease){$tempLease.Dispose()}
+            if($tempIdentity){Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath()) $tempIdentity}
+        }
     }
 }
 

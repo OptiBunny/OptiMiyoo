@@ -228,7 +228,7 @@ function Read-ApplicationSdConsolePath {
                 $selected=$text.Trim().Trim('"')
                 return $selected
             }
-            if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,$text.Length-1)}
+            if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
             elseif(-not [char]::IsControl($key.KeyChar) -and $key.KeyChar -notmatch '[\u202a-\u202e\u2066-\u2069]' -and $text.Length -lt 32767){$text+=[string]$key.KeyChar}
             $dirty=$true
             if(-not $script:UiVT){[Console]::Write("`r"+$prompt+': '+$text+' ')}

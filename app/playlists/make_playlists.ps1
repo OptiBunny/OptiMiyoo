@@ -19,12 +19,12 @@ param(
     [switch]$C64Convert,
     [ValidateSet('Main','C64','ZX')][string]$StartPage='Main'
 )
+$ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry Playlist -Arguments $PSBoundParameters)
 }
 $script:AppVersion='0.0.9'
-$ErrorActionPreference='Stop'
 $ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $ScriptDir 'shared/source_policy.ps1')
 . (Join-Path $ScriptDir 'shared/archive_limits.ps1')

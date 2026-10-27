@@ -282,18 +282,55 @@ function Fit-Text([string]$Text,[int]$Width) {
     }
     return $Text+(' '*[Math]::Max(0,$Width-(Get-TextWidth $Text)))
 }
+function Get-InputCaretOffset([string]$Text,[int]$Caret,[int]$Direction) {
+    $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
+    if ($Text -notmatch '[^\x00-\x7F]') {
+        return [Math]::Max(0,[Math]::Min($Text.Length,$Caret+[Math]::Sign($Direction)))
+    }
+    # Carets and deletions follow whole text elements, including surrogate pairs
+    # and combining accents. This runs only on a key press, never an idle poll.
+    $starts=[Globalization.StringInfo]::ParseCombiningCharacters($Text)
+    $at=[Array]::BinarySearch($starts,$Caret)
+    if ($Direction -gt 0) {
+        if ($at -ge 0) {$at++} else {$at=-bnot $at}
+        if ($at -ge $starts.Length) {return $Text.Length}
+    } else {
+        if ($at -ge 0) {$at--} else {$at=(-bnot $at)-1}
+        if ($at -lt 0) {return 0}
+    }
+    return $starts[$at]
+}
 function Get-InputViewport([string]$Text,[int]$Caret,[int]$Width) {
-    $offset=[Math]::Max(0,$Caret-$Width+1)
-    if ($offset -lt $Caret -and [char]::IsLowSurrogate($Text[$offset])) {$offset++}
-    while ((Get-TextWidth $Text.Substring($offset,$Caret-$offset)) -ge $Width) {
-        $element=[Globalization.StringInfo]::GetNextTextElement($Text,$offset)
-        $offset+=$element.Length
-        if ($offset -ge $Caret) {$offset=$Caret; break}
+    $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
+    if ($Width -lt 1) {return [pscustomobject]@{Text='';Caret=0;CaretTextIndex=0}}
+    if ($Text -notmatch '[^\x00-\x7F]') {
+        $offset=[Math]::Max(0,$Caret-$Width+1)
+        return [pscustomobject]@{
+            Text=$Text.Substring($offset,[Math]::Min($Width,$Text.Length-$offset))
+            Caret=$Caret-$offset;CaretTextIndex=$Caret-$offset
+        }
+    }
+    $starts=[Globalization.StringInfo]::ParseCombiningCharacters($Text)
+    $at=$starts.Length
+    if ($Caret -lt $Text.Length) {
+        $at=[Array]::BinarySearch($starts,$Caret)
+        if ($at -lt 0) {$at=(-bnot $at)-1;$Caret=$starts[$at]}
+    }
+    # Work backward over visible elements once. A UTF-16 offset can otherwise
+    # drop the base of an accent, even when the whole input fits on screen.
+    $reserve=1
+    if ($Caret -lt $Text.Length) {$reserve=[Math]::Max(1,(Get-TextElementWidth ([Globalization.StringInfo]::GetNextTextElement($Text,$Caret))))}
+    $offset=$Caret;$cells=0
+    for ($index=$at-1;$index -ge 0;$index--) {
+        $end=$Text.Length;if ($index+1 -lt $starts.Length) {$end=$starts[$index+1]}
+        $element=$Text.Substring($starts[$index],$end-$starts[$index])
+        $widthOfElement=Get-TextElementWidth $element
+        if ($cells+$widthOfElement -gt $Width-$reserve) {break}
+        $cells+=$widthOfElement;$offset=$starts[$index]
     }
     return [pscustomobject]@{
         Text=Get-TextPrefix $Text.Substring($offset) $Width
-        Caret=Get-TextWidth $Text.Substring($offset,$Caret-$offset)
-        CaretTextIndex=$Caret-$offset
+        Caret=$cells;CaretTextIndex=$Caret-$offset
     }
 }
 
@@ -535,7 +572,9 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
     # Cached row shading adds CRT texture without moving pixels or changing
     # menu, status, or input text.
     $useCrt=($script:DisplayEffect -eq 'CRT' -and $script:UiAnsi)
-    $sparseCrt=($useCrt -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry)
+    # A logo-only sweep leaves these pixels static; reuse the ordinary pose
+    # cache instead of retaining an identical bunny frame for every logo phase.
+    $sparseCrt=($useCrt -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry -and $script:UiSparseCrtRegion -eq 'Bunny')
     $cacheKey=$pose+'|'+$script:UiAnsi+'|'+$useCrt
     $phaseKey=$null
     if ($sparseCrt) {
@@ -900,10 +939,10 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                 }
                 if ($key.Key -eq [ConsoleKey]::Enter) {return $text.Trim()}
                 if ($key.Key -eq [ConsoleKey]::Escape) {return 'B'}
-                if ($key.Key -eq [ConsoleKey]::Backspace -and $caret -gt 0) {$text=$text.Remove($caret-1,1); $caret--}
-                elseif ($key.Key -eq [ConsoleKey]::Delete -and $caret -lt $text.Length) {$text=$text.Remove($caret,1)}
-                elseif ($key.Key -eq [ConsoleKey]::LeftArrow) {$caret=[Math]::Max(0,$caret-1)}
-                elseif ($key.Key -eq [ConsoleKey]::RightArrow) {$caret=[Math]::Min($text.Length,$caret+1)}
+                if ($key.Key -eq [ConsoleKey]::Backspace -and $caret -gt 0) {$previous=Get-InputCaretOffset $text $caret -1;$text=$text.Remove($previous,$caret-$previous);$caret=$previous}
+                elseif ($key.Key -eq [ConsoleKey]::Delete -and $caret -lt $text.Length) {$next=Get-InputCaretOffset $text $caret 1;$text=$text.Remove($caret,$next-$caret)}
+                elseif ($key.Key -eq [ConsoleKey]::LeftArrow) {$caret=Get-InputCaretOffset $text $caret -1}
+                elseif ($key.Key -eq [ConsoleKey]::RightArrow) {$caret=Get-InputCaretOffset $text $caret 1}
                 elseif ($key.Key -eq [ConsoleKey]::Home) {$caret=0}
                 elseif ($key.Key -eq [ConsoleKey]::End) {$caret=$text.Length}
                 elseif ($key.Key -eq [ConsoleKey]::U -and ($key.Modifiers -band [ConsoleModifiers]::Control)) {$text='';$caret=0}
@@ -1123,7 +1162,9 @@ function Get-OptiLogoRows {
     $colors=@(Get-BannerPalette)
     $crt=($script:UiAnsi -and $script:DisplayEffect -eq 'CRT')
     $cacheKey=$script:UiAnsi.ToString()+'|'+$crt+'|'+($colors -join '|')
-    $motion=($crt -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry.LogoRow -gt 0)
+    # The later bunny sweep cannot shade the logo. Its steady rows already
+    # have a cache entry and need no per-phase copies.
+    $motion=($crt -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry.LogoRow -gt 0 -and $script:UiSparseCrtRegion -eq 'Logo')
     $levels=$null
     if ($motion) {
         $cacheKey+='|'+$script:MioSparseCrtGeometry.Key+'|'+$script:UiSparseCrtRegion+'|'+$script:MioSparseCrtLogoFrameCount+'|'+$script:MioSparseCrtBunnyFrameCount+'|'+$script:UiSparseCrtPhase

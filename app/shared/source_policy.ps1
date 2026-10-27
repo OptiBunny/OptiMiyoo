@@ -105,6 +105,20 @@ namespace OptiMiyoo {
         }
         public static SourceRemovalLeaseV128 Open(string path, string root) { return OpenCore(path, root, true); }
         public static SourceRemovalLeaseV128 OpenRead(string path) { return OpenCore(path, Path.GetPathRoot(Path.GetFullPath(path)), false); }
+        public static SourceRemovalLeaseV128 OpenReadForPublication(string path) {
+            // Hold the descriptor before relaxing its ancestor share modes.
+            // Its locked directory entry keeps each ancestor nonempty, so none
+            // can become a junction; no-delete sharing pins the ancestry while
+            // write sharing allows unrelated sibling outputs to be published.
+            SourceRemovalLeaseV128 lease = OpenRead(path);
+            List<SafeFileHandle> relaxed = new List<SafeFileHandle>();
+            try {
+                foreach (string ancestor in Ancestors(Path.GetFullPath(path))) relaxed.Add(OpenHandle(ancestor, true, false, 3));
+                for (int i = lease.parents.Count - 1; i >= 0; i--) lease.parents[i].Dispose();
+                lease.parents.Clear(); lease.parents.AddRange(relaxed); relaxed.Clear();
+                return lease;
+            } catch { foreach (SafeFileHandle handle in relaxed) handle.Dispose(); lease.Dispose(); throw; }
+        }
         public static SourceRemovalLeaseV128 OpenDirectory(string path) {
             RequireWindows();
             SourceRemovalLeaseV128 lease = new SourceRemovalLeaseV128();

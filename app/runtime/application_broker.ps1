@@ -584,24 +584,24 @@ function Get-ApplicationBrokerExpectedLengths($Expected,$Batch,$ReceiptStore) {
     return ,([long[]]$lengths)
 }
 
-function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot) {
+function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot,$ReferenceIndex=$null) {
     if($Batch.Operation -eq 'Playlist'){
-        & $Batch.Module {param($job,$profile,$dst)
+        & $Batch.Module {param($job,$profile,$dst,$references)
             $script:DiskExtensions=@($profile.Extensions)
             $names=@($job.Plan.ContentNames)+@($job.Files.Keys)
             Assert-NoMediaNesting $job.SourceJob $dst $job.Plan.ZipMode
-            Assert-PlaylistOutputOwnership $job.Plan $names
-        } $Job $Batch.Profile $DestinationRoot
+            Assert-PlaylistOutputOwnership $job.Plan $names $references
+        } $Job $Batch.Profile $DestinationRoot $ReferenceIndex
     } elseif($Batch.Operation -in 'C64','ZX'){
         & $Batch.Module {param($group,$dst)Assert-ConversionGroupOwnership $group $dst} $Job.SourceJob $DestinationRoot
     } else {throw 'Unknown application operation.'}
 }
 
-function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
+function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null) {
     $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
     $items=New-Object 'System.Collections.Generic.List[object]';$owned=New-Object 'System.Collections.Generic.List[string]';$locks=New-Object 'System.Collections.Generic.List[IDisposable]'
     try {
-        Assert-ApplicationBrokerOwnership $Batch $Job $dst
+        Assert-ApplicationBrokerOwnership $Batch $Job $dst $ReferenceIndex
         foreach($write in $Job.Writes){
             $relative=Get-ApplicationBrokerRelative $write.Destination $dst
             $childPath=Join-Path $workDst $relative
@@ -728,18 +728,21 @@ function Complete-ApplicationBrokerBatch {
     $batch.Completed=$true
     $src=Join-Path $state.OriginalRoot 'SRC';$dst=Join-Path $state.OriginalRoot 'DST'
     $results=New-Object 'System.Collections.Generic.List[object]'
+    $referenceIndex=$null
     try {
         Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
         Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
+        if($batch.Operation -eq 'Playlist'){$referenceIndex=& $batch.Module {param($root)New-PlaylistReferenceIndex $root} $dst}
         foreach($id in $CompletedJobIds){
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
             try {
-                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $ReceiptStore
-                Assert-ApplicationBrokerOwnership $batch $job $dst
+                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $ReceiptStore $referenceIndex
+                Assert-ApplicationBrokerOwnership $batch $job $dst $referenceIndex
                 # Reuse the verified publication and rollback logic for all output layouts.
                 $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock
                 $folderManifest=(Get-Command Get-ApplicationBrokerBackupManifest).ScriptBlock
                 $validateBackup={param($destination,$backup,$folder)& $backupFactory $state $destination $backup $folder $folderManifest}.GetNewClosure()
+                if($referenceIndex){& $batch.Module {param($index,$targets)Reset-PlaylistReferenceIndexTargets $index $targets} $referenceIndex (@($job.Writes)+@($job.Retired)+@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}}))}
                 $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
@@ -749,6 +752,7 @@ function Complete-ApplicationBrokerBatch {
                 if($commit){foreach($lock in $commit.Locks){$lock.Dispose()}}
                 if($sealed){
                     foreach($path in $sealed.Owned){
+                        if($referenceIndex){& $batch.Module {param($index,$path)Reset-PlaylistReferenceIndexTargets $index @([pscustomobject]@{Destination=$path;Folder=$true})} $referenceIndex $path}
                         $preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path,[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0
                         if(-not $preserve -and (Test-Path -LiteralPath $path)){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalText $path))}}
                     }
@@ -795,7 +799,7 @@ function Complete-ApplicationBrokerBatch {
             [pscustomobject]@{State=$_.State;Reason=$reason}
         })
         return [pscustomobject]@{BatchId=$BatchId;Operation=$batch.Operation;SourcePolicy=$batch.SourcePolicy;Results=$results.ToArray();Sources=$sourceStates;Written=@($results | Where-Object {$_.Result -in 'Written','Overwritten'}).Count;Failed=@($results | Where-Object {$_.Result -eq 'Failed'}).Count;Removed=@($sourceStates | Where-Object {$_.State -eq 'Removed'}).Count;Kept=@($sourceStates | Where-Object {$_.State -ne 'Removed'}).Count;RemovalFailures=@($sourceStates | Where-Object {$_.State -eq 'Failed'}).Count}
-    } finally {$Session.ActiveBatch=$null}
+    } finally {if($referenceIndex){& $batch.Module {param($index)Close-PlaylistReferenceIndex $index} $referenceIndex};$Session.ActiveBatch=$null}
 }
 
 function Close-ApplicationBrokerSession($Session) {

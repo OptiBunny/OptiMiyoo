@@ -1292,6 +1292,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Show-MenuTitle $pageName
             $support=Get-PlaylistSupport $profile ''
             $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
+            if ($profile.Folder -in 'CPC','ZXS') {$coreName+=' (Onion OS bundled build)'}
             Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
             if ($singlePage) {
                 Write-MenuLine '  Games with one disc or tape side stay visible in DST.'
@@ -1329,9 +1330,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 Write-MenuLine '  B. Back to main menu     Q. Exit'
                 $prompt='Choose single-game storage'
             } else {
-                if ($profile.Folder -in 'CPC','ZXS' -and $support.Core -eq $profile.DefaultCore -and $support.Status -eq 'UNSUPPORTED') {
-                    Write-MenuLine '  The default core cannot load playlists in any storage format.'
-                } elseif ($zipNotice.Label) {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
+                if ($zipNotice.Label -and $support.CanBuild) {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
                 Write-MenuLine '  Next: choose Keep or Remove originals.'
                 Write-MenuLine '  B. Back to single games     Q. Exit'
                 $prompt='Choose storage in .hidden'

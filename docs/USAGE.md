@@ -8,12 +8,14 @@ Press **Enter** on its own to use the default.
 In submenus, **B** goes back and **Q** exits. In SD setup (**S**), use **Esc**
 to go back.
 
+To create playlists or convert files, [prepare your games](#prepare-a-batch) first.
+
 | Choose | Task |
 | --- | --- |
 | **S** | [Enable supported file types in Onion's game list](#sd-setup). |
-| **C** | [C64 converter](#c64-converter-c). |
-| **Z** | [ZX Spectrum converter](#zx-converter-z). |
-| **1–9** | [Create playlists](#create-playlists) without changing file formats. |
+| **C** | [C64 converter](#convert-disk-images). |
+| **Z** | [ZX Spectrum converter](#convert-disk-images). |
+| **1–9** | [Create playlists](#create-playlists) without converting disk images. |
 | **D** | [Demo](#demo). |
 | **E** | Turn the CRT effect on or off. |
 | **Q** | Exit. |
@@ -65,10 +67,9 @@ Converts IPF to DSK. Some IPF copy-protection details cannot be preserved in DSK
 
 ### Make playlists after conversion
 
-After conversion, create a [separate batch folder](#prepare-a-batch) with
-empty `SRC` and `DST` folders. Copy the contents of the first batch's `DST`
-into the new `SRC`, then drag the new batch folder onto `OptiMiyoo.bat`.
-Choose **2** for C64 or **9** for ZX Spectrum.
+1. Create a [separate batch folder](#prepare-a-batch) with empty `SRC` and `DST` folders.
+2. Copy the contents of the first batch's `DST` into the new `SRC`.
+3. Drag the new batch folder onto `OptiMiyoo.bat`. Choose **2** for C64 or **9** for ZX Spectrum.
 
 ## Choose how to save
 
@@ -103,11 +104,11 @@ If a file or folder with the same name already exists in `DST`:
 | Key | Action |
 | --- | --- |
 | **Y** | Overwrite the files shown |
-| **N / Enter** | Keep the existing files and skip this game |
+| **N / Enter** | Keep the existing files and skip this output |
 | **A** | Overwrite this and all later matches in the batch |
 | **S** | Skip this and all later matches in the batch |
 
-Use **> / <** to see more of the file list. Here, **B / Q** also skips the game.
+Use **> / <** to see more of the file list. Here, **B / Q** also skips this output.
 
 When processing finishes, review the results. At that prompt, **Enter** returns
 to the main menu and **Q** exits.

@@ -42,7 +42,7 @@ function Get-ApplicationPromptModel {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
-          [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',
           [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage
     if($Kind -eq 'SourcePolicy' -and $Operation -eq 'SD'){throw 'SD setup cannot remove source media.'}
@@ -50,7 +50,7 @@ function Get-ApplicationPromptModel {
     if($Kind -eq 'SourcePolicy') {
         $lines=@()
         if ($Operation -eq 'Playlist') {
-            $names=@{Zip='ZIPs';Folders='Folders';Loose='Loose files'}
+            $names=@{Auto='Auto / keep input layout';Zip='ZIPs';Folders='Folders';Loose='Loose files'}
             $lines+=@(('Single games: '+$names[$SingleStorage]),('Playlist media: '+$names[$Storage]))
         }
         $lines+=@('1. KEEP originals in SRC (default)','2. REMOVE originals after verified success',
@@ -134,7 +134,7 @@ function Invoke-ApplicationPolicyPrompt {
           [Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
-          [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',
           [string[]]$ConflictPaths=@(),[switch]$Folder,
           [switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')

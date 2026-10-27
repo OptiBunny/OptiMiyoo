@@ -345,7 +345,7 @@ function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
           [string]$System,[ValidateSet('Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
-          [ValidateSet('Zip','Loose','Folders')][string]$SingleStorage='Zip')
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto')
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}

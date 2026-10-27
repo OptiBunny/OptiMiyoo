@@ -42,15 +42,15 @@ function Resolve-ApplicationOutputSelection {
     }
     $selection=@{Storage=$Storage}
     if ($Operation -eq 'Playlist') {
-        if (-not $SingleStorage) {$SingleStorage='Zip'}
-        if ($SingleStorage -notin 'Zip','Loose','Folders') {throw 'Unknown single-game storage.'}
-        $selection.SingleStorage=@{Zip='Zip';Loose='Loose';Folders='Folders'}[$SingleStorage]
+        if (-not $SingleStorage) {$SingleStorage='Auto'}
+        if ($SingleStorage -notin 'Auto','Zip','Loose','Folders') {throw 'Unknown single-game storage.'}
+        $selection.SingleStorage=@{Auto='Auto';Zip='Zip';Loose='Loose';Folders='Folders'}[$SingleStorage]
     }
     return $selection
 }
 
 function Read-ApplicationSourcePolicy {
-    param([string]$Operation,[string]$System,[string]$Storage='Zip',[string]$SingleStorage='Zip')
+    param([string]$Operation,[string]$System,[string]$Storage='Zip',[string]$SingleStorage='Auto')
     $output=Resolve-ApplicationOutputSelection -Operation $Operation -Storage $Storage -SingleStorage $SingleStorage
     $selection=@{Operation=$Operation;System=$System;Storage=$output.Storage}
     if ($Operation -eq 'Playlist') {$selection.SingleStorage=$output.SingleStorage}

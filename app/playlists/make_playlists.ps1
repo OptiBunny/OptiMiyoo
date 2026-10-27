@@ -1227,7 +1227,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $number=0
             if ([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $Profiles.Count) {
                 $profile=$Profiles[$number-1]
-                $singleOutput='1'
+                $singleOutput='2'; if ($profile.Folder -eq 'CPC') {$singleOutput='4'}
                 $hiddenOutput='2'; if ($profile.Folder -in 'DOS','MSX','PS','SEGACD','CPC','ZXS') {$hiddenOutput='3'}
                 $page='SingleStorage'; continue
             }

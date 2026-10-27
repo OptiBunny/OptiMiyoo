@@ -779,13 +779,17 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     for ($i=0;$i -lt $bodyRows;$i++) {
         $text=''; if ($i -lt $Rows.Count) {$text=$Rows[$i]}
         $right=' '*22; if ($i -lt $mio.Count) {$right=$mio[$i]}
-        $warningRow=$false
+        $warningRow=$false; $unverifiedRow=$false
         foreach ($warning in $warnings) {
-            if ($warning.Index -lt $rowOffset+$text.Length -and $warning.Index+$warning.Length -gt $rowOffset) {$warningRow=$true; break}
+            if ($warning.Index -lt $rowOffset+$text.Length -and $warning.Index+$warning.Length -gt $rowOffset) {
+                if ($warning.Value -match '(?i)unverified' -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$unverifiedRow=$true}
+                else {$warningRow=$true}
+            }
         }
         $rgb='218;224;244'
         if ($text -match '^\d+\..*\(default\)') {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
+        elseif ($unverifiedRow) {$rgb='255;190;96'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1

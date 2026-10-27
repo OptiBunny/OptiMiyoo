@@ -1225,7 +1225,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $number=0
             if ([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $Profiles.Count) {
                 $profile=$Profiles[$number-1]
-                $singleOutput='2'; if ($profile.Folder -eq 'CPC') {$singleOutput='4'}
+                $singleOutput='2'; if ($profile.Folder -in 'CPC','PS','SEGACD') {$singleOutput='4'}
                 $hiddenOutput='2'; if ($profile.Folder -in 'DOS','MSX','PS','SEGACD','CPC','ZXS') {$hiddenOutput='3'}
                 $page='SingleStorage'; continue
             }
@@ -1322,8 +1322,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $looseDefault=if ($defaultOutput -eq $looseChoice) {' (default)'} else {''}
             Write-MenuLine ('  '+$zipChoice+'. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ($zipChoice+'. ZIPs'+$zipDefault+$zipLabel)
             Write-MenuLine ('  '+$folderChoice+'. Folders'+$folderDefault+' / one per game')
-            $looseLabel=if ($singlePage -and $profile.Folder -in 'PS','SEGACD') {' [recommended for CHD]'} else {''}
-            Write-MenuLine ('  '+$looseChoice+'. Loose files'+$looseDefault+$looseLabel)
+            Write-MenuLine ('  '+$looseChoice+'. Loose files'+$looseDefault)
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             if ($singlePage) {
                 Write-MenuLine '  Next: storage for playlist media in .hidden.'

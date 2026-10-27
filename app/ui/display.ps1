@@ -772,24 +772,24 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $channel='SRC -> DST / LOCAL DISK LINK'
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // READY' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
-    # Match before coloring so bracketed notices keep their color across wrapped rows.
+    # Match before coloring so warning labels keep their color across wrapped rows.
     $warnings=@()
-    if ($script:UiAnsi) {$warnings=@([regex]::Matches(($Rows -join "`n"),'(?i)\[[^\[\]]*(?:unsupported|unverified|recommended|not\s+installed|unpack)[^\[\]]*\]'))}
+    if ($script:UiAnsi) {$warnings=@([regex]::Matches(($Rows -join "`n"),'(?i)\[[^\[\]]*(?:unsupported|unverified|not\s+installed|unpack)[^\[\]]*\]'))}
     $rowOffset=0
     for ($i=0;$i -lt $bodyRows;$i++) {
         $text=''; if ($i -lt $Rows.Count) {$text=$Rows[$i]}
         $right=' '*22; if ($i -lt $mio.Count) {$right=$mio[$i]}
-        $warningRow=$false; $amberRow=$false
+        $warningRow=$false; $unverifiedRow=$false
         foreach ($warning in $warnings) {
             if ($warning.Index -lt $rowOffset+$text.Length -and $warning.Index+$warning.Length -gt $rowOffset) {
-                if ($warning.Value -match '(?i)unverified|recommended' -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$amberRow=$true}
+                if ($warning.Value -match '(?i)unverified' -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$unverifiedRow=$true}
                 else {$warningRow=$true}
             }
         }
         $rgb='218;224;244'
         if ($text -match '^\d+\..*\(default\)') {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
-        elseif ($amberRow) {$rgb='255;190;96'}
+        elseif ($unverifiedRow) {$rgb='255;190;96'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1
@@ -1209,7 +1209,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         @{Group='ZX';Mood='check';Stage='Preserving an existing DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 2.dsk';Detail='Existing DSK bytes are copied and verified.';Progress=$true},
         @{Group='ZX';Mood='check';Stage='Verifying and saving DSK output';System='ZX SPECTRUM';Game='Demo Spectrum';Detail='Final checks, then save the selected output in DST.';Progress=$true;CompleteSet=$true},
         @{Group='ZX';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo Spectrum.zip','Folders: DST/Demo Spectrum/','Loose: DST/Disk 1.dsk, Disk 2.dsk','Converted DSK images stay visible.','No playlists are created.');Detail='Finished DSK output is ready in DST.'},
-        @{Group='Playlists';Mood='idle';Stage='Single-game storage';System='MENU';Menu=@('DEMO / single games','Games with one disc or tape side stay visible in DST.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose files','Next: storage for playlist media in .hidden.');Detail='Single games default to ZIPs; CPC defaults to Loose files.'},
+        @{Group='Playlists';Mood='idle';Stage='Single-game storage';System='MENU';Menu=@('DEMO / single games','Games with one disc or tape side stay visible in DST.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose files','Next: storage for playlist media in .hidden.');Detail='PS, Sega CD and CPC default to Loose files; other systems use ZIPs.'},
         @{Group='Playlists';Mood='idle';Stage='Playlist media storage';System='MENU';Menu=@('DEMO / playlist media','Choose how to store media in .hidden.','Playlists stay outside .hidden.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose files','Next: choose Keep or Remove originals.');Detail='Then choose storage for multi-disc games independently.'},
         @{Group='Playlists';Mood='scan';Stage='Amiga IPF and ADF disk sets';System='AMIGA';Game='Demo Amiga / Disk 1.ipf';Detail='Keep IPF/ADF images; choose ZIPs, a folder per game or loose files.'},
         @{Group='Playlists';Mood='scan';Stage='C64 disk and tape-side playlists';System='COMMODORE 64';Game='Demo C64 / Side A.nib';Detail='Original formats are kept. Choose C separately for G64.'},

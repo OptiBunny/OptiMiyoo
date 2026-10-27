@@ -59,13 +59,17 @@ Converts IPF to DSK. Some IPF copy-protection details cannot be preserved in DSK
 
 ## Choose how to save
 
-The playlist maker and both converters offer the same choices:
+Numbered systems ask separately how to save single games and how to store
+the game files used by playlists in `.hidden`. C and Z ask once, for converted files.
 
-| Choice | Files in `DST` |
-| --- | --- |
-| **1: ZIPs** | One ZIP per game. |
-| **2: Folders** | One folder per game. |
-| **3: Loose files** | Files without adding a game folder. |
+| Format | Numbered systems | C / Z | Result |
+| --- | --- | --- | --- |
+| **Auto** | **1** | — | Keep the input layout. |
+| **ZIPs** | **2** | **1** | One ZIP per game. |
+| **Folders** | **3** | **2** | One folder per game. |
+| **Loose files** | **4** | **3** | Files without adding a game folder. |
+
+Playlists themselves always stay outside `.hidden`.
 
 ## Originals and existing files
 

@@ -5,9 +5,10 @@ Project: https://github.com/rittwage/nibtools
 Release commit: 7bd20898c325a0e0036167f5a8b2fa66319154d3
 Included source: NIBTools-source-20241120.zip
 Download: https://api.github.com/repos/rittwage/nibtools/zipball/20241120
+Source archive SHA-256: c45ef4eaaac40a3b5ff8741343a35a4946452813209258b521ac2a72a37ac83e
 
 Bundled binary
-OptiMiyoo builds AMD64 nibconv.exe from the unmodified release source, retaining
+OptiMiyoo builds x64 nibconv.exe from the unmodified release source, retaining
 relocations required by Windows AppContainer. It converts existing image files;
 physical-drive tools and OpenCBM components are not used.
 File: app/C64/tools/nibconv.exe
@@ -18,9 +19,10 @@ Compiler: official Zig 0.17.0 (Clang/MinGW-w64).
 Download: https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip
 Compiler archive SHA-256: b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428
 
-Extract the source and compiler. In cmd.exe, enter the source root, set
-SOURCE_DATE_EPOCH=1732060800, and run this command with zig.exe on PATH:
+Extract the source and compiler. In cmd.exe, enter the source root. With
+zig.exe on PATH, run:
 
+set "SOURCE_DATE_EPOCH=1732060800"
 zig cc -target x86_64-windows-gnu -std=c99 -O1 -s -Wno-format -Wno-pointer-sign -Wno-error=date-time -DWIN32 -D_XOPEN_SOURCE=500 -I include/WINDOWS -o nibconv.exe nibconv.c gcr.c prot.c fileio.c crc.c md5.c lz.c
 
 Licenses

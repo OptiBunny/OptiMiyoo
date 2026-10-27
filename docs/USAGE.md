@@ -2,9 +2,11 @@
 
 ## Menu guide
 
-Open **`OptiMiyoo.bat`**. Type an option's number or letter and press **Enter**.
-Press **Enter** without typing anything to choose the default. Each menu shows
-how to go back or exit.
+Open **`OptiMiyoo.bat`**. Type a number or letter, then press **Enter**.
+Press **Enter** on its own to use the default.
+
+In submenus, **B** goes back and **Q** exits. In SD setup (**S**), use **Esc**
+to go back.
 
 | Choose | Task |
 | --- | --- |
@@ -18,16 +20,16 @@ how to go back or exit.
 
 ## Prepare a batch
 
-Copy one system's games into `SRC`, using one ZIP per game, a folder per game,
-or individual files. Finished files go into `DST`.
+Copy one system's games into the app's `SRC` folder, using ZIPs, a folder per game,
+or individual files. Each ZIP is treated as one game, so include all its discs or tape sides.
+Finished files go into `DST`.
 
 To work in a separate folder, create `SRC` and `DST` inside it, then drag that
 folder onto `OptiMiyoo.bat`.
 
 ## Create playlists
 
-Choose your [system number](#systems-and-rom-folders). Give separate discs
-matching names with a disc number so OptiMiyoo can group them:
+Give separate discs matching names with a disc number so OptiMiyoo can group them:
 
 ```text
 Game (Disc 1).chd
@@ -35,20 +37,23 @@ Game (Disc 2).chd
 ```
 
 Inside a game folder, `Disc 1.chd` and `Disc 2.chd` also work.
-For tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
+For C64 tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 
-Keep CUE files, their tracks, and any matching SBI files together. Keep different
-versions of the same disc in separate batches.
+Keep CUE files, their tracks, and any matching SBI files together. A CUE file
+and its tracks count as one disc. Keep different editions of the same game in
+separate batches.
 
-For games with multiple discs or tape sides, the ZIP, game folder or loose files
-go in `.hidden`. The playlist stays outside it, visible in Onion's game list.
-Games with one disc or tape side stay visible without a playlist.
+Choose your [system number](#systems-and-rom-folders), then
+[how to save the files](#choose-how-to-save).
+
+A game with multiple discs or tape sides gets one playlist. Its game files go
+in `DST/.hidden`, and the playlist stays outside that folder so it appears in
+Onion's game list. Games with one disc or tape side stay visible without a playlist.
 
 ## Convert disk images
 
-**C** and **Z** convert files without creating playlists. To make playlists
-afterwards, use the converted files as input for a [new batch](#prepare-a-batch)
-and choose a numbered system.
+Choose **C** or **Z**, then [how to save the converted files](#choose-how-to-save).
+These options convert files without creating playlists.
 
 ### C64 converter: C
 
@@ -58,41 +63,63 @@ Converts NIB/NBZ to G64.
 
 Converts IPF to DSK. Some IPF copy-protection details cannot be preserved in DSK.
 
+### Make playlists after conversion
+
+After conversion, create a [separate batch folder](#prepare-a-batch) with
+empty `SRC` and `DST` folders. Copy the contents of the first batch's `DST`
+into the new `SRC`, then drag the new batch folder onto `OptiMiyoo.bat`.
+Choose **2** for C64 or **9** for ZX Spectrum.
+
 ## Choose how to save
 
-Numbered systems ask separately how to save single games and how to store
-the game files used by playlists in `.hidden`. C and Z ask once, for converted files.
+Numbered systems have two storage menus:
 
-| Format | Numbered systems | C / Z | Result |
-| --- | --- | --- | --- |
-| **Auto** | **1** | — | Keep the input layout. |
-| **ZIPs** | **2** | **1** | One ZIP per game. |
-| **Folders** | **3** | **2** | One folder per game. |
-| **Loose files** | **4** | **3** | Files without adding a game folder. |
+1. **Single games:** how to save games with one disc or tape side, which stay visible.
+2. **Playlist media:** how to store multi-disc or multi-side game files in `.hidden`.
 
-Playlists themselves always stay outside `.hidden`.
+Both menus offer:
+
+| Choice | How the game files are saved |
+| --- | --- |
+| **1: Auto** | Keep ZIPs zipped and keep the same folder layout for other files. |
+| **2: ZIPs** | One ZIP per game. |
+| **3: Folders** | One folder per game. |
+| **4: Loose files** | Individual files, without adding a game folder. |
+
+**C** and **Z** ask once, for converted files: **1: ZIPs**, **2: Folders**,
+or **3: Loose files**.
+
+After choosing storage, [choose what happens to the originals](#originals-and-existing-files)
+to start processing.
 
 ## Originals and existing files
 
-Choose **1: Keep originals** (default) or **2: Remove originals** to start.
-Remove deletes processed files from `SRC` only after checking the finished files
-in `DST`. Skipped or failed files are kept.
+Choose **1: Keep originals** (default) to leave the files in `SRC`.
+**2: Remove originals** deletes processed files from `SRC` after checking the
+finished files in `DST`. Skipped or failed files are kept.
 
 If a file or folder with the same name already exists in `DST`:
 
 | Key | Action |
 | --- | --- |
 | **Y** | Overwrite the files shown |
-| **N / Enter** | Keep them and skip this game or disc |
+| **N / Enter** | Keep the existing files and skip this game |
 | **A** | Overwrite this and all later matches in the batch |
 | **S** | Skip this and all later matches in the batch |
 
-Use **> / <** to see more of the file list. **B / Q** also means Skip here.
+Use **> / <** to see more of the file list. Here, **B / Q** also skips the game.
+
+When processing finishes, review the results. At that prompt, **Enter** returns
+to the main menu and **Q** exits.
 
 ## Copy to your Miyoo
 
 Copy the contents of `DST`, including `.hidden` when present, to the system's
-ROM folder on your SD card. Then refresh Onion's game list.
+ROM folder on your SD card. For playlists, use [SD setup](#sd-setup) to enable
+supported file types in Onion's game list.
+
+On the Miyoo, open **Games**, press **SELECT**, and choose
+[**Refresh all roms**](https://onionui.github.io/docs/faq#i-have-added-new-roms-to-my-sd-card-why-are-the-games-not-showing-up).
 
 ### Systems and ROM folders
 
@@ -110,18 +137,20 @@ ROM folder on your SD card. Then refresh Onion's game list.
 
 ### SD setup
 
-Choose **S** and enter your SD drive, such as `E:\`. This enables supported
-playlists, C64 tape files, and Atari Lynx `.lyx` files in Onion's game list.
-It does not install or switch emulator cores. **Esc** goes back.
+Connect your SD card to the PC, choose **S**, and enter its drive, such as `E:\`.
+This enables supported playlists, C64 tape files, and Atari Lynx `.lyx` files
+in Onion's game list by updating its file-type settings. It does not install
+or switch emulator cores. **Esc** goes back.
 
 To undo setup, copy each saved `config.json` from `OptiMiyoo_Backup_<ID>` on the
 SD card to its matching folder under `Emu`.
 
 ### Swap discs
 
-Launch the playlist, then open **RetroArch → Quick Menu → Disk Control**.
-Eject the current disc, select the next image, and insert it. C64 tapes may also
-need keyboard/load commands; DOSBox Pure has its own disc-selection controls.
+Launch the playlist. When the game asks for another disc, open
+**RetroArch → Quick Menu → [Disc Control](https://docs.libretro.com/guides/disc-swapping/)**.
+Eject the current disc, select the next image, and insert it.
+C64 tapes may also need keyboard/load commands.
 
 ## Demo
 
@@ -132,4 +161,5 @@ During playback, keys work without Enter:
 
 - **Space:** pause/resume. **Left / Right:** previous/next screen.
 - **R:** restart the demo.
+- **E:** turn the CRT effect on or off.
 - **B / Q / Esc:** return to demo selection.

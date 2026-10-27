@@ -26,16 +26,20 @@ Compiler: official portable Zig 0.17.0.
 Download: https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip
 Compiler archive SHA-256: b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428
 
-Extract the source to a short path. In cmd.exe, enter its root and set SOURCE_DATE_EPOCH=1743897600
-and HXC_RUNTIME to OptiMiyoo's app/ZX/tools/hxc/x86 folder. With zig.exe on PATH,
-run this command (shown wrapped; join into one line):
+Extract the source to a short path. In cmd.exe, enter its root. Replace the
+HXC_RUNTIME example below with the full path to your bundled x86 tools folder:
 
-zig cc -target x86-windows-gnu -O2 -s -Wno-error=date-time
-  -I libhxcfe/sources -I libusbhxcfe/sources -I libhxcadaptor/sources -I build
-  -o hxcfe.exe HxCFloppyEmulator_cmdline/sources/hxcfe.c
-  HxCFloppyEmulator_cmdline/sources/utils.c libhxcadaptor/sources/libhxcadaptor.c
-  libhxcadaptor/sources/fs.c libhxcadaptor/sources/network.c
-  libhxcadaptor/sources/cache.c "%HXC_RUNTIME%/libhxcfe.dll"
+set "SOURCE_DATE_EPOCH=1743897600"
+set "HXC_RUNTIME=C:\path\to\OptiMiyoo\app\ZX\tools\hxc\x86"
+
+With zig.exe on PATH, run:
+
+zig cc -target x86-windows-gnu -O2 -s -Wno-error=date-time ^
+  -I libhxcfe/sources -I libusbhxcfe/sources -I libhxcadaptor/sources -I build ^
+  -o hxcfe.exe HxCFloppyEmulator_cmdline/sources/hxcfe.c ^
+  HxCFloppyEmulator_cmdline/sources/utils.c libhxcadaptor/sources/libhxcadaptor.c ^
+  libhxcadaptor/sources/fs.c libhxcadaptor/sources/network.c ^
+  libhxcadaptor/sources/cache.c "%HXC_RUNTIME%/libhxcfe.dll" ^
   "%HXC_RUNTIME%/libusbhxcfe.dll" -lws2_32 -lwinmm
 
 Licenses

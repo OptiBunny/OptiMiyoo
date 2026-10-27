@@ -19,7 +19,8 @@ ZX Spectrum IPF to DSK conversion. Bundled version: **2.16.13.1**.
 
 ## [CAPSIMG](https://github.com/FrodeSolheim/capsimg)
 
-IPF decoding for HxC. Bundled FS-UAE Windows versions: **5.1.3 x64** and **5.1fs3 x86**.
+Decodes IPF images for HxC. This is the SPS Decoder Library adapted by Frode
+Solheim for FS-UAE. Bundled Windows versions: **5.1.3 x64** and **5.1fs3 x86**.
 
 [License](capsimg/LICENSE.txt) · [Source](capsimg/SOURCE.txt)
 

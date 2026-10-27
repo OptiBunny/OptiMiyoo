@@ -1322,7 +1322,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $looseDefault=if ($defaultOutput -eq $looseChoice) {' (default)'} else {''}
             Write-MenuLine ('  '+$zipChoice+'. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ($zipChoice+'. ZIPs'+$zipDefault+$zipLabel)
             Write-MenuLine ('  '+$folderChoice+'. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine ('  '+$looseChoice+'. Loose files'+$looseDefault)
+            $looseLabel=if ($singlePage -and $profile.Folder -in 'PS','SEGACD') {' [recommended for CHD]'} else {''}
+            Write-MenuLine ('  '+$looseChoice+'. Loose files'+$looseDefault+$looseLabel)
             if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
             if ($singlePage) {
                 Write-MenuLine '  Next: storage for playlist media in .hidden.'

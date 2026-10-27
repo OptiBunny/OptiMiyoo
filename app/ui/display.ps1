@@ -772,24 +772,24 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $channel='SRC -> DST / LOCAL DISK LINK'
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // READY' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
-    # Match before coloring so warning labels keep their color across wrapped rows.
+    # Match before coloring so bracketed notices keep their color across wrapped rows.
     $warnings=@()
-    if ($script:UiAnsi) {$warnings=@([regex]::Matches(($Rows -join "`n"),'(?i)\[[^\[\]]*(?:unsupported|unverified|not\s+installed|unpack)[^\[\]]*\]'))}
+    if ($script:UiAnsi) {$warnings=@([regex]::Matches(($Rows -join "`n"),'(?i)\[[^\[\]]*(?:unsupported|unverified|recommended|not\s+installed|unpack)[^\[\]]*\]'))}
     $rowOffset=0
     for ($i=0;$i -lt $bodyRows;$i++) {
         $text=''; if ($i -lt $Rows.Count) {$text=$Rows[$i]}
         $right=' '*22; if ($i -lt $mio.Count) {$right=$mio[$i]}
-        $warningRow=$false; $unverifiedRow=$false
+        $warningRow=$false; $amberRow=$false
         foreach ($warning in $warnings) {
             if ($warning.Index -lt $rowOffset+$text.Length -and $warning.Index+$warning.Length -gt $rowOffset) {
-                if ($warning.Value -match '(?i)unverified' -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$unverifiedRow=$true}
+                if ($warning.Value -match '(?i)unverified|recommended' -and $warning.Value -notmatch '(?i)unsupported|not\s+installed|unpack') {$amberRow=$true}
                 else {$warningRow=$true}
             }
         }
         $rgb='218;224;244'
         if ($text -match '^\d+\..*\(default\)') {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
-        elseif ($unverifiedRow) {$rgb='255;190;96'}
+        elseif ($amberRow) {$rgb='255;190;96'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1

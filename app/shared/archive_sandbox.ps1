@@ -87,10 +87,10 @@ internal static class ArchivePayloadWorker {
     }
 }
 '@
-    $folder=Join-Path ([IO.Path]::GetTempPath()) ('oa_'+[Guid]::NewGuid().ToString('N').Substring(0,16))
+    $folder=Join-Path (Get-OptiScratchRoot) ('oa_'+[Guid]::NewGuid().ToString('N').Substring(0,16))
     $process=$null;$started=$false;$parentLease=$null;$folderLease=$null;$created=$false;$folderIdentity=$null
     try {
-        $parentLease=Open-SourcePolicyDirectoryLease ([IO.Path]::GetTempPath())
+        $parentLease=Open-SourcePolicyDirectoryLease (Get-OptiScratchRoot)
         New-SourcePolicyOwnedDirectory $folder;$created=$true
         $folderLease=Open-SourcePolicyDirectoryLease $folder
         $folderIdentity=$folderLease.DirectoryIdentity
@@ -112,7 +112,27 @@ internal static class ArchivePayloadWorker {
     } finally {
         if($process) {try {if($started -and -not $process.HasExited){$process.Kill();[void]$process.WaitForExit(5000)}}finally{$process.Dispose()}}
         if($folderLease){$folderLease.Dispose()}
-        try {if($created){Remove-ArchiveSandboxScratch $folder ([IO.Path]::GetTempPath()) $folderIdentity}}finally{if($parentLease){$parentLease.Dispose()}}
+        try {if($created){Remove-ArchiveSandboxScratch $folder (Get-OptiScratchRoot) $folderIdentity}}finally{if($parentLease){$parentLease.Dispose()}}
+    }
+}
+
+function Assert-ArchiveSandboxOutputPaths($Archive,[string]$Operation,[string]$Destination) {
+    if($Operation -notin 'Extract','File'){return}
+    if([string]::IsNullOrWhiteSpace($Destination)){throw 'An extraction destination is required.'}
+    $full=[IO.Path]::GetFullPath($Destination)
+    Assert-OptiPathBudget -Path $full -Directory:($Operation -eq 'Extract')
+    Assert-OptiPathBudget -Path ([IO.Path]::GetDirectoryName($full)) -Directory
+    if($Operation -eq 'File'){return}
+    $prefix=$full.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    # Include explicit empty directories, which do not appear in payload hashes.
+    # Check the whole archive before creating any extraction output.
+    foreach($entry in $Archive.Entries) {
+        $directory=$entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')
+        $relative=$entry.FullName.Replace('\','/').TrimEnd('/').Replace('/',[IO.Path]::DirectorySeparatorChar)
+        $target=[IO.Path]::GetFullPath((Join-Path $full $relative))
+        if([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or -not $target.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'ZIP entry leaves its extraction folder.'}
+        Assert-OptiPathBudget -Path $target -Directory:$directory
+        Assert-OptiPathBudget -Path ([IO.Path]::GetDirectoryName($target)) -Directory
     }
 }
 
@@ -123,12 +143,13 @@ function Invoke-ArchiveSandbox {
           [ValidateSet('Hash','Extract','Read','File')][string]$Operation='Hash',
           [int]$EntryIndex=-1,[string]$Destination,[long]$MaximumBytes=16777216,[scriptblock]$Progress=$null)
     if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationArchive @PSBoundParameters)}
+    Assert-ArchiveSandboxOutputPaths $Archive $Operation $Destination
     Initialize-NativeSandbox;Initialize-NativeTextCapture
     $exeBytes=Get-ArchiveSandboxExecutableBytes
-    $toolRoot=Join-Path ([IO.Path]::GetTempPath()) ('oas_'+[Guid]::NewGuid().ToString('N').Substring(0,16))
+    $toolRoot=Join-Path (Get-OptiScratchRoot) ('oas_'+[Guid]::NewGuid().ToString('N').Substring(0,16))
     $job=$null;$readLease=$null;$stdout=$null;$stderr=$null;$destinationLease=$null;$toolParentLease=$null;$toolLease=$null;$toolCreated=$false;$toolIdentity=$null
     try {
-        $toolParentLease=Open-SourcePolicyDirectoryLease ([IO.Path]::GetTempPath())
+        $toolParentLease=Open-SourcePolicyDirectoryLease (Get-OptiScratchRoot)
         New-SourcePolicyOwnedDirectory $toolRoot;$toolCreated=$true
         $toolLease=Open-SourcePolicyDirectoryLease $toolRoot
         $toolIdentity=$toolLease.DirectoryIdentity
@@ -273,7 +294,7 @@ function Invoke-ArchiveSandbox {
         if($readLease) {$readLease.Dispose()}
         if($destinationLease) {$destinationLease.Dispose()}
         if($toolLease){$toolLease.Dispose()}
-        try {if($toolCreated){Remove-ArchiveSandboxScratch $toolRoot ([IO.Path]::GetTempPath()) $toolIdentity}}finally{if($toolParentLease){$toolParentLease.Dispose()}}
+        try {if($toolCreated){Remove-ArchiveSandboxScratch $toolRoot (Get-OptiScratchRoot) $toolIdentity}}finally{if($toolParentLease){$toolParentLease.Dispose()}}
     }
 }
 

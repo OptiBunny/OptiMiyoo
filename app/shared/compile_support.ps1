@@ -24,11 +24,33 @@ function Get-OptiCompilerFileApi {
     return $builder.CreateType()
 }
 
+function Get-OptiScratchRoot {
+    # GetTempPath adds an AppContainer Packages/session/AC/Temp suffix. The
+    # broker already supplied a private writable root; use its captured path.
+    $client='OptiMiyoo.ApplicationRpcClient' -as [type]
+    if ($null -ne $client -and $client::IsIsolated) {return $client::WorkPath}
+    return [IO.Path]::GetTempPath()
+}
+
+# The shipped Windows PowerShell runtime still uses legacy limits for managed
+# file operations, even when native handle operations accept extended paths.
+function Assert-OptiPathBudget {
+    param([Parameter(Mandatory=$true)][string]$Path,[switch]$Directory)
+    $full=[IO.Path]::GetFullPath($Path)
+    $limit=259;if ($Directory) {$limit=247}
+    if ($full.Length -gt $limit) {
+        throw 'A working path is too long for Windows PowerShell. Move OptiMiyoo to a shorter folder or shorten the game folders and names, then retry. Originals kept.'
+    }
+}
+
 function Open-OptiCompilerFile([string]$Path,[uint32]$Access,[uint32]$Share,[uint32]$Creation,[switch]$Directory) {
     $api=Get-OptiCompilerFileApi
     $flags=[uint32]0x00200000 # OPEN_REPARSE_POINT: inspect the entry itself.
     if ($Directory) {$flags=$flags -bor 0x02000000}
-    $handle=$api::CreateFileW($Path,$Access,$Share,[IntPtr]::Zero,$Creation,$flags,[IntPtr]::Zero)
+    $native=[IO.Path]::GetFullPath($Path)
+    if ($native.StartsWith('\\?\',[StringComparison]::Ordinal) -or $native.StartsWith('\\.\',[StringComparison]::Ordinal)) {throw 'Device paths are not supported.'}
+    $native=if ($native.StartsWith('\\',[StringComparison]::Ordinal)) {'\\?\UNC\'+$native.Substring(2)} else {'\\?\'+$native}
+    $handle=$api::CreateFileW($native,$Access,$Share,[IntPtr]::Zero,$Creation,$flags,[IntPtr]::Zero)
     if ($handle.IsInvalid) {
         $errorCode=[Runtime.InteropServices.Marshal]::GetLastWin32Error();$handle.Dispose()
         throw [ComponentModel.Win32Exception]::new($errorCode,'Compiler scratch file could not be opened safely.')
@@ -75,7 +97,9 @@ function Remove-OptiCompilerReservation($Entry) {
 # Keep the caller's environment/cwd intact and give csc relative ASCII names.
 function Add-OptiMiyooType {
     param([Parameter(Mandatory=$true)][string]$TypeDefinition)
-    $temporary=[IO.Path]::GetTempPath()
+    $temporary=Get-OptiScratchRoot
+    Assert-OptiPathBudget -Path $temporary -Directory
+    Assert-OptiPathBudget -Path (Join-Path $temporary ('CSC'+('0'*32)+'.TMP'))
     if ($PSVersionTable.PSEdition -ne 'Desktop' -or $temporary -notmatch '[^\x00-\x7F]') {
         Add-Type -TypeDefinition $TypeDefinition -ErrorAction Stop
         return

@@ -70,6 +70,14 @@ namespace OptiMiyoo {
         public string DirectoryIdentity { get; private set; }
         private bool disposed;
         private SourceRemovalLeaseV128() {}
+        private static string NativePath(string path) {
+            // Keep canonical ordinary paths for all boundary comparisons. Only
+            // the Win32 call receives extended syntax, after normalization.
+            string full = Path.GetFullPath(path);
+            if (full.StartsWith(@"\\?\", StringComparison.Ordinal) || full.StartsWith(@"\\.\", StringComparison.Ordinal))
+                throw new IOException("Device paths are not supported.");
+            return full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full.Substring(2) : @"\\?\" + full;
+        }
         private static FileInformation Inspect(SafeFileHandle handle) {
             FileInformation information;
             if (!GetFileInformationByHandle(handle, out information)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -81,7 +89,7 @@ namespace OptiMiyoo {
             // is required for an ancestor handle to participate in sharing.
             uint access = directory ? (removal ? 0x10081U : 0x81U) : (removal ? 0x80010000U : 0x80000000U); // LIST_DIRECTORY | READ_ATTRIBUTES, or file read (+ DELETE)
             uint flags = 0x00200000U | (directory ? 0x02000000U : 0U); // OPEN_REPARSE_POINT | BACKUP_SEMANTICS
-            SafeFileHandle handle = CreateFileW(path, access, share, IntPtr.Zero, 3, flags, IntPtr.Zero);
+            SafeFileHandle handle = CreateFileW(NativePath(path), access, share, IntPtr.Zero, 3, flags, IntPtr.Zero);
             if (handle.IsInvalid) {
                 int error = Marshal.GetLastWin32Error(); handle.Dispose();
                 throw new Win32Exception(error, "File could not be locked safely: " + path + " (" + error + ": " + new Win32Exception(error).Message + ")");
@@ -110,12 +118,7 @@ namespace OptiMiyoo {
                 // Create a locked delete-on-close guard before relaxing sharing.
                 // Ancestors remain nonempty because their child directory is pinned.
                 string guard = Path.Combine(full, ".optimiyoo-" + Guid.NewGuid().ToString("N") + ".lease");
-                // The directory may fit MAX_PATH while its internal guard does
-                // not. Parents were validated above; use an absolute Win32 path
-                // for this fixed, generated leaf without relaxing any lease.
-                string nativeGuard = guard.StartsWith(@"\\?\", StringComparison.Ordinal) ? guard :
-                    (guard.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + guard.Substring(2) : @"\\?\" + guard);
-                lease.directoryGuard = CreateFileW(nativeGuard, 0x80010000U, 1, IntPtr.Zero, 1, 0x04000102U, IntPtr.Zero);
+                lease.directoryGuard = CreateFileW(NativePath(guard), 0x80010000U, 1, IntPtr.Zero, 1, 0x04000102U, IntPtr.Zero);
                 if (lease.directoryGuard.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not protect transaction directory.");
                 foreach (string ancestor in chain) lease.parents.Add(OpenHandle(ancestor, true, false, 3));
                 lease.DirectoryIdentity = Identity(Inspect(lease.parents[lease.parents.Count - 1]));
@@ -150,7 +153,7 @@ namespace OptiMiyoo {
             // directory. Callers may claim cleanup ownership only after success.
             string full = Path.GetFullPath(path);
             using (SourceRemovalLeaseV128 parent = OpenDirectory(Path.GetDirectoryName(full))) {
-                if (!CreateDirectoryW(full, IntPtr.Zero))
+                if (!CreateDirectoryW(NativePath(full), IntPtr.Zero))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create a new private scratch directory.");
             }
         }

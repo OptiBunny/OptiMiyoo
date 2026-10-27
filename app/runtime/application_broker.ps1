@@ -46,12 +46,17 @@ namespace OptiMiyoo {
         [StructLayout(LayoutKind.Sequential)] struct Disposition {public byte Delete;}
         [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle,int kind,ref Disposition value,uint size);
         readonly List<SafeFileHandle> handles=new List<SafeFileHandle>();
+        private static string NativePath(string path) {
+            string full=Path.GetFullPath(path);
+            if(full.StartsWith(@"\\?\",StringComparison.Ordinal)||full.StartsWith(@"\\.\",StringComparison.Ordinal))throw new IOException("Device paths are not supported.");
+            return full.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+full.Substring(2):@"\\?\"+full;
+        }
         public static void CreatePrivateDirectory(string path) {
             string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
             IntPtr descriptor;uint size;
             if(!ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;"+sid+")",1,out descriptor,out size))throw new Win32Exception(Marshal.GetLastWin32Error());
             try {SecurityAttributes attributes=new SecurityAttributes();attributes.Length=Marshal.SizeOf(typeof(SecurityAttributes));attributes.Descriptor=descriptor;
-                if(!CreateDirectoryW(path,ref attributes))throw new Win32Exception(Marshal.GetLastWin32Error(),"Could not create private broker publication staging.");
+                if(!CreateDirectoryW(NativePath(path),ref attributes))throw new Win32Exception(Marshal.GetLastWin32Error(),"Could not create private broker publication staging.");
             } finally {LocalFree(descriptor);}
         }
         public static ApplicationBrokerLease Directory(string path) {
@@ -61,7 +66,7 @@ namespace OptiMiyoo {
                 while(!String.IsNullOrEmpty(current)) {names.Add(current);DirectoryInfo p=System.IO.Directory.GetParent(current);current=p==null?null:p.FullName;}
                 names.Reverse();
                 foreach(string name in names) {
-                    SafeFileHandle handle=CreateFileW(name,0x81,1,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+                    SafeFileHandle handle=CreateFileW(NativePath(name),0x81,1,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
                     if(handle.IsInvalid) {int error=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(error,"Could not pin broker snapshot directory.");}
                     lease.handles.Add(handle);Info info;
                     if(!GetFileInformationByHandle(handle,out info))throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -104,7 +109,7 @@ namespace OptiMiyoo {
                     while(pending.Count>0) {
                         string current=pending.Dequeue();bool isRoot=String.Equals(current,root,StringComparison.OrdinalIgnoreCase);
                         string relative=isRoot?"":current.Substring(prefix.Length).Replace('\\','/');
-                        SafeFileHandle handle=CreateFileW(current,0x80010000,1,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+                        SafeFileHandle handle=CreateFileW(NativePath(current),0x80010000,1,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
                         if(handle.IsInvalid){int error=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(error,"Could not freeze previous output backup.");}
                         Entry entry=new Entry{Handle=handle};result.entries.Add(entry);Info info;
                         if(!GetFileInformationByHandle(handle,out info))throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -113,9 +118,9 @@ namespace OptiMiyoo {
                         if(directory) {
                             if(!isRoot&&!dirs.Contains(relative))throw new IOException("Previous output gained an unapproved directory; previous output kept.");
                             dirCount++;if(dirCount>directories.Length+1)throw new IOException("Previous output directory inventory changed.");
-                            foreach(string child in System.IO.Directory.EnumerateFileSystemEntries(current)) {
+                            foreach(string child in System.IO.Directory.EnumerateFileSystemEntries(NativePath(current))) {
                                 if(pending.Count+result.entries.Count>=names.Length+directories.Length+1)throw new IOException("Previous output gained an unapproved entry; previous output kept.");
-                                pending.Enqueue(child);
+                                pending.Enqueue(Path.Combine(current,Path.GetFileName(child)));
                             }
                         } else {
                             int index;if(!files.TryGetValue(relative,out index)||info.Links!=1||(info.Attributes&1)!=0)throw new IOException("Previous output is unapproved, linked, or read-only; previous output kept.");
@@ -167,6 +172,7 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
     $files=@{};$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0;$buffer=$null
     if($MaximumEntries -lt 1 -or $MaximumEntries -gt 1000000){throw 'Invalid broker snapshot entry limit.'}
     if($MetadataOnly -and $CopyTo){throw 'A metadata-only inventory cannot copy file data.'}
+    Assert-OptiPathBudget -Path $Root -Directory
     if(-not [IO.Directory]::Exists($Root)) {
         if(Test-Path -LiteralPath $Root){throw 'Broker root is not a directory.'}
         if($CopyTo){[void][IO.Directory]::CreateDirectory($CopyTo)}
@@ -179,8 +185,10 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
         while($pending.Count -gt 0) {
             $directory=$pending.Dequeue();$directoryLease=[OptiMiyoo.ApplicationBrokerLease]::Directory($directory)
             try {
+                Assert-OptiPathBudget -Path $directory -Directory
                 foreach($entryPath in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
                     $entryCount++;if($entryCount -gt $MaximumEntries){throw 'Broker snapshot entry limit exceeded; originals kept.'}
+                    Assert-OptiPathBudget -Path $entryPath
                     $entry=Get-Item -LiteralPath $entryPath -Force -ErrorAction Stop
                     if($entry.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Broker snapshot contains a link; originals kept.'}
                     $relative=Get-ApplicationBrokerRelative $entry.FullName $Root
@@ -274,6 +282,17 @@ function New-ApplicationBrokerSession {
         $destinationInventory=Get-ApplicationBrokerTree (Join-Path $original 'DST') -MetadataOnly -MaximumEntries ([Math]::Max(1,100000-$sourceCount))
         $destinationCount=$destinationInventory.Files.Count+$destinationInventory.Directories.Count
         if($sourceCount+$destinationCount -gt 100000){throw 'SRC and DST contain more than 100,000 entries. Split this collection into smaller batches.'}
+        # Reuse the inventory to reject unworkable staging paths before copying.
+        foreach($snapshot in @(@{Name='SRC';Tree=$sourceInventory},@{Name='DST';Tree=$destinationInventory})) {
+            $targetRoot=Join-Path $work $snapshot.Name
+            Assert-OptiPathBudget -Path $targetRoot -Directory
+            foreach($relative in $snapshot.Tree.Directories){Assert-OptiPathBudget -Path (Join-Path $targetRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)) -Directory}
+            foreach($relative in $snapshot.Tree.Files.Keys){
+                $target=Join-Path $targetRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
+                Assert-OptiPathBudget -Path $target
+                Assert-OptiPathBudget -Path ([IO.Path]::GetDirectoryName($target)) -Directory
+            }
+        }
         $source=Get-ApplicationBrokerTree (Join-Path $original 'SRC') (Join-Path $work 'SRC') -MaximumEntries ([Math]::Max(1,$sourceCount)) -ExpectedFiles $sourceInventory.Files
         $destination=Get-ApplicationBrokerTree (Join-Path $original 'DST') (Join-Path $work 'DST') -MaximumEntries ([Math]::Max(1,$destinationCount)) -ExpectedFiles $destinationInventory.Files
         if($source.Files.Count+$source.Directories.Count+$destination.Files.Count+$destination.Directories.Count -gt 100000){throw 'SRC or DST grew beyond the snapshot entry limit; originals kept.'}
@@ -341,6 +360,76 @@ function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
     return [pscustomobject]@{JobId=[Guid]::NewGuid().ToString('N');SourceKey=$SourceKey;ConflictId='';SourceJob=$SourceJob;Plan=$Plan;BlockedReason='';BlockedResult='Failed';Paths=@();SourceHashes=@{};Files=@{};DiskNames=@();Writes=@();Retired=@();Conflicts=@();Decision='Write';PlaylistText=$null;DataKind='';SourceBlockReason='';ContainerHash=''}
 }
 
+function Assert-ApplicationBrokerJobPaths($State,[string]$Operation,$Job,[hashtable]$ArchiveFiles) {
+    function Assert-PlannedPath([string]$Path,[switch]$Directory) {
+        Assert-OptiPathBudget -Path $Path -Directory:$Directory
+        Assert-OptiPathBudget -Path ([IO.Path]::GetDirectoryName($Path)) -Directory
+    }
+    $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
+    # These placeholders match the generated names' lengths; no files are created.
+    $hostName='.app_'+('0'*16)+'.tmp'
+    foreach($write in $Job.Writes) {
+        $relative=Get-ApplicationBrokerRelative $write.Destination $dst
+        $childPath=Join-Path $workDst $relative
+        Assert-PlannedPath $write.Destination -Directory:([bool]$write.Folder)
+        Assert-PlannedPath $childPath -Directory:([bool]$write.Folder)
+        $hostData=Join-Path (Join-Path ([IO.Path]::GetDirectoryName($write.Destination)) $hostName) 'data'
+        Assert-PlannedPath $hostData -Directory:([bool]$write.Folder)
+        if($write.Folder) {
+            foreach($name in $Job.Files.Keys) {
+                foreach($root in @($write.Destination,$childPath,$hostData)) {Assert-PlannedPath (Join-Path $root $name)}
+            }
+        }
+        if($Operation -in 'C64','ZX') {
+            $workerData=Join-Path (Join-Path ([IO.Path]::GetDirectoryName($childPath)) ('.ppg_'+('0'*12)+'.tmp')) 'data'
+            Assert-PlannedPath $workerData -Directory:([bool]$write.Folder)
+            if($write.Folder){foreach($name in $Job.Files.Keys){Assert-PlannedPath (Join-Path $workerData $name)}}
+        }
+    }
+    # Replacement moves the old tree too. Its members can be longer than the
+    # new ones, especially when a short game folder gets a generated backup name.
+    Get-ApplicationBrokerBackupManifest $State '' -IndexOnly
+    $checkedTargets=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($target in @($Job.Writes)+@($Job.Retired)) {
+        $relative=Get-ApplicationBrokerRelative $target.Destination $dst
+        if(-not $checkedTargets.Add($relative)){continue}
+        $folder=$State.DestinationTree.ContainsKey($relative)
+        if(-not $folder -and -not $State.DestinationSnapshot.Files.ContainsKey($relative)){continue}
+        $hostBackup=Join-Path ([IO.Path]::GetDirectoryName($target.Destination)) ('.m3u_'+('0'*12)+'.backup')
+        $workerName='.m3u_'+('0'*12)+'.backup'
+        if($Operation -in 'C64','ZX'){$workerName='.ppg_'+('0'*12)+'.backup'}
+        $workerBackup=Join-Path ([IO.Path]::GetDirectoryName((Join-Path $workDst $relative))) $workerName
+        $manifest=$null;if($folder){$manifest=Get-ApplicationBrokerBackupManifest $State $relative}
+        foreach($backup in @($hostBackup,$workerBackup)) {
+            Assert-PlannedPath $backup -Directory:$folder
+            if($folder) {
+                foreach($name in $manifest.Directories){Assert-PlannedPath (Join-Path $backup $name) -Directory}
+                foreach($name in $manifest.Names){Assert-PlannedPath (Join-Path $backup $name)}
+            }
+        }
+    }
+    if($Operation -eq 'Playlist') {
+        $container=Join-Path $workDst ('.m3u_'+('0'*16)+'.tmp')
+        $data=Join-Path $container 'data'
+        Assert-PlannedPath $data -Directory:(-not [bool]$Job.Plan.PreserveZip)
+        if(-not $Job.Plan.PreserveZip){foreach($name in $Job.Files.Keys){Assert-PlannedPath (Join-Path $data $name)}}
+        if($Job.Plan.ZipMode -and -not $Job.Plan.PreserveZip){Assert-PlannedPath (Join-Path $container 'media.zip')}
+        if($Job.Plan.HasPlaylist){Assert-PlannedPath (Join-Path $container 'playlist')}
+    } else {
+        $scratch=Join-Path $State.WorkRoot ('ppg_'+('0'*12))
+        $input=Join-Path $scratch 'i';$output=Join-Path $scratch 'o'
+        Assert-PlannedPath $input -Directory;Assert-PlannedPath $output -Directory
+        foreach($item in $Job.SourceJob.Items) {
+            Assert-PlannedPath (Join-Path $input $item.InputName)
+            Assert-PlannedPath (Join-Path $output $item.Name)
+        }
+        # ZIP extraction also writes non-media members, so include their names.
+        foreach($zip in @($Job.SourceJob.Items | Where-Object {$_.Type -eq 'Zip'} | Select-Object -ExpandProperty InputPath -Unique)) {
+            foreach($name in $ArchiveFiles[$zip].Keys){Assert-PlannedPath (Join-Path $input $name)}
+        }
+    }
+}
+
 function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
           [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
@@ -368,7 +457,7 @@ function Start-ApplicationBrokerBatch {
         $sourcePins.Add((Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.DestinationSnapshot.Files[$relative].Hash -Root $dst -ReadOnly))
     }
     $module=Get-ApplicationBrokerModule $Operation;$sourceModule=Get-ApplicationBrokerModule 'Playlist'
-    $jobs=New-Object 'System.Collections.Generic.List[object]';$profile=$null
+    $jobs=New-Object 'System.Collections.Generic.List[object]';$profile=$null;$archives=@{}
     if($Operation -eq 'Playlist'){
         $profiles=Get-Content -LiteralPath (Join-Path $script:ApplicationBrokerCodeRoot 'systems.json') -Raw | ConvertFrom-Json
         $selected=@($profiles | Where-Object {$_.Folder -eq $System})
@@ -402,7 +491,6 @@ function Start-ApplicationBrokerBatch {
         $System=@{C64='COMMODORE';ZX='ZXS'}[$Operation]
         $raw=@(& $module {param($src,$dst,$storage,$operation)Get-ConversionSourceGroups $src $dst $storage $operation} $src $dst $Storage $Operation)
         if($raw.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
-        $archives=@{}
         foreach($group in $raw){
             $plan=$group.Plan;$job=New-ApplicationBrokerJob $group.SourceKey $group $plan
             $job.Paths=@($group.Paths);$job.SourceBlockReason=$group.SourceBlockReason;$job.BlockedReason=$group.Error
@@ -434,6 +522,7 @@ function Start-ApplicationBrokerBatch {
     $sourcePlan=& $sourceModule {param($src,$policy)New-SourcePolicyPlan $src $policy} $src $SourcePolicy
     $jobMap=@{};$conflicts=@{}
     foreach($job in $jobs){
+        if(-not $job.BlockedReason){try{Assert-ApplicationBrokerJobPaths $state $Operation $job $archives}catch{$job.BlockedReason=$_.Exception.Message}}
         $jobMap[$job.JobId]=$job
         foreach($path in $job.Paths){$key=Get-ApplicationBrokerRelative $path $src;if($state.SourceSnapshot.Files.ContainsKey($key)){$job.SourceHashes[[IO.Path]::GetFullPath($path)]=$state.SourceSnapshot.Files[$key].Hash}}
         & $sourceModule {param($plan,$job)Add-SourcePolicyJob $plan $job.JobId $job.Paths $job.SourceBlockReason} $sourcePlan $job
@@ -588,7 +677,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore) {
     }
 }
 
-function Get-ApplicationBrokerBackupManifest($State,[string]$Relative) {
+function Get-ApplicationBrokerBackupManifest($State,[string]$Relative,[switch]$IndexOnly) {
     # Each snapshot entry is indexed once. A folder replacement then visits only
     # its descendants, rather than rescanning the entire DST for every game.
     if($null -eq $State.DestinationTree) {
@@ -598,6 +687,7 @@ function Get-ApplicationBrokerBackupManifest($State,[string]$Relative) {
         foreach($name in $State.DestinationSnapshot.Files.Keys){$cut=$name.LastIndexOf('/');$parent='';if($cut -ge 0){$parent=$name.Substring(0,$cut)};$tree[$parent].Files.Add($name)}
         $State.DestinationTree=$tree
     }
+    if($IndexOnly){return}
     if(-not $State.DestinationTree.ContainsKey($Relative)){throw 'An unapproved output directory appeared during publication; previous output kept.'}
     $names=New-Object 'Collections.Generic.List[string]';$lengths=New-Object 'Collections.Generic.List[long]';$hashes=New-Object 'Collections.Generic.List[string]';$directories=New-Object 'Collections.Generic.List[string]'
     $prefix=$Relative+'/'

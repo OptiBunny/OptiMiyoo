@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 [CmdletBinding()]
 param([string]$Root,
       [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage,
@@ -460,7 +460,7 @@ function Ensure-CapsIPFReady($ProbeItem) {
     } finally {
         if ($expanded -and $expanded.TempLease) {$expanded.TempLease.Dispose()}
         if ($probeTempRoot -and (Test-Path -LiteralPath $probeTempRoot)) {
-            Remove-ZXWorkPath $probeTempRoot ([IO.Path]::GetTempPath()) $expanded.TempIdentity
+            Remove-ZXWorkPath $probeTempRoot (Get-OptiScratchRoot) $expanded.TempIdentity
         }
     }
 }
@@ -513,7 +513,7 @@ function Remove-ZXWorkPath([string]$Path,[string]$Root,[string]$Identity) {
 }
 
 function Stage-LooseIPF([string]$InputPath) {
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_' + [Guid]::NewGuid().ToString('N'))
+    $tempRoot = Join-Path (Get-OptiScratchRoot) ('ZX_IPF_' + [Guid]::NewGuid().ToString('N'))
     $input = $null
     $output = $null
     $tempLease=$null;$tempIdentity=''
@@ -536,13 +536,13 @@ function Stage-LooseIPF([string]$InputPath) {
         if ($input) { $input.Dispose() }
         if (-not $complete) {
             if ($tempLease) {$tempLease.Dispose()}
-            if ($tempIdentity) {Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath()) $tempIdentity}
+            if ($tempIdentity) {Remove-ZXWorkPath $tempRoot (Get-OptiScratchRoot) $tempIdentity}
         }
     }
 }
 
 function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
-    $tempRoot=Join-Path ([IO.Path]::GetTempPath()) ('ZX_IPF_'+[Guid]::NewGuid().ToString('N'))
+    $tempRoot=Join-Path (Get-OptiScratchRoot) ('ZX_IPF_'+[Guid]::NewGuid().ToString('N'))
     $zip=$null;$complete=$false;$tempLease=$null;$tempIdentity=''
     try {
         New-SourcePolicyOwnedDirectory $tempRoot
@@ -558,7 +558,7 @@ function Expand-OneZipIPF([string]$ZipPath,[string]$EntryName) {
         if($zip){$zip.Dispose()}
         if(-not $complete){
             if($tempLease){$tempLease.Dispose()}
-            if($tempIdentity){Remove-ZXWorkPath $tempRoot ([IO.Path]::GetTempPath()) $tempIdentity}
+            if($tempIdentity){Remove-ZXWorkPath $tempRoot (Get-OptiScratchRoot) $tempIdentity}
         }
     }
 }

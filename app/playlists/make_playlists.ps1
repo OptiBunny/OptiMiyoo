@@ -1578,7 +1578,7 @@ try {
                 [void][IO.Directory]::CreateDirectory($parent)
                 if ($parent -ne $parentAnchor) {$outputDirectoryLocks.Add((Open-SourcePolicyDirectoryLease $parent))}
             }
-            $stageContainer=Join-Path $destinationRoot ('.m3u_'+[Guid]::NewGuid().ToString('N')+'.tmp')
+            $stageContainer=Join-Path $destinationRoot ('.m3u_'+[Guid]::NewGuid().ToString('N').Substring(0,16)+'.tmp')
             New-SourcePolicyOwnedDirectory $stageContainer
             $stageLease=Open-SourcePolicyDirectoryLease $stageContainer;$stageIdentity=$stageLease.DirectoryIdentity
             $stageData=Join-Path $stageContainer 'data'

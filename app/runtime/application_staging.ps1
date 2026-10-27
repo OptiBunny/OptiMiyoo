@@ -39,6 +39,7 @@ function ConvertTo-ApplicationWorkLease {
 
 function New-ApplicationStagedCode {
     param([Parameter(Mandatory=$true)][string]$ApplicationRoot,[Parameter(Mandatory=$true)]$Session)
+    . (Join-Path $PSScriptRoot '../shared/compile_support.ps1')
     Initialize-ApplicationSession
     if ($Session.ProcessId -ne 0) {throw 'Application code must be staged before process startup.'}
     $application=[IO.Path]::GetFullPath($ApplicationRoot).TrimEnd('\','/')
@@ -52,6 +53,19 @@ function New-ApplicationStagedCode {
         'app/shared/native_process.ps1','app/shared/native_sandbox.ps1','app/shared/archive_sandbox.ps1','app/shared/conversion_layout.ps1',
         'app/runtime/application_session.ps1','app/runtime/application_entry.ps1','app/runtime/application_jobs.ps1','app/runtime/application_archive.ps1',
         'app/systems.json')
+    $build=Join-Path $Session.RootPath 'b'
+    $helpers=Join-Path $code 'helpers'
+    $control=Join-Path $Session.RootPath 'p'
+    foreach ($directory in @($Session.RootPath,$code,$work,$build,$helpers,$control)) {Assert-OptiPathBudget -Path $directory -Directory}
+    # Check the complete fixed code layout before copying any installed files.
+    foreach ($relative in @($files)+@('helpers/application.dll','boot.ps1')) {
+        $destination=Join-Path $code $relative
+        Assert-OptiPathBudget -Path $destination
+        Assert-OptiPathBudget -Path ([IO.Path]::GetDirectoryName($destination)) -Directory
+    }
+    foreach ($name in 'start.ps1','rpc-handles.txt') {Assert-OptiPathBudget -Path (Join-Path $control $name)}
+    Assert-OptiPathBudget -Path (Join-Path $build 'a.dll')
+    Assert-OptiPathBudget -Path (Join-Path $build ('CSC'+('0'*32)+'.TMP'))
     $texts=@{};$encoding=New-Object Text.UTF8Encoding($true)
     foreach ($relative in $files) {
         $path=Join-Path $application $relative;$destination=Join-Path $code $relative
@@ -80,14 +94,15 @@ function New-ApplicationStagedCode {
     $sources.Add((ConvertTo-ApplicationWorkLease $onion $work))
     $sources.Add((Get-ApplicationRpcClientSource))
     # The generated assembly is loaded before any app script; attempted new compilation is an error.
-    [IO.File]::WriteAllText((Join-Path $code 'app/shared/compile_support.ps1'),"function Add-OptiMiyooType {param([string]`$TypeDefinition) throw 'The isolated application cannot compile additional code.'}`r`n",$encoding)
-    $build=Join-Path $Session.RootPath 'b'
-    $helpers=Join-Path $code 'helpers';[void][IO.Directory]::CreateDirectory($build);[void][IO.Directory]::CreateDirectory($helpers)
+    $childSupport="function Add-OptiMiyooType {param([string]`$TypeDefinition) throw 'The isolated application cannot compile additional code.'}`r`n"+
+        "function Get-OptiScratchRoot {return [OptiMiyoo.ApplicationRpcClient]::WorkPath}`r`n"
+    [IO.File]::WriteAllText((Join-Path $code 'app/shared/compile_support.ps1'),$childSupport,$encoding)
+    [void][IO.Directory]::CreateDirectory($build);[void][IO.Directory]::CreateDirectory($helpers)
     $compiler=Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     if (-not [IO.File]::Exists($compiler)) {throw 'The Windows .NET Framework compiler is required to prepare the isolated application.'}
     $process=$null;$started=$false;$names=New-Object Collections.Generic.List[string]
     try {
-        for($index=0;$index -lt $sources.Count;$index++) {$name='s'+$index+'.cs';$names.Add($name);[IO.File]::WriteAllText((Join-Path $build $name),$sources[$index],$encoding)}
+        for($index=0;$index -lt $sources.Count;$index++) {$name='s'+$index+'.cs';$names.Add($name);$sourcePath=Join-Path $build $name;Assert-OptiPathBudget -Path $sourcePath;[IO.File]::WriteAllText($sourcePath,$sources[$index],$encoding)}
         $start=New-Object Diagnostics.ProcessStartInfo
         $start.FileName=$compiler;$start.WorkingDirectory=$build
         $start.Arguments='/nologo /noconfig /utf8output /optimize+ /warnaserror+ /target:library /out:a.dll /reference:System.dll /reference:System.Core.dll '+($names -join ' ')

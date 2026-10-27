@@ -59,6 +59,11 @@ namespace OptiMiyoo {
   public uint Id {get;private set;}
   public bool IsAppContainer {get;private set;}
   public string CleanupWarning {get;private set;}
+  internal static string NativePath(string path) {
+   string full=Path.GetFullPath(path);
+   if(full.StartsWith(@"\\?\",StringComparison.Ordinal)||full.StartsWith(@"\\.\",StringComparison.Ordinal))throw new IOException("Device paths are not supported.");
+   return full.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+full.Substring(2):@"\\?\"+full;
+  }
   private static void Check(bool ok,string where) {if(!ok) {int code=Marshal.GetLastWin32Error();throw new Win32Exception(code,where+": "+code+" "+new Win32Exception(code).Message);}}
   private static IntPtr Value<T>(T value) {IntPtr p=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(T)));Marshal.StructureToPtr(value,p,false);return p;}
   private static void Attribute(IntPtr list,int id,IntPtr value,int bytes) {Check(UpdateProcThreadAttribute(list,0,new IntPtr(id),value,new IntPtr(bytes),IntPtr.Zero,IntPtr.Zero),"Update attribute "+id);}
@@ -68,7 +73,7 @@ namespace OptiMiyoo {
    string rights=write?"0x1301bf":"0x1200a9";
    string sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;"+user+")(A;OICI;"+rights+";;;"+package+")"+(write?"S:(ML;OICI;NW;;;LW)":"");
    IntPtr sd;uint bytes;Check(ConvertStringSecurityDescriptorToSecurityDescriptor(sddl,1,out sd,out bytes),"Parse ACL");
-   try {bool present,defaulted;IntPtr dacl,sacl;Check(GetSecurityDescriptorDacl(sd,out present,out dacl,out defaulted),"Read DACL");Check(GetSecurityDescriptorSacl(sd,out present,out sacl,out defaulted),"Read SACL");uint status=SetNamedSecurityInfo(path,1,0x80000004u|(write?0x10u:0u),IntPtr.Zero,IntPtr.Zero,dacl,sacl);if(status!=0) throw new Win32Exception((int)status,"Apply private scratch ACL");} finally {LocalFree(sd);}
+   try {bool present,defaulted;IntPtr dacl,sacl;Check(GetSecurityDescriptorDacl(sd,out present,out dacl,out defaulted),"Read DACL");Check(GetSecurityDescriptorSacl(sd,out present,out sacl,out defaulted),"Read SACL");uint status=SetNamedSecurityInfo(NativePath(path),1,0x80000004u|(write?0x10u:0u),IntPtr.Zero,IntPtr.Zero,dacl,sacl);if(status!=0) throw new Win32Exception((int)status,"Apply private scratch ACL");} finally {LocalFree(sd);}
   }
   public static NativeSandboxProcess Start(string exe,string args,string cwd,string[] readFolders,string[] writeFolders,bool lpac,bool allowChildren,int memoryMiB,int cpuSeconds,IntPtr[] extraHandles) {
    NativeSandboxProcess result=new NativeSandboxProcess();
@@ -100,7 +105,7 @@ namespace OptiMiyoo {
     JobExtended limits=new JobExtended();limits.basic.flags=0x2000|0x100|0x200|0x8|0x2;limits.basic.processTime=(long)cpuSeconds*10000000;limits.basic.active=allowChildren?8u:1u;limits.processMemory=new UIntPtr((ulong)memoryMiB*1024*1024);limits.jobMemory=limits.processMemory;
     Check(SetInformationJobObject(result.job,9,ref limits,(uint)Marshal.SizeOf(typeof(JobExtended))),"Job limits");
     uint uiRestrictions=0xff;Check(SetJobUiRestrictions(result.job,4,ref uiRestrictions,4),"Restrict sandbox desktop access");
-    Check(CreateProcess(exe,new StringBuilder("\""+exe+"\" "+args),IntPtr.Zero,IntPtr.Zero,true,0x80000|0x400|0x4|0x8,environment,cwd,ref si,out pi),"Create isolated process");
+    Check(CreateProcess(NativePath(exe),new StringBuilder("\""+exe+"\" "+args),IntPtr.Zero,IntPtr.Zero,true,0x80000|0x400|0x4|0x8,environment,cwd,ref si,out pi),"Create isolated process");
     result.process=pi.process;result.Id=pi.pid;Check(AssignProcessToJobObject(result.job,result.process),"Assign job");
     IntPtr token;Check(OpenProcessToken(result.process,8,out token),"Inspect process token");
     try {uint returned;IntPtr flag=Marshal.AllocHGlobal(4);try {Check(GetTokenInformation(token,29,flag,4,out returned),"Inspect AppContainer token");result.IsAppContainer=Marshal.ReadInt32(flag)!=0;uint tokenBytes;GetTokenInformation(token,30,IntPtr.Zero,0,out tokenBytes);if(tokenBytes<4 || tokenBytes>65536)throw new IOException("Cannot verify sandbox capabilities.");IntPtr caps=Marshal.AllocHGlobal((int)tokenBytes);try{Check(GetTokenInformation(token,30,caps,tokenBytes,out returned),"Inspect sandbox capabilities");if(Marshal.ReadInt32(caps)!=0)throw new IOException("Sandbox capabilities must be empty.");}finally{Marshal.FreeHGlobal(caps);}}finally {Marshal.FreeHGlobal(flag);}}finally {CloseHandle(token);}
@@ -176,7 +181,7 @@ namespace OptiMiyoo {
   }
   private static FileStream ReadOrdinary(string path,long maximum) {
    NoLinkedParents(path);
-   SafeFileHandle handle=CreateFile(path,0x80000000u,1,IntPtr.Zero,3,0x00200000u|0x08000000u,IntPtr.Zero);
+   SafeFileHandle handle=CreateFile(NativeSandboxProcess.NativePath(path),0x80000000u,1,IntPtr.Zero,3,0x00200000u|0x08000000u,IntPtr.Zero);
    if(handle.IsInvalid){handle.Dispose();throw new Win32Exception(Marshal.GetLastWin32Error(),"Open sandbox input");}
    try {
     FileInfoNative info;Check(GetFileInformationByHandle(handle,out info),"Inspect sandbox input");
@@ -194,7 +199,7 @@ namespace OptiMiyoo {
    }
   }
   private void PinDirectory(string path) {
-   SafeFileHandle handle=CreateFile(path,1,3,IntPtr.Zero,3,0x02000000u|0x00200000u,IntPtr.Zero);
+   SafeFileHandle handle=CreateFile(NativeSandboxProcess.NativePath(path),1,3,IntPtr.Zero,3,0x02000000u|0x00200000u,IntPtr.Zero);
    if(handle.IsInvalid){handle.Dispose();throw new Win32Exception(Marshal.GetLastWin32Error(),"Pin sandbox directory");}
    FileInfoNative info;try{Check(GetFileInformationByHandle(handle,out info),"Inspect sandbox directory");if((info.attributes&0x410)!=0x10)throw new IOException("Sandbox directory was replaced by a link.");if(path==RootPath&&rootIdentity==null)rootIdentity=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8");}catch{handle.Dispose();throw;}
    directories.Add(handle);
@@ -206,8 +211,8 @@ namespace OptiMiyoo {
    try {
     string temp=Path.GetFullPath(Path.GetTempPath());NoLinkedParents(temp);
     result.parentLease=(IDisposable)SourcePolicy("OpenDirectory",temp);
-    string root=Path.Combine(temp,"os_"+Guid.NewGuid().ToString("N"));
-    Check(CreateDirectoryW(root,IntPtr.Zero),"Create a new private sandbox directory");
+    string root=Path.Combine(temp,"os_"+Guid.NewGuid().ToString("N").Substring(0,16));
+    Check(CreateDirectoryW(NativeSandboxProcess.NativePath(root),IntPtr.Zero),"Create a new private sandbox directory");
     result.RootPath=root;
     // First protect the new empty root for the current account. The zero SID has no members.
     NativeSandboxProcess.Secure(result.RootPath,"S-1-0-0",false);

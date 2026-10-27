@@ -119,13 +119,16 @@ function Invoke-ApplicationArchiveRequest {
             $task.InputLease=Open-SourcePolicyReadLease $inputPath $state.WorkRoot
             if($destination) {
                 $parent=[IO.Path]::GetDirectoryName($destination)
+                Assert-OptiPathBudget -Path $destination -Directory:($Payload.ArchiveOperation -eq 'Extract')
+                Assert-OptiPathBudget -Path $parent -Directory
                 if(-not [IO.Directory]::Exists($parent)){throw 'Archive destination parent must already exist in this batch.'}
                 $task.DestinationLease=Open-SourcePolicyDirectoryLease $parent
-                if($Payload.ArchiveOperation -eq 'Extract') {
-                    [void][IO.Directory]::CreateDirectory($destination)
+                # The host importer validates every ZIP path before creating
+                # the extraction directory, including empty directory entries.
+                if($Payload.ArchiveOperation -eq 'Extract' -and [IO.Directory]::Exists($destination)) {
                     $directoryLease=Open-SourcePolicyDirectoryLease $destination
                     $task.DestinationLease.Dispose();$task.DestinationLease=$directoryLease
-                } elseif(Test-Path -LiteralPath $destination){throw 'Archive destination must be a new output in the active batch.'}
+                } elseif($Payload.ArchiveOperation -eq 'File' -and (Test-Path -LiteralPath $destination)){throw 'Archive destination must be a new output in the active batch.'}
             }
             # Compile the fixed installed service once in the trusted parent.
             # Fresh runspaces receive only these bytes, never executable payloads

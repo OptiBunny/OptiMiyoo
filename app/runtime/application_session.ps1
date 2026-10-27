@@ -15,12 +15,13 @@ namespace OptiMiyoo {
   [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int info,IntPtr data,uint bytes,out uint returned);
   private static bool Confined(){IntPtr token;if(!OpenProcessToken(GetCurrentProcess(),8,out token))return false;try{uint returned;IntPtr flag=Marshal.AllocHGlobal(4);try{if(!GetTokenInformation(token,29,flag,4,out returned)||Marshal.ReadInt32(flag)!=1)return false;}finally{Marshal.FreeHGlobal(flag);}uint bytes;GetTokenInformation(token,30,IntPtr.Zero,0,out bytes);if(bytes<4||bytes>65536)return false;IntPtr caps=Marshal.AllocHGlobal((int)bytes);try{return GetTokenInformation(token,30,caps,bytes,out returned)&&Marshal.ReadInt32(caps)==0;}finally{Marshal.FreeHGlobal(caps);}}finally{CloseHandle(token);}}
   public static bool IsIsolated {get{return request!=null&&response!=null&&Confined();}}
+  public static string WorkPath {get;private set;}
   private const int Limit=1048576;
   private static readonly object Gate=new object();
   private static readonly UTF8Encoding Utf8=new UTF8Encoding(false,true);
   private static FileStream request,response;
   private static uint nextId;
-  public static void Initialize(long requestHandle,long responseHandle){lock(Gate){if(!Confined()||request!=null||requestHandle<=0||responseHandle<=0||requestHandle==responseHandle)throw new InvalidOperationException("Invalid application broker handles.");request=new FileStream(new SafeFileHandle(new IntPtr(requestHandle),true),FileAccess.Write);response=new FileStream(new SafeFileHandle(new IntPtr(responseHandle),true),FileAccess.Read);}}
+  public static void Initialize(long requestHandle,long responseHandle){lock(Gate){if(!Confined()||request!=null||requestHandle<=0||responseHandle<=0||requestHandle==responseHandle)throw new InvalidOperationException("Invalid application broker handles.");string work=Environment.GetEnvironmentVariable("OPTIMIYOO_SESSION_WORK");if(String.IsNullOrEmpty(work)||!Path.IsPathRooted(work)||!Directory.Exists(work))throw new IOException("Application work directory is unavailable.");WorkPath=Path.GetFullPath(work);request=new FileStream(new SafeFileHandle(new IntPtr(requestHandle),true),FileAccess.Write);response=new FileStream(new SafeFileHandle(new IntPtr(responseHandle),true),FileAccess.Read);}}
   private static byte[] Read(int size){byte[] data=new byte[size];int done=0;while(done<size){int n=response.Read(data,done,size-done);if(n==0)throw new IOException("Application broker disconnected.");done+=n;}return data;}
   public static string Call(string operation,string payload){lock(Gate){
    if(request==null)throw new InvalidOperationException("Application broker is not initialized.");
@@ -196,14 +197,19 @@ namespace OptiMiyoo {
   private static void Attribute(IntPtr list,int id,IntPtr value,int bytes){Check(UpdateProcThreadAttribute(list,0,new IntPtr(id),value,new IntPtr(bytes),IntPtr.Zero,IntPtr.Zero),"Configure application process attribute");}
   private static Type PolicyType(){foreach(System.Reflection.Assembly a in AppDomain.CurrentDomain.GetAssemblies()){Type t=a.GetType("OptiMiyoo.SourceRemovalLeaseV128",false);if(t!=null)return t;}throw new IOException("Verified source policy helper is unavailable.");}
   private static object Policy(string name,params object[] args){try{return PolicyType().GetMethod(name,System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static).Invoke(null,args);}catch(System.Reflection.TargetInvocationException e){throw e.InnerException??e;}}
+  private static string NativePath(string path){
+   string full=Path.GetFullPath(path);
+   if(full.StartsWith(@"\\?\",StringComparison.Ordinal)||full.StartsWith(@"\\.\",StringComparison.Ordinal))throw new IOException("Device paths are not supported.");
+   return full.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+full.Substring(2):@"\\?\"+full;
+  }
   private static void Secure(string path,string package,bool write){
    string user=WindowsIdentity.GetCurrent().User.Value;
    string sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;"+user+")(A;OICI;"+(write?"0x1301bf":"0x1200a9")+";;;"+package+")"+(write?"S:(ML;OICI;NW;;;LW)":"");
    IntPtr sd;uint size;Check(ConvertStringSecurityDescriptorToSecurityDescriptor(sddl,1,out sd,out size),"Prepare application ACL");
-   try{bool present,defaulted;IntPtr dacl,sacl;Check(GetSecurityDescriptorDacl(sd,out present,out dacl,out defaulted),"Read application DACL");Check(GetSecurityDescriptorSacl(sd,out present,out sacl,out defaulted),"Read application SACL");uint status=SetNamedSecurityInfo(path,1,0x80000004u|(write?0x10u:0u),IntPtr.Zero,IntPtr.Zero,dacl,sacl);if(status!=0)throw new Win32Exception((int)status,"Protect application staging");}finally{LocalFree(sd);}
+   try{bool present,defaulted;IntPtr dacl,sacl;Check(GetSecurityDescriptorDacl(sd,out present,out dacl,out defaulted),"Read application DACL");Check(GetSecurityDescriptorSacl(sd,out present,out sacl,out defaulted),"Read application SACL");uint status=SetNamedSecurityInfo(NativePath(path),1,0x80000004u|(write?0x10u:0u),IntPtr.Zero,IntPtr.Zero,dacl,sacl);if(status!=0)throw new Win32Exception((int)status,"Protect application staging");}finally{LocalFree(sd);}
   }
   private void Pin(string path,bool directory){
-   SafeFileHandle h=CreateFile(path,directory?1u:0x80000000u,directory?3u:1u,IntPtr.Zero,3,0x00200000u|(directory?0x02000000u:0u),IntPtr.Zero);
+   SafeFileHandle h=CreateFile(NativePath(path),directory?1u:0x80000000u,directory?3u:1u,IntPtr.Zero,3,0x00200000u|(directory?0x02000000u:0u),IntPtr.Zero);
    if(h.IsInvalid){h.Dispose();throw new Win32Exception(Marshal.GetLastWin32Error(),"Pin application staging");}
    try{FileInformation info;Check(GetFileInformationByHandle(h,out info),"Inspect application staging");if((info.attributes&0x400)!=0||((info.attributes&0x10)!=0)!=directory||(!directory&&info.links!=1))throw new IOException("Application staging must contain ordinary unlinked files/directories.");if(directory&&path==RootPath&&rootIdentity==null)rootIdentity=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8");pins.Add(h);}catch{h.Dispose();throw;}
   }
@@ -213,8 +219,8 @@ namespace OptiMiyoo {
    try{
     string temp=Path.GetFullPath(Path.GetTempPath());if(temp.StartsWith("\\\\",StringComparison.Ordinal)||!String.Equals(new DriveInfo(Path.GetPathRoot(temp)).DriveFormat,"NTFS",StringComparison.OrdinalIgnoreCase))throw new IOException("Application isolation needs a local NTFS temporary directory.");
     result.parentLease=(IDisposable)Policy("OpenDirectory",temp);
-    string root=Path.Combine(temp,"as_"+Guid.NewGuid().ToString("N"));Policy("CreateOwnedDirectory",root);result.RootPath=root;Secure(result.RootPath,"S-1-0-0",false);result.Pin(result.RootPath,true);
-    result.CodePath=Path.Combine(result.RootPath,"code");result.WorkPath=Path.Combine(result.RootPath,"work");result.controlPath=Path.Combine(result.RootPath,"control");Directory.CreateDirectory(result.CodePath);Directory.CreateDirectory(result.WorkPath);Directory.CreateDirectory(result.controlPath);result.Pin(result.WorkPath,true);return result;
+    string root=Path.Combine(temp,"as_"+Guid.NewGuid().ToString("N").Substring(0,16));if(root.Length+2>247)throw new IOException("Application working path is too long. Move OptiMiyoo to a shorter folder, then retry. Originals kept.");Policy("CreateOwnedDirectory",root);result.RootPath=root;Secure(result.RootPath,"S-1-0-0",false);result.Pin(result.RootPath,true);
+    result.CodePath=Path.Combine(result.RootPath,"c");result.WorkPath=Path.Combine(result.RootPath,"w");result.controlPath=Path.Combine(result.RootPath,"p");Directory.CreateDirectory(result.CodePath);Directory.CreateDirectory(result.WorkPath);Directory.CreateDirectory(result.controlPath);result.Pin(result.WorkPath,true);return result;
    }catch{result.Dispose();throw;}
   }
   private string CodeFile(string relative){if(String.IsNullOrEmpty(relative)||Path.IsPathRooted(relative)||relative.IndexOf(':')>=0)throw new IOException("A relative staged code path is required.");string full=Path.GetFullPath(Path.Combine(CodePath,relative));if(!full.StartsWith(CodePath+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)||!File.Exists(full))throw new IOException("Application code is outside its staging root.");return full;}

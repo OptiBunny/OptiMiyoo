@@ -37,10 +37,15 @@ namespace OptiMiyoo {
         private readonly List<SafeFileHandle> directories = new List<SafeFileHandle>();
         private FileStream stream;
         public FileStream Stream { get { return stream; } }
+        private static string NativePath(string path) {
+            string full = Path.GetFullPath(path);
+            if (full.StartsWith(@"\\?\", StringComparison.Ordinal) || full.StartsWith(@"\\.\", StringComparison.Ordinal)) throw new IOException("Device paths are not supported.");
+            return full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full.Substring(2) : @"\\?\" + full;
+        }
         private static SafeFileHandle OpenHandle(string path, bool directory, bool write, bool create) {
             uint access = directory ? 0x81U : (write ? 0xC0000000U : 0x80000000U);
             uint flags = 0x00200000U | (directory ? 0x02000000U : 0U);
-            SafeFileHandle handle = CreateFileW(path, access, 1, IntPtr.Zero, create ? 1U : 3U, flags, IntPtr.Zero);
+            SafeFileHandle handle = CreateFileW(NativePath(path), access, 1, IntPtr.Zero, create ? 1U : 3U, flags, IntPtr.Zero);
             if (handle.IsInvalid) {
                 int error = Marshal.GetLastWin32Error(); handle.Dispose();
                 throw new Win32Exception(error, "SD path could not be locked safely.");

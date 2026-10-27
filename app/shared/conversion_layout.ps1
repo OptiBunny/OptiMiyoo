@@ -1,4 +1,4 @@
-﻿# Shared Auto, ZIP, loose-file and per-game-folder layouts for C64 and ZX.
+# Shared Auto, ZIP, loose-file and per-game-folder layouts for C64 and ZX.
 . (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 
 function Assert-ConversionRelativeName([string]$Name) {
@@ -307,7 +307,7 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
             }
             Assert-ConversionGroupOwnership $group $destinationRoot
             foreach ($path in $group.Paths) {$leases.Add((Open-SourcePolicyReadLease $path $sourceRoot));$hashes[[IO.Path]::GetFullPath($path)]=Get-SourcePolicyHash $path}
-            $temp=Join-Path ([IO.Path]::GetTempPath()) ('ppg_'+[Guid]::NewGuid().ToString('N').Substring(0,12))
+            $temp=Join-Path (Get-OptiScratchRoot) ('ppg_'+[Guid]::NewGuid().ToString('N').Substring(0,12))
             New-SourcePolicyOwnedDirectory $temp;$tempOwned=$true
             $tempLease=Open-SourcePolicyDirectoryLease $temp;$tempIdentity=$tempLease.DirectoryIdentity
             $inputDir=Join-Path $temp 'i';$convertedDir=Join-Path $temp 'o'
@@ -339,7 +339,7 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
             foreach ($lease in $leases) {$lease.Dispose()}
             if ($commit) {foreach ($lock in $commit.Locks) {$lock.Dispose()}}
             if ($tempLease) {$tempLease.Dispose()}
-            if ($tempOwned -and $tempIdentity -and (Test-Path -LiteralPath $temp)) {Remove-SourcePolicyOwnedPath -Path $temp -Root ([IO.Path]::GetTempPath()) -Identity $tempIdentity -MaximumEntries 400005}
+            if ($tempOwned -and $tempIdentity -and (Test-Path -LiteralPath $temp)) {Remove-SourcePolicyOwnedPath -Path $temp -Root (Get-OptiScratchRoot) -Identity $tempIdentity -MaximumEntries 400005}
             $script:Processed++
         }
     }

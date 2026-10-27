@@ -245,17 +245,18 @@ function Invoke-ApplicationHost {
         $startPage=$Entry;$Entry='Playlist';$menu=$true
     }
     $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
-    $again=$true;$exitCode=1;$selectedOnionRoot=$originalArguments.OnionRoot
+    $again=$true;$exitCode=1;$selectedOnionRoot=$null
+    if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
     while ($again) {
         $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
         try {
             Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan
             $session=[OptiMiyoo.ApplicationSession]::Create()
             $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
-            if ($selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath}
+            if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath}
             $receipts=[pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=(New-Object Collections.ArrayList)}
             if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
-                $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath -OnionRoot $selectedOnionRoot
+                $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
                 $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
             }
             $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
@@ -264,7 +265,6 @@ function Invoke-ApplicationHost {
             foreach ($key in 'NoAnimation','NoColor','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
             if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
             if ($menu) {$worker.StartPage=$startPage}
-            if ($sd) {$worker.OnionRoot=$sd.StagedRoot}
             $batch=$null
             if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
                 $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
@@ -272,7 +272,7 @@ function Invoke-ApplicationHost {
                 $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
                 $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
                 if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.SingleStorage=$selection.SingleStorage}
-                else {[void]$worker.Remove('Preview');[void]$worker.Remove('OnionRoot')}
+                else {[void]$worker.Remove('Preview')}
                 $worker.Storage=$selection.Storage
             }
             if ($Entry -eq 'SD') {
@@ -329,7 +329,7 @@ function Invoke-ApplicationHost {
             if ($sdResult.BackupRoot) {Write-Host ('Original configs: '+$sdResult.BackupRoot)}
             if ($sdResult.Changed) {Write-Host 'Refresh the Onion game list.'}
             if ($sdResult.Failed) {$exitCode=1}
-            if ($menu) {$Entry='Playlist';$startPage='Main';$again=$true}
+            if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$true}
         }
     }
     return [int]$exitCode

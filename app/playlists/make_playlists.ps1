@@ -1188,7 +1188,6 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
 
 function Invoke-OptiMenu([object[]]$Profiles) {
     $page=$StartPage; $profile=$null; $lastCode=0
-    $menuOnionRoot=$OnionRoot
     $common=@{Root=$Root; Existing=$Existing; NoAnimation=$NoAnimation; NoColor=$NoColor; DisplayEffect=$DisplayEffect}
     while ($true) {
         $worker=$null; $workerArgs=$null; $pageName=$page
@@ -1198,10 +1197,9 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
             Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
             Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
-            if ($menuOnionRoot) {Write-MenuLine ('  Support: selected cores on '+$menuOnionRoot) 'Support: selected cores on your SD'}
-            else {Write-MenuLine '  Support: standard Onion cores. S checks a connected SD card.' 'Support: standard Onion cores'}
+            Write-MenuLine '  Support: standard Onion cores'
             for ($i=0;$i -lt $Profiles.Count;$i++) {
-                $support=Get-PlaylistSupport $Profiles[$i] $menuOnionRoot
+                $support=Get-PlaylistSupport $Profiles[$i] ''
                 $label=Get-PlaylistFeatureLabel $support
                 if ($label) {$label=' '+$label}
                 $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
@@ -1264,7 +1262,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
-            $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
+            $converterSupport=Get-PlaylistSupport $converterProfile ''
             $defaultOutput='1'
             $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -GameOutput
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
@@ -1293,7 +1291,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $pageName=$profile.Name+' / playlist media'
             if ($singlePage) {$pageName=$profile.Name+' / single games'}
             Show-MenuTitle $pageName
-            $support=Get-PlaylistSupport $profile $menuOnionRoot
+            $support=Get-PlaylistSupport $profile ''
             $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
             Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
             if ($singlePage) {
@@ -1303,7 +1301,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 $playlistLabel=Get-PlaylistFeatureLabel $support
                 if ($playlistLabel) {Write-MenuLine ('  '+$playlistLabel)}
                 if ($profile.Folder -eq 'COMMODORE') {
-                    $tapeSupport=Get-TapeSwapSupport $profile $menuOnionRoot $support
+                    $tapeSupport=Get-TapeSwapSupport $profile '' $support
                     $tapeFormats='TAP, T64'
                     if ($tapeSupport.CanBuild) {$tapeFormats=(@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.').ToUpperInvariant()}) -join ', ')}
                     $tapeLabel=''; if (-not $tapeSupport.CanBuild) {$tapeLabel=' ['+$tapeSupport.Status.ToLowerInvariant()+']'}
@@ -1350,7 +1348,6 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $workerArgs=$common.Clone(); $workerArgs.System=$profile.Folder
             $workerArgs.SingleStorage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$singleOutput]
             $workerArgs.Storage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$hiddenOutput]
-            $workerArgs.OnionRoot=$menuOnionRoot
         } elseif ($page -eq 'SD') {
             $selected=Invoke-ApplicationRpc -Operation SD.Select -Payload @{}
             if ($selected.Cancelled) {$page='Main';continue}
@@ -1414,17 +1411,17 @@ try {
     Write-Host '  Single media stays visible in DST. Playlists require 2+ images.'
     Write-Host '  Working on staged copies. Originals are handled after verification.'
     Write-Host ('  Single games: '+$SingleStorage+'. Playlist media in .hidden: '+$Storage+'.')
-    Write-Host '  Support follows Onion defaults or the selected core on the supplied SD card.' -ForegroundColor Yellow
+    Write-Host '  Playback notes use standard Onion cores.' -ForegroundColor Yellow
     Show-ConversionStart $System
     $jobs=New-Object 'System.Collections.Generic.List[object]'
     foreach ($profile in $selected) {
-        Show-PreparationProgress 'Checking selected core' $profile.Folder 0 -1 'profiles' -Force
-        $support=Get-PlaylistSupport $profile $OnionRoot
+        Show-PreparationProgress 'Preparing system' $profile.Folder 0 -1 'profiles' -Force
+        $support=Get-PlaylistSupport $profile ''
         Write-Event 'CORE' ($support.Basis+' / '+$support.Core+' / '+$support.Status)
         if (-not $support.CanBuild) {Write-Event 'PLAYBACK NOTE' ((Get-PlaylistFeatureLabel $support)+' '+$support.Reason)}
         $tapeSupport=$null
         if ($profile.Folder -eq 'COMMODORE') {
-            $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $support
+            $tapeSupport=Get-TapeSwapSupport $profile '' $support
             Write-Event 'TAPES' ($tapeSupport.Status+' / '+$support.Basis+' / '+$tapeSupport.Reason)
         }
         $sourceRoot=Join-Path $Root 'SRC'

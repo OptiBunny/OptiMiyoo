@@ -253,7 +253,7 @@ function Get-ApplicationBrokerModule([ValidateSet('Playlist','C64','ZX')][string
 }
 
 function New-ApplicationBrokerSession {
-    param([Parameter(Mandatory=$true)][string]$OriginalRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[string]$OnionRoot)
+    param([Parameter(Mandatory=$true)][string]$OriginalRoot,[Parameter(Mandatory=$true)][string]$WorkRoot)
     $original=[IO.Path]::GetFullPath($OriginalRoot).TrimEnd('\','/');$work=[IO.Path]::GetFullPath($WorkRoot).TrimEnd('\','/')
     if(-not [IO.Directory]::Exists($original)){throw 'Application input root must exist.'}
     foreach($name in 'SRC','DST') {
@@ -279,8 +279,8 @@ function New-ApplicationBrokerSession {
         if($source.Files.Count+$source.Directories.Count+$destination.Files.Count+$destination.Directories.Count -gt 100000){throw 'SRC or DST grew beyond the snapshot entry limit; originals kept.'}
     } finally {$workLease.Dispose()}
     $id=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
-    $handle=[pscustomobject]@{Id=$id;OriginalRoot=$original;WorkRoot=$work;OnionRoot=$OnionRoot;SourceSnapshot=[pscustomobject]@{FileCount=$source.Files.Count;Bytes=$source.Bytes};DestinationSnapshot=[pscustomobject]@{FileCount=$destination.Files.Count;Bytes=$destination.Bytes};ActiveBatch=$null}
-    $script:ApplicationBrokerStates[$id]=[pscustomobject]@{Handle=$handle;Id=$id;OriginalRoot=$original;WorkRoot=$work;OnionRoot=$OnionRoot;SourceSnapshot=$source;DestinationSnapshot=$destination;DestinationTree=$null;Batch=$null;Closed=$false}
+    $handle=[pscustomobject]@{Id=$id;OriginalRoot=$original;WorkRoot=$work;SourceSnapshot=[pscustomobject]@{FileCount=$source.Files.Count;Bytes=$source.Bytes};DestinationSnapshot=[pscustomobject]@{FileCount=$destination.Files.Count;Bytes=$destination.Bytes};ActiveBatch=$null}
+    $script:ApplicationBrokerStates[$id]=[pscustomobject]@{Handle=$handle;Id=$id;OriginalRoot=$original;WorkRoot=$work;SourceSnapshot=$source;DestinationSnapshot=$destination;DestinationTree=$null;Batch=$null;Closed=$false}
     return $handle
 }
 

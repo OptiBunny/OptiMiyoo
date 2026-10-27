@@ -1152,7 +1152,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
             $converterSupport=Get-PlaylistSupport $converterProfile $menuOnionRoot
             $defaultOutput='1'; if ($page -eq 'ZX') {$defaultOutput='3'}
-            $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -Conversion
+            $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -GameOutput
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
             $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
@@ -1201,7 +1201,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 Write-MenuLine '  Playlists stay outside .hidden.'
             }
             $defaultOutput=if ($singlePage) {$singleOutput} else {$hiddenOutput}
-            $zipNotice=Get-ZipOutputNotice $profile $support -Conversion:$singlePage
+            $zipNotice=Get-ZipOutputNotice $profile $support -GameOutput:$singlePage
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
             $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
@@ -1216,8 +1216,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 $prompt='Choose single-game storage'
             } else {
                 if ($profile.Folder -in 'CPC','ZXS' -and $support.Core -eq $profile.DefaultCore -and $support.Status -eq 'UNSUPPORTED') {
-                    Write-MenuLine '  Playlists are also unsupported by the default core.'
-                } elseif (-not $profile.ZipMemberPlaylist -and $zipNotice.Hint -notlike 'Choose Folders*') {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
+                    Write-MenuLine '  The default core cannot load playlists in any storage format.'
+                } elseif ($zipNotice.Label) {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
                 Write-MenuLine '  Next: choose Keep or Remove originals.'
                 Write-MenuLine '  B. Back to single games     Q. Exit'
                 $prompt='Choose storage in .hidden'

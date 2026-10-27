@@ -359,33 +359,29 @@ function Get-PlaylistFeatureLabel($Support) {
     return '[playlists unsupported]'
 }
 
-function Get-ZipOutputNotice($Profile,$Support,[switch]$Conversion) {
-    # ZipMemberPlaylist describes OptiMiyoo's archive#member playlist layout,
-    # not general ZIP loading. DefaultZipSupport follows Onion's core docs.
+function Get-ZipOutputNotice($Profile,$Support,[switch]$GameOutput) {
+    # General ZIP loading and archive#member playlist links are separate features.
+    # Unlisted/false metadata means unverified, not proof of missing core support.
     $notice=[pscustomobject]@{Label='';Hint=''}
     $knownMemberCore=($Profile.ZipMemberPlaylist -and $Support.Core -in @($Profile.SupportedCores))
-    if ($Support.Status -in 'UNVERIFIED','NOT INSTALLED' -or
-        ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore)) {
-        $notice.Label='[ZIP playback unverified]'
-        $notice.Hint='Unpack ZIP output before playing.'
-    } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
-        $notice.Label='[unsupported by default Onion OS core]'
-        $notice.Hint='ZIP loading is not supported. Unpack before playing.'
-    } elseif ($Profile.DefaultZipSupport -eq 'Unlisted') {
-        $notice.Label='[unpack before playing]'
-        if ($Profile.Folder -in 'CPC','ZXS') {$notice.Label='[unsupported by default Onion OS core]'}
-        $notice.Hint='ZIP loading is not supported by the default Onion OS core.'
-    } elseif (-not $Conversion -and -not $Profile.ZipMemberPlaylist) {
-        $notice.Label='[ZIP playlists unsupported]'
-        $notice.Hint='The core loads ZIPs, but not ZIP playlists.'
-        if ($Profile.Folder -eq 'MSX') {
-            $notice.Label='[unsupported by default Onion OS core]'
-            $notice.Hint='ZIP games work; ZIP playlists are unsupported.'
+    $unknownCore=($Support.Status -in 'UNVERIFIED','NOT INSTALLED' -or
+        ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore))
+    if (-not $GameOutput) {
+        if ($unknownCore -or -not $knownMemberCore) {
+            $notice.Label='[ZIP playlists unverified]'
+            $notice.Hint='Playlists pointing inside ZIPs are unverified for this core.'
         }
+        return $notice
     }
-    if (-not $Conversion) {
-        if ($notice.Label -eq '[unpack before playing]') {$notice.Label='[ZIP playlists unsupported]'}
-        if ($notice.Hint -match '(?i)unpack') {$notice.Hint='Choose Folders or Loose files for playlists.'}
+    if ($unknownCore) {
+        $notice.Label='[ZIP games unverified]'
+        $notice.Hint='ZIP game loading is unverified for the selected core.'
+    } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
+        $notice.Label='[ZIP games unsupported]'
+        $notice.Hint='ZIP game loading is not supported by this core.'
+    } elseif ($Profile.DefaultZipSupport -ne 'Documented') {
+        $notice.Label='[ZIP games unverified]'
+        $notice.Hint='Onion''s docs do not list ZIP games for this default core.'
     }
     return $notice
 }

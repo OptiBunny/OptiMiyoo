@@ -354,59 +354,36 @@ function Get-OnionSetupMenuRows {
 
 function Get-PlaylistFeatureLabel($Support) {
     if ($Support.CanBuild) {return ''}
-    if ($Support.Status -eq 'NOT INSTALLED') {return '[not installed]'}
-    if ($Support.Status -eq 'UNVERIFIED') {return '[playlists unverified]'}
     return '[playlists unsupported]'
 }
 
-function Get-ZipOutputNotice($Profile,$Support,[switch]$GameOutput) {
-    # General ZIP loading and archive#member playlist links are separate features.
-    # Negative archive-member support is explicit and scoped to researched cores.
-    # A false/absent positive flag alone is not evidence of incompatibility.
-    # UserVerified records ZIP-game playback, not archive-member playlists.
+function Get-ZipOutputNotice($Profile,[switch]$GameOutput) {
+    # Menu compatibility always describes the standard Onion profile.
+    # ZIP games and archive#member playlist links are separate capabilities.
     $notice=[pscustomobject]@{Label='';Hint=''}
-    $coreName=[string]$Support.Core
-    $alternateNames=@{'puae_libretro.so'='PUAE';'vice_x64sc_libretro.so'='VICE x64sc';
-        'cap32_libretro.so'='Caprice32';'genesis_plus_gx_libretro.so'='Genesis Plus GX'}
-    if ($coreName -eq $Profile.DefaultCore -and $Profile.PSObject.Properties['Core'] -and $Profile.Core) {$coreName=$Profile.Core}
-    elseif ($alternateNames.ContainsKey($coreName)) {$coreName=$alternateNames[$coreName]}
-    elseif (-not $coreName -or $coreName -eq 'unknown') {$coreName='the selected core'}
-    else {$coreName=$coreName -replace '_libretro\.so$',''}
-    $knownMemberCore=($Profile.ZipMemberPlaylist -and $Support.Core -in @($Profile.SupportedCores))
-    $unknownBuild=$Support.Status -in 'UNVERIFIED','NOT INSTALLED'
-    $unsupportedMemberCore=$false
-    if ($Profile.PSObject.Properties['ZipMemberUnsupportedCores']) {
-        $unsupportedMemberCore=$Support.Core -in @($Profile.ZipMemberUnsupportedCores)
-    }
-    $knownZipGameCore=$false
-    if ($Profile.PSObject.Properties['ZipGameSupportedCores']) {
-        $knownZipGameCore=$Support.Core -in @($Profile.ZipGameSupportedCores)
-    }
-    $unknownCore=($unknownBuild -or
-        ($Support.Core -ne $Profile.DefaultCore -and -not $knownMemberCore -and -not $knownZipGameCore))
+    $coreName='the default core'
+    if ($Profile.PSObject.Properties['Core'] -and $Profile.Core) {$coreName=$Profile.Core}
+    elseif ($Profile.PSObject.Properties['DefaultCore'] -and $Profile.DefaultCore) {$coreName=$Profile.DefaultCore -replace '_libretro\.so$',''}
     if (-not $GameOutput) {
-        if (-not $unknownBuild -and $unsupportedMemberCore) {
-            $notice.Label='[ZIP playlists unsupported]'
-            $notice.Hint=$coreName+' cannot follow playlist links inside ZIPs.'
-            if ($Support.Core -eq 'dosbox_pure_libretro.so') {
-                $notice.Hint='DOSBox Pure mounts the whole ZIP, not individual discs.'
-            }
-        } elseif ($unknownBuild -or -not $knownMemberCore) {
+        $memberSupport=$Profile.PSObject.Properties['ZipMemberPlaylist']
+        if ($null -eq $memberSupport -or $memberSupport.Value -isnot [bool]) {
             $notice.Label='[ZIP playlists unverified]'
             $notice.Hint='Playlists pointing inside ZIPs are unverified for '+$coreName+'.'
+        } elseif (-not $memberSupport.Value) {
+            $notice.Label='[ZIP playlists unsupported]'
+            $notice.Hint=$coreName+' cannot follow playlist links inside ZIPs.'
+            if ($Profile.DefaultCore -eq 'dosbox_pure_libretro.so') {
+                $notice.Hint='DOSBox Pure mounts the whole ZIP, not individual discs.'
+            }
         }
         return $notice
     }
-    if ($unknownCore) {
-        $notice.Label='[ZIP games unverified]'
-        $notice.Hint='ZIP game loading is unverified for '+$coreName+'.'
-    } elseif ($knownZipGameCore) {
-        return $notice
-    } elseif ($Profile.DefaultZipSupport -eq 'Unsupported') {
+    $zipSupport=$Profile.PSObject.Properties['DefaultZipSupport']
+    if ($zipSupport -and $zipSupport.Value -eq 'Unsupported') {
         $notice.Label='[ZIP games unsupported]'
         $notice.Hint='ZIP games are not supported in the default Onion setup.'
         if ($Profile.PSObject.Properties['DefaultZipReason']) {$notice.Hint=$Profile.DefaultZipReason}
-    } elseif ($Profile.DefaultZipSupport -notin 'Documented','UserVerified') {
+    } elseif ($null -eq $zipSupport -or $zipSupport.Value -notin 'Documented','UserVerified') {
         $notice.Label='[ZIP games unverified]'
         $notice.Hint='Onion''s docs do not list ZIP games for this default core.'
     }

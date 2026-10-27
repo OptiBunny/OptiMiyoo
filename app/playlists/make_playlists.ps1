@@ -1262,9 +1262,8 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
             $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
             $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
-            $converterSupport=Get-PlaylistSupport $converterProfile ''
             $defaultOutput='1'
-            $zipNotice=Get-ZipOutputNotice $converterProfile $converterSupport -GameOutput
+            $zipNotice=Get-ZipOutputNotice $converterProfile -GameOutput
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $zipDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
             $folderDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
@@ -1313,7 +1312,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 Write-MenuLine '  Playlists stay outside .hidden.'
             }
             $defaultOutput=if ($singlePage) {$singleOutput} else {$hiddenOutput}
-            $zipNotice=Get-ZipOutputNotice $profile $support -GameOutput:$singlePage
+            $zipNotice=Get-ZipOutputNotice $profile -GameOutput:$singlePage
             $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
             $autoDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
             Write-MenuLine ('  1. Auto'+$autoDefault+' / keep input layout')

@@ -179,6 +179,70 @@ function Close-ApplicationSdSession {
     finally{if($state.RootLease){$state.RootLease.Dispose();$state.RootLease=$null};$script:ApplicationSdStates.Remove($Session.Id)}
 }
 
+function Get-ApplicationSdResultLines {
+    param([Parameter(Mandatory=$true)]$Result)
+    'SD setup finished.'
+    'Updated: {0} | Skipped: {1} | Failed: {2}' -f $Result.Changed,$Result.Skipped,$Result.Failed
+    if ($Result.Changed) {"Refresh Onion's game list."}
+    elseif (-not $Result.Failed) {'No configs were changed.'}
+    if ($Result.Failed) {'Some configs could not be updated.'}
+    foreach ($item in $Result.Results) {
+        $status=[string]$item.State
+        if ($status -eq 'Kept') {$status='Unchanged'}
+        ConvertTo-ApplicationPromptPath ($item.System+': '+$status)
+    }
+    if ($Result.BackupRoot) {
+        'Original configs saved in:'
+        ConvertTo-ApplicationPromptPath $Result.BackupRoot
+    }
+}
+
+function Get-ApplicationSdResultModel {
+    param([Parameter(Mandatory=$true)]$Result,[int]$Page=0)
+    # Wrap before paging so even long redirected-drive paths fit the normal panel.
+    $rows=@(Get-MenuRows @(Get-ApplicationSdResultLines -Result $Result) 44)
+    $pageSize=11
+    $pages=[Math]::Max(1,[int][Math]::Ceiling($rows.Count/[double]$pageSize))
+    $page=[Math]::Max(0,[Math]::Min($Page,$pages-1))
+    $lines=@($rows | Select-Object -Skip ($page*$pageSize) -First $pageSize)
+    if ($pages -gt 1) {$lines+=('Page {0}/{1} | > Next | < Previous' -f ($page+1),$pages)}
+    [pscustomobject]@{
+        Title='Onion SD setup / results';Lines=$lines
+        Prompt='Enter / Esc: Main menu | Q: Exit';Page=$page;Pages=$pages
+    }
+}
+
+function Read-ApplicationSdResult {
+    param([Parameter(Mandatory=$true)]$Result,[switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+    $previousEffect=$script:DisplayEffect;$display=$false;$page=0
+    try {
+        $script:DisplayEffect=$DisplayEffect
+        Initialize-Display;$display=$true
+        while ($true) {
+            $model=Get-ApplicationSdResultModel -Result $Result -Page $page
+            $answer=Read-ApplicationConsoleChoice $model
+            if ($answer -in '', 'B') {return $true}
+            if ($answer -eq 'Q') {return $false}
+            if ($answer -eq '>') {$page=[Math]::Min($model.Page+1,$model.Pages-1)}
+            elseif ($answer -eq '<') {$page=[Math]::Max(0,$model.Page-1)}
+        }
+    }finally {
+        try {if ($display) {Restore-Display}}
+        finally {$script:DisplayEffect=$previousEffect}
+    }
+}
+
+function Show-ApplicationSdResult {
+    param([Parameter(Mandatory=$true)]$Result,[switch]$NoPause,[switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+    if ($NoPause -or $Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+        foreach ($line in @(Get-ApplicationSdResultLines -Result $Result)) {Write-Host $line}
+        return $true
+    }
+    Read-ApplicationSdResult -Result $Result -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
+}
+
 function Resolve-ApplicationSdInput([string]$Text) {
     $choice=[pscustomobject]@{Path=$null;Error=$null}
     $candidate=$Text.Trim().Trim('"')

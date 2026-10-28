@@ -324,11 +324,10 @@ function Invoke-ApplicationHost {
             }
         }
         if ($sdResult) {
-            Write-Host ('SD setup updated: {0}; skipped: {1}; failed: {2}.' -f $sdResult.Changed,$sdResult.Skipped,$sdResult.Failed)
-            if ($sdResult.BackupRoot) {Write-Host ('Original configs: '+(ConvertTo-SafeExternalText $sdResult.BackupRoot))}
-            if ($sdResult.Changed) {Write-Host 'Refresh the Onion game list.'}
             if ($sdResult.Failed) {$exitCode=1}
-            if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$true}
+            $returnToMenu=Show-ApplicationSdResult -Result $sdResult -NoPause:($originalArguments.NoPause -or -not $menu) `
+                -NoAnimation:$originalArguments.NoAnimation -NoColor:$originalArguments.NoColor -DisplayEffect $displayEffect
+            if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$returnToMenu}
         }
     }
     return [int]$exitCode

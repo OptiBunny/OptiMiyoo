@@ -1,17 +1,30 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
-param([string]$OnionRoot)
+param([string]$OnionRoot,[switch]$NoAnimation,[switch]$NoColor,
+      [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT',
+      [Parameter(DontShow=$true)][switch]$PlainProgress)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry SD -Arguments $PSBoundParameters)
 }
 $exitCode=0
+$script:AppVersion='0.0.9'
 $ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $ScriptDir 'onion/core_support.ps1')
 . (Join-Path $ScriptDir 'shared/compile_support.ps1')
 . (Join-Path $ScriptDir 'shared/output_safety.ps1')
-function Write-OnionText([string]$Text) {Write-Host (ConvertTo-SafeExternalText $Text)}
+. (Join-Path $ScriptDir 'ui/display.ps1')
+$script:OnionCompleted=0;$script:OnionTotal=-1;$script:OnionStage='Checking selected cores'
+$script:OnionErrors=New-Object 'System.Collections.Generic.List[string]'
+if ($PlainProgress) {$script:UiVT=$false}
+function Write-OnionText([string]$Text,[switch]$Failure) {
+    $text=ConvertTo-SafeExternalText $Text
+    if ($script:UiVT) {
+        if ($Failure) {$script:OnionErrors.Add($text)}
+        Show-OnionProgress -Stage $script:OnionStage -Detail $text -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems
+    } else {Write-Host $text}
+}
 function Initialize-OnionPathLease {
     if ('OptiMiyoo.OnionPathLease' -as [type]) {return}
     Add-OptiMiyooType -TypeDefinition @'
@@ -108,8 +121,14 @@ function Write-OnionBytesVerified([IO.FileStream]$Stream,[byte[]]$Bytes,[string]
     if ([Convert]::ToBase64String($checked) -cne [Convert]::ToBase64String($Bytes)) {throw ($Description+' verification failed.')}
 }
 
-$rootLease=$null
+$rootLease=$null;$display=$false
 try {
+    # ConPTY looks interactive to the worker even when its parent is redirected.
+    # The trusted host forwards its own mode so scripted runs retain plain text.
+    if (-not $PlainProgress) {
+        Initialize-Display;$display=$true
+        Show-OnionProgress -Stage 'Reading SD configuration' -Detail 'Checking the selected emulator settings.' -Force
+    }
     if ([string]::IsNullOrWhiteSpace($OnionRoot)) {throw 'SD setup requires the staged SD root supplied by the application host.'}
     $OnionRoot=(Resolve-Path -LiteralPath $OnionRoot).ProviderPath
     Assert-PlainOnionPath $OnionRoot $OnionRoot
@@ -119,10 +138,16 @@ try {
     Assert-PlainOnionPath $cores $OnionRoot
     if (-not (Test-Path -LiteralPath $cores -PathType Container)) {throw 'This does not look like an Onion SD card root: RetroArch cores folder not found.'}
     $profiles=@(Get-OnionSetupProfiles $ScriptDir)
+    $script:OnionTotal=$profiles.Count
     $backupRoot=Join-Path $OnionRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
     $changed=0; $unsupported=0
     Write-OnionText 'Checking selected cores. Setup only adds supported file-list extensions to config.json.'
-    foreach ($profile in $profiles) {
+    for ($profileIndex=0;$profileIndex -lt $profiles.Count;$profileIndex++) {
+        $profile=$profiles[$profileIndex]
+        # The count advances only after a profile's assessment/preparation has
+        # returned. A slow core check never receives an invented percentage.
+        $script:OnionCompleted=$profileIndex;$script:OnionStage='Checking selected cores'
+        if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
         $support=Get-OnionSetupSupport $profile $OnionRoot
         if ($support.Status -eq 'NOT INSTALLED') {continue}
         if ($profile.Folder -eq 'COMMODORE') {
@@ -137,6 +162,8 @@ try {
         $folder=$profile.Folder; $configPath=$support.ConfigPath
         $stream=$null; $configLease=$null; $launchLock=$null; $coreLock=$null; $backupLease=$null; $original=$null; $writeStarted=$false
         try {
+            $script:OnionStage='Preparing file types'
+            if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
             # Hold the launcher read-only while editing its config. A concurrent
             # core change must not race the eligibility check on Windows.
             $launchLock=[OptiMiyoo.OnionPathLease]::Open($support.LaunchPath,$OnionRoot,$false,$false,$false)
@@ -177,9 +204,9 @@ try {
             if ($writeStarted -and $stream -and $null -ne $original) {
                 try {
                     Write-OnionBytesVerified $stream $original 'Restored config'
-                } catch {Write-OnionText ('RESTORE FAILED: temporary config copy could not be restored; SD changes will not be applied. '+$_.Exception.Message)}
+                } catch {Write-OnionText ('RESTORE FAILED: temporary config copy could not be restored; SD changes will not be applied. '+$_.Exception.Message) -Failure}
             }
-            Write-OnionText ('SKIPPED: '+$folder+' - '+$_.Exception.Message)
+            Write-OnionText ('SKIPPED: '+$folder+' - '+$_.Exception.Message) -Failure
         } finally {
             if ($backupLease) {$backupLease.Dispose()}
             if ($configLease) {$configLease.Dispose()}
@@ -187,8 +214,27 @@ try {
             if ($launchLock) {$launchLock.Dispose()}
         }
     }
+    $script:OnionCompleted=$profiles.Count;$script:OnionStage='Core checks finished'
     Write-OnionText ("$changed system setup change(s) prepared; $unsupported unsupported/unverified.")
-    if ($exitCode -eq 0) {Write-OnionText 'Waiting for verification before updating the SD card. Selected cores are preserved.'}
-    else {Write-OnionText 'SD changes will not be applied because setup failed.'}
-} catch {$exitCode=1; Write-OnionText ('ERROR: '+$_.Exception.Message)} finally {if ($rootLease) {$rootLease.Dispose()}}
+    if ($exitCode -eq 0) {
+        $script:OnionStage='Verification pending'
+        Write-OnionText 'Waiting for verification before updating the SD card. Selected cores are preserved.'
+    } else {
+        $script:OnionStage='Setup could not finish'
+        Write-OnionText 'SD changes will not be applied because setup failed.' -Failure
+    }
+} catch {
+    $exitCode=1;$script:OnionStage='Setup could not finish'
+    Write-OnionText ('ERROR: '+$_.Exception.Message) -Failure
+} finally {
+    try {if ($rootLease) {$rootLease.Dispose()}}
+    finally {
+        try {if ($display) {Restore-Display}}
+        finally {
+            # A failed worker has no publication report. Keep its diagnostics
+            # visible after the live panel is removed and its console closes.
+            foreach ($message in $script:OnionErrors) {Write-Host $message}
+        }
+    }
+}
 exit $exitCode

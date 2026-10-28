@@ -43,6 +43,7 @@ function Initialize-Display {
     $script:UiSay='Awaiting system selection.'
     $script:UiInteractive=$false; $script:UiAnsi=$false; $script:UiVT=$false
     $script:UiPanel=$false; $script:UiMenuActive=$false; $script:UiMenuLines=$null
+    $script:UiOnionProgressStage=''; $script:UiOnionProgressFinished=$false
     $script:UiDemo=$false; $script:UiDemoPaused=$false; $script:UiPoseOverride=$null
     $script:UiDemoProgressTick=4; $script:UiDemoProgressStatus=''
     if ($script:DisplayEffect -notin 'CRT','Smooth') {$script:DisplayEffect='CRT'}
@@ -747,7 +748,8 @@ function Get-MenuRows([string[]]$Lines,[int]$Width) {
 }
 
 function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
-                        [string]$InputText,[int]$Caret,[string]$Mood='idle') {
+                        [string]$InputText,[int]$Caret,[string]$Mood='idle',
+                        [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK') {
     $requiredHeight=[Math]::Max(12,$Rows.Count)+7
     if (-not $script:UiPanel -or $script:UiHeight -lt $requiredHeight) {
         Draw-ResizePanel $Title $Prompt $InputText $Caret $requiredHeight
@@ -768,7 +770,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $mio=@(Get-DisplayMioFrame $Mood)
     # A sparse gesture changes only Mio. Preserve the rest of the terminal,
     # including its steady input caret, and avoid rebuilding every border.
-    $patchable=($script:UiVT -and -not $script:UiDemo -and
+    $patchable=($script:UiVT -and -not $script:UiDemo -and -not $NoInput -and
         ($script:UiIdlePoseOverride -or $script:UiSparseCrtPhase -ge 0 -or $script:UiIdleMenuCache.SparseCrt) -and $mio.Count -eq 12 -and
         (-not $script:UiPendingEvents -or $script:UiPendingEvents.Count -eq 0))
     $rowsKey=$Rows -join [char]0
@@ -808,9 +810,9 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $lines=[System.Collections.Generic.List[string]]::new()
     $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$Title+' ') ($w-2)
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
-    $channel='SRC -> DST / LOCAL DISK LINK'
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
-    $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // READY' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
+    $mioStatus='    MIO // READY';if ($NoInput) {$mioStatus='   MIO // WORKING'}
+    $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
     # Match complete warnings before coloring, including explanations split across rows.
     $warnings=@()
     if ($script:UiAnsi) {
@@ -838,12 +840,14 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         if ($text -match '^\d+\..*\(default\)') {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
         elseif ($unverifiedRow) {$rgb='255;190;96'}
+        elseif ($NoInput -and $text -match '^\[[#.]+\] \d+%$') {$rgb='107;216;245'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1
     }
     $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($borderHeight-1) $border $true))
     $lines.Add('  '+(Color-Text (Fit-Text $Prompt $w) '249;202;226'))
+    if ($NoInput) {Write-TerminalPanel $lines.ToArray();return}
     $fieldWidth=$w-8
     $inputView=Get-InputViewport $InputText $Caret $fieldWidth
     if ($script:UiDemo) {$lines.Add('  '+(Get-MioPreviewTourBar $w))}
@@ -860,6 +864,35 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
             InputColumn=(11+$inputView.Caret);BunnyRow=($script:UiLastFrameRows-$lines.Count+3)
         }
     }
+}
+
+function Show-OnionProgress([string]$Stage,[string]$Detail='',
+                            [long]$Completed=0,[long]$Total=-1,[string]$Unit='systems',[switch]$Force) {
+    # Refresh only when work reports progress; no background animation loop.
+    $Stage=$Stage -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $Detail=$Detail -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $Unit=$Unit -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $Completed=[Math]::Max(0,$Completed)
+    if ($Total -ge 0) {$Completed=[Math]::Min($Completed,$Total)}
+    $changed=($Stage -cne $script:UiOnionProgressStage)
+    $finished=($Total -ge 0 -and $Completed -eq $Total)
+    if (-not $Force -and -not $changed -and -not ($finished -and -not $script:UiOnionProgressFinished) -and $script:UiPreparationWatch.ElapsedMilliseconds -lt 150) {return}
+    $script:UiOnionProgressStage=$Stage;$script:UiOnionProgressFinished=$finished
+    $script:UiPreparationWatch.Restart()
+    $count='Working...';$bar=''
+    if ($Total -ge 0) {
+        $count=('{0} / {1} {2} complete' -f $Completed,$Total,$Unit)
+        $percent=100.0;if ($Total -gt 0) {$percent=100.0*$Completed/$Total}
+        $filled=[int][Math]::Floor(28*$percent/100)
+        $bar='['+('#'*$filled)+('.'*(28-$filled))+('] {0:N0}%' -f $percent)
+    }
+    if (-not $script:UiVT) {Write-Host ($Stage+' / '+$count+' / '+$Detail);return}
+    [void](Update-DisplaySize)
+    $width=[Math]::Max(44,$script:UiWidth-28)
+    $detailRows=@(Get-MenuRows @($Detail) $width)
+    if ($detailRows.Count -gt 4) {$detailRows=@($detailRows[0..3]);$detailRows[3]=(Fit-Text $detailRows[3] ($width-3))+'...'}
+    $rows=@($Stage,'')+$detailRows+@('',$count,$bar,'','Games and emulator cores stay unchanged.')
+    Draw-MenuPanel -Title 'Onion SD setup / progress' -Rows $rows -Prompt 'Please wait...' -Caret -1 -Mood 'scan' -NoInput -Channel 'ONION SD SETUP'
 }
 
 function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',

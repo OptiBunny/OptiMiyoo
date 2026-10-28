@@ -68,7 +68,7 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
 }
 
 function New-ApplicationSdSession {
-    param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot)
+    param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[scriptblock]$Progress)
     Initialize-ApplicationSdSupport
     $original=[IO.Path]::GetFullPath($OnionRoot);$work=[IO.Path]::GetFullPath($WorkRoot)
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'
@@ -84,9 +84,11 @@ function New-ApplicationSdSession {
         if(Test-Path -LiteralPath $state.StagedRoot){throw 'SD snapshot needs a fresh Onion staging folder.'}
         [void][IO.Directory]::CreateDirectory((Join-Path $state.StagedRoot 'RetroArch/.retroarch/cores'))
         $profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
-        foreach($profile in $profiles) {
+        for($index=0;$index -lt $profiles.Count;$index++) {
+            $profile=$profiles[$index]
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             if($folder -notmatch '^[A-Z0-9]+$'){throw 'Invalid installed SD profile.'}
+            if($Progress){$null=& $Progress 'Reading SD setup files' $folder $index $profiles.Count 'systems'}
             $config='Emu/'+$folder+'/config.json';$launch='Emu/'+$folder+'/launch.sh'
             Add-ApplicationSdSnapshotFile $state $config 1048576 -Config
             if(-not $state.Files.ContainsKey($config)){continue}
@@ -97,8 +99,11 @@ function New-ApplicationSdSession {
                 if($selected -and $selected -in @($profile.SupportedCores)) {Add-ApplicationSdSnapshotFile $state ('RetroArch/.retroarch/cores/'+$selected) 536870912}
             }
         }
-        foreach($profile in $profiles) {
+        if($Progress){$null=& $Progress 'Reading SD setup files' 'SD setup files collected.' $profiles.Count $profiles.Count 'systems'}
+        for($index=0;$index -lt $profiles.Count;$index++) {
+            $profile=$profiles[$index]
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
+            if($Progress){$null=& $Progress 'Checking supported file types' $folder $index $profiles.Count 'systems'}
             $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder
             $support=& $script:ApplicationSdModule {param($profile,$root)Get-OnionSetupSupport $profile $root} $profile $original
@@ -112,6 +117,7 @@ function New-ApplicationSdSession {
                 catch{$file.Expected=$null}
             }
         }
+        if($Progress){$null=& $Progress 'Checking supported file types' 'Ready for isolated setup checks.' $profiles.Count $profiles.Count 'systems'}
         $handle=[pscustomobject]@{Id=([Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'));StagedRoot=$state.StagedRoot}
         $state.Handle=$handle;$script:ApplicationSdStates[$handle.Id]=$state
         return $handle
@@ -123,7 +129,7 @@ function New-ApplicationSdSession {
 }
 
 function Complete-ApplicationSdSession {
-    param([Parameter(Mandatory=$true)]$Session)
+    param([Parameter(Mandatory=$true)]$Session,[scriptblock]$Progress)
     $state=Get-ApplicationSdState $Session
     if($state.Completed){throw 'SD setup result has already been consumed.'}
     $state.Completed=$true
@@ -132,17 +138,24 @@ function Complete-ApplicationSdSession {
     try {
         # Freeze and validate the entire selected snapshot before any original
         # write. Extra child files are never imported or executed.
+        $checked=0
         foreach($file in $state.Files.Values) {
+            if($Progress){$null=& $Progress 'Verifying SD setup changes' $file.Relative $checked $state.Files.Count 'files'}
             $target=Join-Path $state.StagedRoot $file.Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
             $lease=[OptiMiyoo.OnionPathLease]::Open($target,$state.StagedRoot,$false,$false,$false);$stagedLeases.Add($lease)
             if($file.Config) {
                 $bytes=Read-ApplicationSdBytes $lease.Stream 1048576
-                if([Convert]::ToBase64String($bytes) -ceq [Convert]::ToBase64String($file.Bytes)){continue}
+                if([Convert]::ToBase64String($bytes) -ceq [Convert]::ToBase64String($file.Bytes)){$checked++;continue}
                 if($null -eq $file.Expected -or [Convert]::ToBase64String($bytes) -cne [Convert]::ToBase64String($file.Expected)){throw 'SD sandbox proposed an unapproved config change; originals kept.'}
                 $file.Changed=$true
             } elseif($lease.Stream.Length -ne $file.Length -or (Get-ApplicationSdHash $lease.Stream) -cne $file.Hash){throw 'SD sandbox changed a launcher or core; originals kept.'}
+            $checked++
         }
-        foreach($file in @($state.Files.Values | Where-Object {$_.Config} | Sort-Object Relative)) {
+        if($Progress){$null=& $Progress 'Verifying SD setup changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
+        $configs=@($state.Files.Values | Where-Object {$_.Config} | Sort-Object Relative)
+        for($index=0;$index -lt $configs.Count;$index++) {
+            $file=$configs[$index]
+            if($Progress){$null=& $Progress 'Updating SD file lists' $file.Folder $index $configs.Count 'systems'}
             if(-not $file.Changed){$skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept'});continue}
             $writeLease=$null;$backupLease=$null;$writeStarted=$false;$restored=$false
             try {
@@ -168,6 +181,7 @@ function Complete-ApplicationSdSession {
                 $results.Add([pscustomobject]@{System=$file.Folder;State=$result})
             }finally{if($backupLease){$backupLease.Dispose()};if($writeLease){$writeLease.Dispose()}}
         }
+        if($Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}
         return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;BackupRoot=$state.BackupRoot;Results=$results.ToArray()}
     }finally{foreach($lease in $stagedLeases){$lease.Dispose()}}
 }

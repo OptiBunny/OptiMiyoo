@@ -1,4 +1,4 @@
-﻿# This is the small trusted coordinator. The interface and processing scripts
+# This is the small trusted coordinator. The interface and processing scripts
 # execute in a zero-capability AppContainer using disposable SRC/DST snapshots.
 . (Join-Path $PSScriptRoot 'application_entry.ps1')
 . (Join-Path $PSScriptRoot 'application_session.ps1')
@@ -244,15 +244,26 @@ function Invoke-ApplicationHost {
         $startPage=$Entry;$Entry='Playlist';$menu=$true
     }
     $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
+    $NoAnimation=[bool]$originalArguments.NoAnimation;$NoColor=[bool]$originalArguments.NoColor
+    $sdProgress={param($Stage,$Detail,$Completed,$Total,$Unit)
+        # Losing a terminal frame must not interrupt a verified SD write.
+        try {Show-OnionProgress -Stage $Stage -Detail $Detail -Completed $Completed -Total $Total -Unit $Unit}
+        catch {Write-Verbose 'Could not refresh the SD progress display.'}
+    }
     $again=$true;$exitCode=1;$selectedOnionRoot=$null
     if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
     while ($again) {
         $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
+        $progressDisplay=$false;$previousEffect=$script:DisplayEffect
         try {
-            Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan
+            if ($Entry -eq 'SD') {
+                $script:DisplayEffect=$displayEffect
+                Initialize-Display;$progressDisplay=$true
+                $null=& $sdProgress 'Preparing SD setup' 'Starting isolated checks.' 0 -1 systems
+            } else {Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
             $session=[OptiMiyoo.ApplicationSession]::Create()
             $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
-            if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath}
+            if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress}
             $receipts=[pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=(New-Object Collections.ArrayList)}
             if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
                 $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
@@ -276,11 +287,13 @@ function Invoke-ApplicationHost {
             }
             if ($Entry -eq 'SD') {
                 if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
-                $worker=@{OnionRoot=$sd.StagedRoot}
+                $worker=@{OnionRoot=$sd.StagedRoot;NoAnimation=$NoAnimation;NoColor=$NoColor;DisplayEffect=$displayEffect;PlainProgress=(-not $session.Interactive)}
             }
             Write-ApplicationBootstrap $session $Entry $worker $batch
             $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
             if ($Arguments.Preview) {$operations=[string[]]@('Display.Preference')}
+            # Only one renderer owns the console while the isolated worker runs.
+            if ($progressDisplay) {$progressDisplay=$false;Restore-Display}
             $session.Start('boot.ps1',[string[]]$staged.Assemblies,$operations)
             $exitCode=Invoke-ApplicationHostLoop $state
             if ($native) {Close-ApplicationJobBroker $native}
@@ -295,14 +308,28 @@ function Invoke-ApplicationHost {
                 $state.Result=Complete-ApplicationBrokerBatch -Session $broker @pending -ReceiptStore $receipts
                 $state.Completed=$true
             }
-            if ($Entry -eq 'SD' -and $exitCode -eq 0) {$sdResult=Complete-ApplicationSdSession -Session $sd}
+            if ($Entry -eq 'SD' -and $exitCode -eq 0) {
+                # Drain no more worker output over the parent's verified update panel.
+                if ($session.Interactive) {[void]$session.PauseRelay()}
+                $script:DisplayEffect=$displayEffect
+                Initialize-Display;$progressDisplay=$true
+                $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress
+            }
             if ($state.NextOnionRoot) {$selectedOnionRoot=$state.NextOnionRoot;$Entry='SD';$again=$true}
-        } catch {Write-Host ('OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $_.Exception.Message)) -ForegroundColor Red;$exitCode=1}
+        } catch {
+            $failure=$_
+            if ($progressDisplay) {$progressDisplay=$false;try {Restore-Display} catch {}}
+            Write-Host ('OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $failure.Exception.Message)) -ForegroundColor Red;$exitCode=1
+        }
         finally {
-            if ($native) {Close-ApplicationJobBroker $native}
-            if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
-            if ($sd) {Close-ApplicationSdSession -Session $sd}
-            if ($session) {$session.Dispose();if ($session.CleanupWarning) {Write-Warning (ConvertTo-SafeExternalText $session.CleanupWarning)}}
+            try {if ($progressDisplay) {Restore-Display}} catch {}
+            finally {
+                $script:DisplayEffect=$previousEffect
+                if ($native) {Close-ApplicationJobBroker $native}
+                if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
+                if ($sd) {Close-ApplicationSdSession -Session $sd}
+                if ($session) {$session.Dispose();if ($session.CleanupWarning) {Write-Warning (ConvertTo-SafeExternalText $session.CleanupWarning)}}
+            }
         }
         if ($state) {$displayEffect=$state.DisplayEffect}
         if ($state -and $state.Result) {

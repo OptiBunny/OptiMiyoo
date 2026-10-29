@@ -12,6 +12,7 @@ function Initialize-Display {
     $script:UiRows=0; $script:UiTick=0; $script:UiLastStage=''
     $script:UiIdlePoseOverride=$null
     $script:UiIdleMenuCache=$null
+    $script:UiMenuLayoutCache=$null
     $script:MioSparseCrtFps=12.0
     $script:MioSparseCrtLogoFrameCount=10
     $script:MioSparseCrtBunnyFrameCount=24
@@ -57,7 +58,7 @@ function Initialize-Display {
         [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
         $script:UiInteractive=($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
         if ($script:UiInteractive) {
-            $script:UiWidth=[Math]::Min(92,[Math]::Max(50,[Console]::WindowWidth-4))
+            $script:UiWidth=[Math]::Min(296,[Math]::Max(16,[Console]::WindowWidth-4))
             $script:UiOldCursor=$true
             try {$script:UiOldCursor=[Console]::CursorVisible} catch {}
             $script:UiOldForeground=$Host.UI.RawUI.ForegroundColor
@@ -171,7 +172,9 @@ function Update-DisplaySize([switch]$Throttled) {
     }
     $script:UiColumns=$columns; $script:UiHeight=$height
     $script:MioSparseCrtGeometry=$null; $script:MioSparseCrtGeometryKey=''
-    $script:UiWidth=[Math]::Min(92,[Math]::Max(50,$columns-4))
+    $script:UiIdleMenuCache=$null
+    $script:UiMenuLayoutCache=$null
+    $script:UiWidth=[Math]::Min(296,[Math]::Max(16,$columns-4))
     $script:UiPanel=($script:UiWidth -ge 72 -and $height -ge 19)
     return $true
 }
@@ -747,30 +750,62 @@ function Get-MenuRows([string[]]$Lines,[int]$Width) {
     return $rows.ToArray()
 }
 
+function Get-MenuLayout([string[]]$Rows,[switch]$NoInput) {
+    # Keep source rows intact so a later wider window can unwrap them again.
+    # Reserve the compact banner, borders, prompt and one unused terminal row.
+    $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+    $key=('{0}|{1}|{2}|{3}' -f $width,$script:UiColumns,$script:UiHeight,[bool]$NoInput)
+    $cached=$script:UiMenuLayoutCache
+    if ($cached -and $cached.Key -ceq $key -and $cached.Rows.Count -eq $Rows.Count) {
+        $same=$true
+        for ($i=0;$i -lt $Rows.Count;$i++) {if ($Rows[$i] -cne $cached.Rows[$i]) {$same=$false;break}}
+        if ($same) {return $cached.Layout}
+    }
+    $overhead=7;if ($NoInput) {$overhead=6}
+    $result=$null
+    if ($width -ge 72) {
+        $wrapped=@(Get-MenuRows $Rows ($width-28))
+        $body=[Math]::Max(12,$wrapped.Count)
+        if ($script:UiHeight -ge $body+$overhead) {
+            $result=[pscustomobject]@{Rows=$wrapped;Width=$width;TextWidth=($width-28);BodyRows=$body;RequiredHeight=($body+$overhead);ShowMio=$true;Fits=$true}
+        }
+    }
+    # Reclaim the mascot column and empty padding before asking for more room.
+    if (-not $result) {
+        $wrapped=@(Get-MenuRows $Rows ($width-4))
+        $required=$wrapped.Count+$overhead
+        $result=[pscustomobject]@{Rows=$wrapped;Width=$width;TextWidth=($width-4);BodyRows=$wrapped.Count;RequiredHeight=$required;ShowMio=$false;Fits=($script:UiColumns -ge 44 -and $script:UiHeight -ge $required)}
+    }
+    $script:UiMenuLayoutCache=[pscustomobject]@{Key=$key;Rows=@($Rows);Layout=$result}
+    return $result
+}
+
 function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
                         [string]$InputText,[int]$Caret,[string]$Mood='idle',
                         [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK') {
-    $requiredHeight=[Math]::Max(12,$Rows.Count)+7
-    if (-not $script:UiPanel -or $script:UiHeight -lt $requiredHeight) {
-        Draw-ResizePanel $Title $Prompt $InputText $Caret $requiredHeight
+    $menuLayout=Get-MenuLayout $Rows -NoInput:$NoInput
+    if (-not $menuLayout.Fits) {
+        Draw-ResizePanel $Title $Prompt $InputText $Caret $menuLayout.RequiredHeight 44
         return
     }
-    $w=$script:UiWidth; $left=$w-28
-    $bodyRows=[Math]::Max(12,$Rows.Count); $borderHeight=$bodyRows+3
+    $Rows=$menuLayout.Rows
+    $w=$menuLayout.Width; $left=$menuLayout.TextWidth
+    $bodyRows=$menuLayout.BodyRows; $borderHeight=$bodyRows+3
     Flush-DisplayEvents
-    $geometryKey=('{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f $w,$script:UiColumns,$script:UiHeight,$bodyRows,$script:UiMenuActive,$script:UiDemo,$script:UiEventRows.Count)
-    if ($geometryKey -cne $script:MioSparseCrtGeometryKey) {
-        $placeholder=New-Object 'string[]' ($bodyRows+5)
+    $geometryKey=('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $w,$script:UiColumns,$script:UiHeight,$bodyRows,$script:UiMenuActive,$script:UiDemo,$script:UiEventRows.Count,[bool]$NoInput)
+    if ($menuLayout.ShowMio -and $geometryKey -cne $script:MioSparseCrtGeometryKey) {
+        $panelRows=$bodyRows+5;if ($NoInput) {$panelRows--}
+        $placeholder=New-Object 'string[]' $panelRows
         $layout=Get-TerminalFrame $placeholder
         $bunnyRow=$layout.Lines.Count-$placeholder.Count+3
         $logoRow=0; if ($layout.BannerRows -eq 7) {$logoRow=1}
         $script:MioSparseCrtGeometry=@{Key=($logoRow.ToString()+'|'+$bunnyRow);LogoRow=$logoRow;BunnyRow=$bunnyRow}
         $script:MioSparseCrtGeometryKey=$geometryKey
     }
-    $mio=@(Get-DisplayMioFrame $Mood)
+    $mio=@();if ($menuLayout.ShowMio) {$mio=@(Get-DisplayMioFrame $Mood)}
     # A sparse gesture changes only Mio. Preserve the rest of the terminal,
     # including its steady input caret, and avoid rebuilding every border.
-    $patchable=($script:UiVT -and -not $script:UiDemo -and -not $NoInput -and
+    $patchable=($menuLayout.ShowMio -and $script:UiVT -and -not $script:UiDemo -and -not $NoInput -and
         ($script:UiIdlePoseOverride -or $script:UiSparseCrtPhase -ge 0 -or $script:UiIdleMenuCache.SparseCrt) -and $mio.Count -eq 12 -and
         (-not $script:UiPendingEvents -or $script:UiPendingEvents.Count -eq 0))
     $rowsKey=$Rows -join [char]0
@@ -812,7 +847,9 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
     $mioStatus='    MIO // READY';if ($NoInput) {$mioStatus='   MIO // WORKING'}
-    $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
+    $channelRight=' '
+    if ($menuLayout.ShowMio) {$channelRight=(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')}
+    $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+$channelRight+(Format-BorderText '|' ($w-1) 1 $border))
     # Match complete warnings before coloring, including explanations split across rows.
     $warnings=@()
     if ($script:UiAnsi) {
@@ -842,7 +879,9 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         elseif ($unverifiedRow) {$rgb='255;190;96'}
         elseif ($NoInput -and $text -match '^\[[#.]+\] \d+%$') {$rgb='107;216;245'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
-        $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
+        $rightColumn=' '
+        if ($menuLayout.ShowMio) {$rightColumn=(Color-Text ' | ' '91;104;151')+$right}
+        $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+$rightColumn+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1
     }
     $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($borderHeight-1) $border $true))
@@ -888,20 +927,27 @@ function Show-OnionProgress([string]$Stage,[string]$Detail='',
     }
     if (-not $script:UiVT) {Write-Host ($Stage+' / '+$count+' / '+$Detail);return}
     [void](Update-DisplaySize)
-    $width=[Math]::Max(44,$script:UiWidth-28)
+    $width=[Math]::Max(12,$script:UiWidth-28)
+    if ($script:UiWidth -lt 72) {$width=[Math]::Max(12,$script:UiWidth-4)}
     $detailRows=@(Get-MenuRows @($Detail) $width)
     if ($detailRows.Count -gt 4) {$detailRows=@($detailRows[0..3]);$detailRows[3]=(Fit-Text $detailRows[3] ($width-3))+'...'}
     $rows=@($Stage,'')+$detailRows+@('',$count,$bar,'','Games and emulator cores stay unchanged.')
+    if (-not (Get-MenuLayout $rows -NoInput).ShowMio) {
+        $width=[Math]::Max(12,$script:UiWidth-4)
+        $detailRows=@(Get-MenuRows @($Detail) $width)
+        if ($detailRows.Count -gt 4) {$detailRows=@($detailRows[0..3]);$detailRows[3]=(Fit-Text $detailRows[3] ($width-3))+'...'}
+        $rows=@($Stage,'')+$detailRows+@('',$count,$bar,'','Games and emulator cores stay unchanged.')
+    }
     Draw-MenuPanel -Title 'Onion SD setup / progress' -Rows $rows -Prompt 'Please wait...' -Caret -1 -Mood 'scan' -NoInput -Channel 'ONION SD SETUP'
 }
 
 function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
-                          [int]$Caret=-1,[int]$RequiredHeight=19) {
+                          [int]$Caret=-1,[int]$RequiredHeight=19,[int]$RequiredWidth=76) {
     if ($script:UiColumns -lt 20 -or $script:UiHeight -lt 6) {return}
     $width=[Math]::Min(92,$script:UiColumns-4)
     $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Fit-Text ('OptiMiyoo / '+$Title) $width))
-    $lines.Add('  '+(Fit-Text ('Resize to at least 76 x '+$RequiredHeight+'.') $width))
+    $lines.Add('  '+(Fit-Text ('Enlarge window: '+$RequiredHeight+' rows, '+$RequiredWidth+'+ columns.') $width))
     $lines.Add('  '+(Fit-Text $Detail $width))
     if ($Caret -ge 0) {
         $fieldWidth=$width-8; $inputView=Get-InputViewport $InputText $Caret $fieldWidth
@@ -919,7 +965,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                            [string[]]$Lines=@(),[string]$Mood='idle') {
     $Prompt=ConvertTo-SafeExternalText $Prompt
     [void](Update-DisplaySize)
-    $rows=@(Get-MenuRows $Lines ([Math]::Max(44,$script:UiWidth-28)))
+    $layout=Get-MenuLayout $Lines
     $canDraw=$script:UiPanel
     try {
         # An undersized interactive window gets the resize panel and can
@@ -948,10 +994,10 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
     try {
         while ($true) {
             if (Update-DisplaySize -Throttled) {
-                $rows=@(Get-MenuRows $Lines ([Math]::Max(44,$script:UiWidth-28)))
+                $layout=Get-MenuLayout $Lines
                 $dirty=$true
             }
-            $bunnyVisible=($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7))
+            $bunnyVisible=($layout.Fits -and $layout.ShowMio)
             if ($sparseIdle) {
                 $idlePose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
                 if ($idlePose -cne $script:UiIdlePoseOverride) {
@@ -961,7 +1007,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
             }
             if (Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible) {$dirty=$true}
             if ($dirty) {
-                Draw-MenuPanel $Title $rows $Prompt $text $caret $Mood
+                Draw-MenuPanel $Title $Lines $Prompt $text $caret $Mood
                 $dirty=$false
             }
             if ([Console]::KeyAvailable) {
@@ -970,8 +1016,14 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                     $idleWatch.Restart(); Reset-MioIdleInput
                     $script:UiIdlePoseOverride='idle'
                 }
-                if ($key.Key -eq [ConsoleKey]::Enter) {return $text.Trim()}
                 if ($key.Key -eq [ConsoleKey]::Escape) {return 'B'}
+                # Never accept an unseen default or confirmation on a tiny screen.
+                if (-not $layout.Fits) {
+                    if ($key.Key -eq [ConsoleKey]::Q) {return 'Q'}
+                    if ($key.Key -eq [ConsoleKey]::B) {return 'B'}
+                    continue
+                }
+                if ($key.Key -eq [ConsoleKey]::Enter) {return $text.Trim()}
                 if ($key.Key -eq [ConsoleKey]::Backspace -and $caret -gt 0) {$previous=Get-InputCaretOffset $text $caret -1;$text=$text.Remove($previous,$caret-$previous);$caret=$previous}
                 elseif ($key.Key -eq [ConsoleKey]::Delete -and $caret -lt $text.Length) {$next=Get-InputCaretOffset $text $caret 1;$text=$text.Remove($caret,$next-$caret)}
                 elseif ($key.Key -eq [ConsoleKey]::LeftArrow) {$caret=Get-InputCaretOffset $text $caret -1}
@@ -1032,11 +1084,13 @@ function Draw-DisplayPanel([switch]$Force) {
     if (Update-DisplaySize) {$Force=$true}
     if (-not $Force -and $script:UiWatch.ElapsedMilliseconds -lt 95) {return}
     $script:UiWatch.Restart()
-    if (-not $script:UiPanel) {
-        Draw-ResizePanel $script:UiStage $script:UiDetail
+    if ($script:UiColumns -lt 44) {
+        Draw-ResizePanel $script:UiStage $script:UiDetail -RequiredWidth 44
         return
     }
     $w=$script:UiWidth; $left=$w-28; $inner=$w-4
+    $compact=(-not $script:UiPanel)
+    if ($compact) {$left=$inner}
     $border=Get-BorderStyle $w 17
     $mio=@(Get-DisplayMioFrame $script:UiMood $script:UiPoseOverride)
     $count=[Math]::Min($script:Total,$script:Processed+1)
@@ -1094,6 +1148,12 @@ function Draw-DisplayPanel([switch]$Force) {
         ('Elapsed '+$clock),
         $eta
     )
+    if ($compact) {
+        if ($script:UiDemo -and $script:UiDemoProgressStatus) {$data[5]='Status: '+$script:UiDemoProgressStatus}
+        $plain=@($data | ForEach-Object {$_ -replace '\x1b\[[0-9;?]*[ -/]*[@-~]',''} | Where-Object {$_})
+        Draw-MenuPanel -Title 'Progress' -Rows $plain -Prompt ('MIO > '+$script:UiSay) -Caret -1 -Mood $script:UiMood -NoInput
+        return
+    }
     $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Format-BorderText (('+-- OptiMiyoo // LOCAL DISK LINK ').PadRight($w-1,'-')+'+') 0 0 $border))
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text 'MEDIA CHANNEL // 140.85' $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // ONLINE' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
@@ -1390,8 +1450,7 @@ function Show-MioPreview([string]$Section='Tour') {
                     $draw.Restart()
                     Set-MioPreviewProgress $scene $timer.ElapsedMilliseconds $duration
                     if ($scene.Menu) {
-                        $rows=@(Get-MenuRows $scene.Menu ([Math]::Max(44,$script:UiWidth-28)))
-                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $rows $script:UiSay 'Preview only / no selection is applied' 0 $scene.Mood
+                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $scene.Menu $script:UiSay 'Preview only / no selection is applied' 0 $scene.Mood
                     } else {Draw-DisplayPanel -Force}
                     $dirty=$false
                 }

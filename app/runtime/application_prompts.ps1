@@ -93,21 +93,22 @@ function Read-ApplicationConsoleChoice($Model) {
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
-    $rows=@(Get-MenuRows $Model.Lines ([Math]::Max(44,$script:UiWidth-28)))
+    [void](Update-DisplaySize)
+    $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows
     if(-not $script:UiVT) {
         [Console]::WriteLine($Model.Title)
         foreach($line in $Model.Lines){[Console]::WriteLine($line)}
         [Console]::Write($Model.Prompt+': ')
     }
     try {while($true) {
-        if(Update-DisplaySize -Throttled){$rows=@(Get-MenuRows $Model.Lines ([Math]::Max(44,$script:UiWidth-28)));$dirty=$true}
-        $bunnyVisible=($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7))
+        if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows;$dirty=$true}
+        $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
         if($sparseIdle) {
             $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
             if($pose -cne $script:UiIdlePoseOverride){$script:UiIdlePoseOverride=$pose;$dirty=$true}
         }
         if(Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible){$dirty=$true}
-        $fits=(-not $script:UiVT -or ($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7)))
+        $fits=(-not $script:UiVT -or $layout.Fits)
         if($script:UiVT -and $dirty) {
             Draw-MenuPanel $Model.Title $rows $Model.Prompt $text $caret 'wait'
             $dirty=$false

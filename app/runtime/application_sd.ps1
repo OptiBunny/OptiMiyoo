@@ -282,14 +282,16 @@ function Read-ApplicationSdConsolePath {
     $title='Onion SD setup';$prompt='SD drive or folder (for example E:\) / Esc: Back'
     if ($ErrorMessage) {$prompt=$ErrorMessage}
     $rows=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');$text=$InitialText;$dirty=$true
+    [void](Update-DisplaySize)
+    $layout=Get-MenuLayout -Rows $rows
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
     if(-not $script:UiVT){[Console]::WriteLine($title);foreach($line in $rows){[Console]::WriteLine($line)};[Console]::Write($prompt+': ')}
     try {while($true) {
-        if(Update-DisplaySize -Throttled){$dirty=$true}
-        $bunnyVisible=($script:UiPanel -and $script:UiHeight -ge ([Math]::Max(12,$rows.Count)+7))
+        if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows;$dirty=$true}
+        $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
         if($sparseIdle) {
             $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
             if($pose -cne $script:UiIdlePoseOverride){$script:UiIdlePoseOverride=$pose;$dirty=$true}
@@ -300,7 +302,7 @@ function Read-ApplicationSdConsolePath {
             $key=[Console]::ReadKey($true)
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return $null}
-            if($script:UiVT -and (-not $script:UiPanel -or $script:UiHeight -lt 19)){continue}
+            if($script:UiVT -and -not $layout.Fits){continue}
             if($key.Key -eq [ConsoleKey]::Enter){
                 if(-not $script:UiVT){[Console]::WriteLine()}
                 $selected=$text.Trim().Trim('"')

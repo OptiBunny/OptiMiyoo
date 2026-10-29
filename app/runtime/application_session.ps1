@@ -77,10 +77,10 @@ namespace OptiMiyoo {
     if(window==IntPtr.Zero||!IsWindowVisible(window)||!GetWindowRect(window,out bounds)||bounds.Right<=bounds.Left||bounds.Bottom<=bounds.Top) {
      // Windows Terminal 1.23+ honors XTWINOPS; older hosts can ignore it.
      // Request only at startup, never on a later user resize or screen change.
-     if(Console.WindowHeight>=40&&Console.WindowWidth>=100)return;
+     if(Console.WindowHeight>=35&&Console.WindowWidth>=100)return;
      IntPtr output=GetStdHandle(-11);uint mode;
      if(!GetConsoleMode(output,out mode)||!SetConsoleMode(output,mode|4))return;
-     try {Console.Write("\x1b[8;"+Math.Max(40,Console.WindowHeight)+";"+Math.Max(100,Console.WindowWidth)+"t");}
+     try {Console.Write("\x1b[8;"+Math.Max(35,Console.WindowHeight)+";"+Math.Max(100,Console.WindowWidth)+"t");}
      finally {SetConsoleMode(output,mode);}
      return;
     }
@@ -94,7 +94,7 @@ namespace OptiMiyoo {
     int maxHeight=Math.Min(Console.LargestWindowHeight,(monitor.Work.Bottom-monitor.Work.Top-frameHeight-16)/font.Size.Y);
     if(maxWidth<20||maxHeight<10)return;
     int width=Math.Min(maxWidth,Math.Max(100,Console.WindowWidth));
-    int height=Math.Min(maxHeight,Math.Max(40,Console.WindowHeight));
+    int height=Math.Min(maxHeight,Math.Max(35,Console.WindowHeight));
     if(width>Console.BufferWidth||height>Console.BufferHeight)Console.SetBufferSize(Math.Max(width,Console.BufferWidth),Math.Max(height,Console.BufferHeight));
     if(width!=Console.WindowWidth||height!=Console.WindowHeight)Console.SetWindowSize(width,height);
     if(GetWindowRect(window,out bounds)) {

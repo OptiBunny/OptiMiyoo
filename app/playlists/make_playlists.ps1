@@ -343,7 +343,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     foreach ($disk in $disks) {
         if (-not $stems.Add([IO.Path]::ChangeExtension($disk,$null))) {throw "Multiple formats of the same game file in one ZIP: $disk. Keep one playable version."}
     }
-    return @(Get-OrderedTapeMembers @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}}))
+    return @(Get-OrderedArchiveMedia @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}}))
 }
 function Assert-ZipExtractionNames([IO.Compression.ZipArchive]$Archive) {
     Assert-ArchiveSandboxMemberBudget $Archive
@@ -463,13 +463,15 @@ function Get-PlaylistMediaIdentity([string]$Relative) {
     return [pscustomobject]@{Stem=$stem;Tag=$tag;Tagged=$tagged;Error=$errorText}
 }
 
-function Get-OrderedTapeMembers([string[]]$Names) {
+function Get-OrderedArchiveMedia([string[]]$Names) {
     # An archive can intentionally contain unrelated or untagged media. Only
-    # use tape labels when every member describes the same tagged game set.
+    # use labels when every member describes the same unambiguous game set.
+    # Disk 1 and tape side 1 can coexist; mixed disk/tape archives keep their order.
     if($Names.Count -lt 2){return $Names}
-    $members=New-Object 'System.Collections.Generic.List[object]';$stem=$null
+    $members=New-Object 'System.Collections.Generic.List[object]';$stem=$null;$tapeSet=$null
     foreach($name in $Names) {
-        if([IO.Path]::GetExtension($name) -notin '.tap','.t64'){return $Names}
+        $isTape=[IO.Path]::GetExtension($name) -in '.tap','.t64'
+        if($null -eq $tapeSet){$tapeSet=$isTape}elseif($tapeSet -ne $isTape){return $Names}
         $identity=Get-PlaylistMediaIdentity $name
         if(-not $identity.Tagged -or $identity.Error){return $Names}
         if($null -eq $stem){$stem=$identity.Stem}
@@ -478,7 +480,7 @@ function Get-OrderedTapeMembers([string[]]$Names) {
     }
     $tags=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach($member in $members) {
-        if(-not $tags.Add((Get-NaturalDiskKey $member.Tag))){throw 'Ambiguous tape set: repeated tape/side label. Separate alternate releases.'}
+        if(-not $tags.Add((Get-NaturalDiskKey $member.Tag))){throw 'Ambiguous archive set: repeated disk/tape label. Separate alternate releases.'}
     }
     return @($members | Sort-Object @{Expression={Get-NaturalDiskKey $_.Tag}},@{Expression={Get-NaturalDiskKey $_.Name}} | ForEach-Object {$_.Name})
 }

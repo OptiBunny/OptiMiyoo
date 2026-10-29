@@ -126,6 +126,7 @@ function Invoke-ApplicationNativeRequest {
         Out=$null;Err=$null;InputLease=$null;ParentLease=$null;InputHash=$null;Destination=$null;
         ReceiptKind=$(if($kind -eq 'Nib'){'Nib'}else{'HxC'});Timer=[Diagnostics.Stopwatch]::StartNew();
         Timeout=120;Done=$false;ExitCode=-1;TimedOut=$false;LimitExceeded=$false;CaptureFailed=$false;Failure=$null}
+    $registered=$false
     try {
         $inputFile=$null;$outputName=$null
         if ($mode -ne 'Modules') {
@@ -165,8 +166,13 @@ function Invoke-ApplicationNativeRequest {
         $job.Out=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardOutput,1048576)
         $job.Err=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardError,1048576)
         $State.Jobs.Add($job.Id,$job)
+        $registered=$true
         return @{TaskId=$job.Id}
-    } catch {Close-ApplicationNativeJob $State $job;throw}
+    } finally {
+        # Engine Stop bypasses catch. Startup owns every native resource until
+        # the job registry makes it reachable by session cleanup.
+        if(-not $registered){Close-ApplicationNativeJob $State $job}
+    }
 }
 
 function ConvertTo-ApplicationWorkRelative([string]$Path) {

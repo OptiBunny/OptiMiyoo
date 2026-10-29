@@ -738,8 +738,17 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot,
             Assert-PlaylistOutputOwnership $job.Plan $names $references
         } $Job $Batch.Profile $DestinationRoot $ReferenceIndex
     } elseif($Batch.Operation -in 'C64','ZX'){
-        & $Batch.Module {param($group,$dst)Assert-ConversionGroupOwnership $group $dst} $Job.SourceJob $DestinationRoot
+        & $Batch.Module {param($group,$dst,$references)Assert-ConversionGroupOwnership $group $dst $references} $Job.SourceJob $DestinationRoot $ReferenceIndex
     } else {throw 'Unknown application operation.'}
+}
+
+function Reset-ApplicationBrokerReferences($Batch,$ReferenceIndex,[object[]]$Targets) {
+    if(-not $ReferenceIndex){return}
+    if($Batch.Operation -eq 'Playlist'){
+        & $Batch.Module {param($index,$targets)Reset-PlaylistReferenceIndexTargets $index $targets} $ReferenceIndex $Targets
+    } else {
+        & $Batch.Module {param($index,$targets)Reset-ConversionDescriptorCacheTargets $index $targets} $ReferenceIndex $Targets
+    }
 }
 
 function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null) {
@@ -881,6 +890,7 @@ function Complete-ApplicationBrokerBatch {
         Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
         $receiptIndex=New-ApplicationBrokerReceiptIndex $batch $ReceiptStore
         if($batch.Operation -eq 'Playlist'){$referenceIndex=& $batch.Module {param($root)New-PlaylistReferenceIndex $root} $dst}
+        else {$referenceIndex=& $batch.Module {param($root)New-ConversionDescriptorCache $root} $dst}
         foreach($id in $CompletedJobIds){
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
             try {
@@ -890,7 +900,7 @@ function Complete-ApplicationBrokerBatch {
                 $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock
                 $folderManifest=(Get-Command Get-ApplicationBrokerBackupManifest).ScriptBlock
                 $validateBackup={param($destination,$backup,$folder)& $backupFactory $state $destination $backup $folder $folderManifest}.GetNewClosure()
-                if($referenceIndex){& $batch.Module {param($index,$targets)Reset-PlaylistReferenceIndexTargets $index $targets} $referenceIndex (@($job.Writes)+@($job.Retired)+@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}}))}
+                Reset-ApplicationBrokerReferences $batch $referenceIndex (@($job.Writes)+@($job.Retired)+@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}}))
                 $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
@@ -900,7 +910,7 @@ function Complete-ApplicationBrokerBatch {
                 if($commit){foreach($lock in $commit.Locks){$lock.Dispose()}}
                 if($sealed){
                     foreach($path in $sealed.Owned){
-                        if($referenceIndex){& $batch.Module {param($index,$path)Reset-PlaylistReferenceIndexTargets $index @([pscustomobject]@{Destination=$path;Folder=$true})} $referenceIndex $path}
+                        Reset-ApplicationBrokerReferences $batch $referenceIndex @([pscustomobject]@{Destination=$path;Folder=$true})
                         $preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path,[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0
                         if(-not $preserve -and (Test-Path -LiteralPath $path)){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalText $path))}}
                     }
@@ -964,7 +974,10 @@ function Complete-ApplicationBrokerBatch {
         finally {
             try {if($sourceInventoryGuard){$sourceInventoryGuard.Dispose()}}
             finally {
-                try {if($referenceIndex){& $batch.Module {param($index)Close-PlaylistReferenceIndex $index} $referenceIndex}}
+                try {if($referenceIndex){
+                    if($batch.Operation -eq 'Playlist'){& $batch.Module {param($index)Close-PlaylistReferenceIndex $index} $referenceIndex}
+                    else {& $batch.Module {param($index)Close-ConversionDescriptorCache $index} $referenceIndex}
+                }}
                 finally {$Session.ActiveBatch=$null}
             }
         }

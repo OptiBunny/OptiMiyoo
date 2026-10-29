@@ -766,12 +766,24 @@ function Set-PlaylistOutputConflicts([object[]]$Jobs) {
     $keys=@($allKeys); $checked=0
     $message='Several input games write or retire overlapping output paths. Separate or rename the inputs; no conflicting game was written.'
     $visibleMessage='Several input games create conflicting visible output paths. Separate or rename the inputs; no conflicting game was written.'
+    # Record each owner's latest conflict event before walking its members.
+    # A shared ancestor can meet thousands of descendants; visiting its whole
+    # owner list for every encounter would make this pass quadratic.
+    $marks=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    $markState=[pscustomobject]@{Sequence=0L}
+    $markOwners={param($Map,[string]$Path,[string]$Kind,[string]$Reason)
+        $markState.Sequence++
+        $identity=$Kind+':'+$Path
+        if(-not $marks.ContainsKey($identity)){$marks[$identity]=[pscustomobject]@{Owners=$Map[$Path];Sequence=0L;Message=''}}
+        $marks[$identity].Sequence=$markState.Sequence;$marks[$identity].Message=$Reason
+    }
     # Visible candidates reserve no output themselves. Reject only a different
     # job's write, which would make later ownership checks depend on job order.
-    $rejectVisibleOverlap={param($Candidates,$Writers)
+    $rejectVisibleOverlap={param([string]$CandidatePath,[string]$WriterPath)
+        $Candidates=$visibleOwners[$CandidatePath];$Writers=$writeOwners[$WriterPath]
         if ($Candidates.Count -gt 1 -or $Writers.Count -gt 1 -or $Candidates[0] -ne $Writers[0]) {
-            foreach ($i in $Candidates) {$Jobs[$i].Error=$visibleMessage}
-            foreach ($i in $Writers) {$Jobs[$i].Error=$visibleMessage}
+            & $markOwners $visibleOwners $CandidatePath 'visible' $visibleMessage
+            & $markOwners $writeOwners $WriterPath 'write' $visibleMessage
         }
     }
     Show-PreparationProgress 'Checking output path conflicts' 'Checking shared paths and parent collections.' 0 $keys.Count 'paths'
@@ -781,23 +793,32 @@ function Set-PlaylistOutputConflicts([object[]]$Jobs) {
         # Legacy layout candidates can coincide without either ever existing.
         # They conflict only with an actual output or a planned write; retain
         # absent candidates in the index so write/retirement overlaps still fail.
-        if ($null -ne $participants -and $participants.Count -gt 1 -and $activeTargets.Contains($key)) {foreach ($i in $participants) {$Jobs[$i].Error=$message}}
-        if ($visibleOwners.ContainsKey($key) -and $writeOwners.ContainsKey($key)) {& $rejectVisibleOverlap $visibleOwners[$key] $writeOwners[$key]}
+        if ($null -ne $participants -and $participants.Count -gt 1 -and $activeTargets.Contains($key)) {& $markOwners $owners $key 'ordinary' $message}
+        if ($visibleOwners.ContainsKey($key) -and $writeOwners.ContainsKey($key)) {& $rejectVisibleOverlap $key $key}
         $parent=[IO.Path]::GetDirectoryName($key)
         while ($parent) {
             if ($null -ne $participants -and $owners.ContainsKey($parent) -and ($activeTargets.Contains($key) -or $activeTargets.Contains($parent))) {
                 $ancestors=$owners[$parent]
                 if ($participants.Count -gt 1 -or $ancestors.Count -gt 1 -or $participants[0] -ne $ancestors[0]) {
-                    foreach ($i in $participants) {$Jobs[$i].Error=$message}
-                    foreach ($i in $ancestors) {$Jobs[$i].Error=$message}
+                    & $markOwners $owners $key 'ordinary' $message
+                    & $markOwners $owners $parent 'ordinary' $message
                 }
             }
-            if ($visibleOwners.ContainsKey($key) -and $writeOwners.ContainsKey($parent)) {& $rejectVisibleOverlap $visibleOwners[$key] $writeOwners[$parent]}
-            if ($writeOwners.ContainsKey($key) -and $visibleOwners.ContainsKey($parent)) {& $rejectVisibleOverlap $visibleOwners[$parent] $writeOwners[$key]}
+            if ($visibleOwners.ContainsKey($key) -and $writeOwners.ContainsKey($parent)) {& $rejectVisibleOverlap $key $parent}
+            if ($writeOwners.ContainsKey($key) -and $visibleOwners.ContainsKey($parent)) {& $rejectVisibleOverlap $parent $key}
             $parent=[IO.Path]::GetDirectoryName($parent)
         }
         $checked++; Show-PreparationProgress 'Checking output path conflicts' $key $checked $keys.Count 'paths'
     }
+    $latest=New-Object long[] $Jobs.Count;$messages=New-Object string[] $Jobs.Count
+    foreach($mark in $marks.Values){
+        foreach($i in $mark.Owners){
+            if($mark.Sequence -gt $latest[$i]){$latest[$i]=$mark.Sequence;$messages[$i]=$mark.Message}
+        }
+    }
+    # Preserve the previous last-applicable-event diagnostic, including jobs
+    # that already had an error when their output plan entered the index.
+    for($i=0;$i -lt $Jobs.Count;$i++){if($latest[$i]){$Jobs[$i].Error=$messages[$i]}}
 }
 
 function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage,$Media,[string]$SingleStorage='Auto') {
@@ -1012,7 +1033,7 @@ function Get-PlaylistOwnedMedia([string]$Path,[string]$Stem,[string]$Root,$Plan=
 function New-PlaylistReferenceIndex([string]$Root) {
     # Explicit batch lifetime, never a module/global cache. Cached descriptors
     # remain read-locked; names and links are inventoried again on every check.
-    return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');Playlists=@{};Cues=@{};Exact=@{};Folders=@{};Guarded=@{};
+    return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');Playlists=@{};Cues=@{};StandaloneCues=@{};Exact=@{};Folders=@{};Guarded=@{};
         MaximumDescriptors=4096;MaximumReferences=100000;MaximumReferenceCharacters=16777216;ReferenceCount=0;ReferenceCharacters=0;LimitReached=$false;Disabled=$false;Closed=$false}
 }
 
@@ -1042,6 +1063,84 @@ function Close-PlaylistReferenceDescriptor($Descriptor) {
     if($Descriptor){$Descriptor.Dispose()}
 }
 
+function New-PlaylistReferenceTargets([object[]]$Targets) {
+    $result=[pscustomobject]@{Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+    foreach($target in $Targets){[void]$result.Exact.Add($target.Destination);if($target.Folder){[void]$result.Folders.Add($target.Destination)}}
+    return $result
+}
+
+function Test-PlaylistReferenceTarget([string]$Path,$Targets) {
+    if($null -eq $Targets){return $false}
+    if($Targets.Exact.Contains($Path)){return $true}
+    $parent=[IO.Path]::GetDirectoryName($Path)
+    while($parent){if($Targets.Folders.Contains($parent)){return $true};$parent=[IO.Path]::GetDirectoryName($parent)}
+    return $false
+}
+
+function Get-PlaylistCueDependencies([string]$Path,[string]$Root) {
+    Assert-PlainOutputParents $Path $Root
+    if((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'A linked CUE prevents checking output ownership; outputs left alone.'}
+    foreach($track in @(Get-CueFiles $Path)){
+        $full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $track.Replace('/',[IO.Path]::DirectorySeparatorChar)))
+        Assert-PlainOutputParents $full $Root
+        if((Test-Path -LiteralPath $full) -and ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'A linked CUE track prevents checking output ownership; outputs left alone.'}
+        $full
+    }
+}
+
+function Get-PlaylistIndexedCue($Index,[string]$Path,[int]$PendingDescriptors=0) {
+    if(-not $Index.Cues.ContainsKey($Path)){
+        Assert-PlaylistReferenceCapacity $Index (1+$PendingDescriptors)
+        $cue=[pscustomobject]@{Descriptor=$null;Tracks=@();Users=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+        try{
+            if(Test-Path -LiteralPath $Path -PathType Leaf){
+                $cue.Descriptor=Open-PlaylistReferenceDescriptor $Path $Index.Root
+                $cue.Tracks=@(Get-PlaylistCueDependencies $Path $Index.Root)
+            }
+            $Index.Cues[$Path]=$cue
+        }catch{Close-PlaylistReferenceDescriptor $cue.Descriptor;throw}
+    }
+    return $Index.Cues[$Path]
+}
+
+function Remove-StandaloneCueReference($Index,[string]$Path) {
+    if(-not $Index.StandaloneCues.ContainsKey($Path)){return}
+    $entry=$Index.StandaloneCues[$Path]
+    foreach($kind in 'Exact','Folders','Guarded'){
+        foreach($key in $entry.$kind){
+            [void]$Index.$kind[$key].Remove($Path)
+            if(-not $Index.$kind[$key].Count){$Index.$kind.Remove($key)}
+        }
+    }
+    $Index.ReferenceCount-=$entry.ReferenceCount;$Index.ReferenceCharacters-=$entry.ReferenceCharacters
+    $Index.StandaloneCues.Remove($Path)
+    if($Index.Cues.ContainsKey($Path) -and -not $Index.Cues[$Path].Users.Count){Close-PlaylistReferenceDescriptor $Index.Cues[$Path].Descriptor;$Index.Cues.Remove($Path)}
+}
+
+function Add-StandaloneCueReference($Index,[string]$Path) {
+    $entry=[pscustomobject]@{ReferenceCount=0;ReferenceCharacters=0;Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Guarded=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+    try{
+        $cue=Get-PlaylistIndexedCue $Index $Path
+        Add-PlaylistReferenceKey $Index $entry Guarded $Path
+        foreach($track in $cue.Tracks){
+            Add-PlaylistReferenceKey $Index $entry Exact $track;Add-PlaylistReferenceKey $Index $entry Guarded $track
+            $parent=[IO.Path]::GetDirectoryName($track)
+            while($parent){Add-PlaylistReferenceKey $Index $entry Folders $parent;$parent=[IO.Path]::GetDirectoryName($parent)}
+        }
+        foreach($kind in 'Exact','Folders','Guarded'){
+            foreach($key in $entry.$kind){
+                if(-not $Index.$kind.ContainsKey($key)){$Index.$kind[$key]=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
+                [void]$Index.$kind[$key].Add($Path)
+            }
+        }
+        $Index.StandaloneCues[$Path]=$entry
+        $Index.ReferenceCount+=$entry.ReferenceCount;$Index.ReferenceCharacters+=$entry.ReferenceCharacters
+    }catch{
+        if($Index.Cues.ContainsKey($Path) -and -not $Index.Cues[$Path].Users.Count){Close-PlaylistReferenceDescriptor $Index.Cues[$Path].Descriptor;$Index.Cues.Remove($Path)}
+        throw
+    }
+}
+
 function Remove-PlaylistReferenceEntry($Index,[string]$Path) {
     if(-not $Index.Playlists.ContainsKey($Path)){return}
     $entry=$Index.Playlists[$Path]
@@ -1054,7 +1153,7 @@ function Remove-PlaylistReferenceEntry($Index,[string]$Path) {
     foreach($cue in $entry.Cues){
         if($Index.Cues.ContainsKey($cue)){
             [void]$Index.Cues[$cue].Users.Remove($Path)
-            if(-not $Index.Cues[$cue].Users.Count){Close-PlaylistReferenceDescriptor $Index.Cues[$cue].Descriptor;$Index.Cues.Remove($cue)}
+            if(-not $Index.Cues[$cue].Users.Count -and -not $Index.StandaloneCues.ContainsKey($cue)){Close-PlaylistReferenceDescriptor $Index.Cues[$cue].Descriptor;$Index.Cues.Remove($cue)}
         }
     }
     $Index.ReferenceCount-=$entry.ReferenceCount;$Index.ReferenceCharacters-=$entry.ReferenceCharacters
@@ -1078,8 +1177,8 @@ function Reset-PlaylistReferenceIndexTargets($Index,[object[]]$Targets) {
         if($Index.Cues.ContainsKey($path)){
             $cue=$Index.Cues[$path]
             foreach($owner in @($cue.Users)){Remove-PlaylistReferenceEntry $Index $owner}
-            Close-PlaylistReferenceDescriptor $cue.Descriptor
-            $Index.Cues.Remove($path)
+            Remove-StandaloneCueReference $Index $path
+            if($Index.Cues.ContainsKey($path)){Close-PlaylistReferenceDescriptor $Index.Cues[$path].Descriptor;$Index.Cues.Remove($path)}
         }
         Remove-PlaylistReferenceEntry $Index $path
     }
@@ -1090,7 +1189,7 @@ function Close-PlaylistReferenceIndex($Index) {
     $Index.Closed=$true
     foreach($entry in $Index.Playlists.Values){Close-PlaylistReferenceDescriptor $entry.Descriptor}
     foreach($cue in $Index.Cues.Values){Close-PlaylistReferenceDescriptor $cue.Descriptor}
-    foreach($kind in 'Playlists','Cues','Exact','Folders','Guarded'){$Index.$kind.Clear()}
+    foreach($kind in 'Playlists','Cues','StandaloneCues','Exact','Folders','Guarded'){$Index.$kind.Clear()}
     $Index.ReferenceCount=0;$Index.ReferenceCharacters=0
 }
 
@@ -1110,22 +1209,7 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
             Add-PlaylistReferenceKey $Index $entry Exact $full
             if([IO.Path]::GetExtension($full) -eq '.cue' -and $full.StartsWith($Index.Root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){
                 Add-PlaylistReferenceKey $Index $entry Cues $full
-                if(-not $Index.Cues.ContainsKey($full)){
-                    Assert-PlaylistReferenceCapacity $Index 2
-                    $cue=[pscustomobject]@{Descriptor=$null;Tracks=@();Users=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
-                    try {
-                        if(Test-Path -LiteralPath $full -PathType Leaf){
-                            $cue.Descriptor=Open-PlaylistReferenceDescriptor $full $Index.Root
-                            $cue.Tracks=@(foreach($track in @(Get-CueFiles $full)){
-                                $trackPath=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($full)) $track.Replace('/',[IO.Path]::DirectorySeparatorChar)))
-                                Assert-PlainOutputParents $trackPath $Index.Root
-                                if((Test-Path -LiteralPath $trackPath) -and ((Get-Item -LiteralPath $trackPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'A linked CUE track prevents checking another playlist dependency; outputs left alone.'}
-                                $trackPath
-                            })
-                        }
-                        $Index.Cues[$full]=$cue
-                    } catch {Close-PlaylistReferenceDescriptor $cue.Descriptor;throw}
-                }
+                $null=Get-PlaylistIndexedCue $Index $full 1
                 Add-PlaylistReferenceKey $Index $entry Guarded $full
                 foreach($track in $Index.Cues[$full].Tracks){Add-PlaylistReferenceKey $Index $entry Exact $track;Add-PlaylistReferenceKey $Index $entry Guarded $track}
             }
@@ -1146,26 +1230,27 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
     } catch {
         Close-PlaylistReferenceDescriptor $entry.Descriptor
         foreach($cuePath in @($Index.Cues.Keys)){
-            if(-not $Index.Cues[$cuePath].Users.Count){Close-PlaylistReferenceDescriptor $Index.Cues[$cuePath].Descriptor;$Index.Cues.Remove($cuePath)}
+            if(-not $Index.Cues[$cuePath].Users.Count -and -not $Index.StandaloneCues.ContainsKey($cuePath)){Close-PlaylistReferenceDescriptor $Index.Cues[$cuePath].Descriptor;$Index.Cues.Remove($cuePath)}
         }
         throw
     }
 }
 
-function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist) {
+function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist,$ReplacedTargets=$null) {
     if($Index.Closed){throw 'Playlist reference index is closed.'}
     $playlists=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $cueFiles=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $links=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    $pending=New-Object 'Collections.Generic.Stack[string]';$pending.Push($Index.Root)
+    $pending=New-Object 'Collections.Generic.Stack[string]';$pending.Push($Index.Root);$count=0
     # Directory metadata or a watcher cannot prove that no new foreign playlist
     # appeared. Keep this fresh traversal, including links and hidden folders.
     while($pending.Count){
         $directory=$pending.Pop();Assert-PlainOutputParents (Join-Path $directory '_') $Index.Root
         foreach($file in (New-Object IO.DirectoryInfo($directory)).GetFileSystemInfos()){
+            if(++$count -gt 100000){throw 'Output ownership inspection exceeds its entry limit.'}
             $folder=[bool]($file.Attributes -band [IO.FileAttributes]::Directory)
             if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){
-                if($folder -or $file.Extension -in '.m3u','.m3u8'){throw 'An output link prevents checking playlist ownership. Output left alone.'}
+                if($folder -or $file.Extension -in '.m3u','.m3u8','.cue'){throw 'An output link prevents checking playlist or CUE ownership. Output left alone.'}
                 [void]$links.Add($file.FullName);continue
             }
             if($folder){$pending.Push($file.FullName);continue}
@@ -1174,6 +1259,9 @@ function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist) {
         }
     }
     foreach($path in @($Index.Playlists.Keys)){if(-not $playlists.Contains($path)){Remove-PlaylistReferenceEntry $Index $path}}
+    foreach($path in @($Index.StandaloneCues.Keys)){
+        if(-not $cueFiles.Contains($path) -or (Test-PlaylistReferenceTarget $path $ReplacedTargets)){Remove-StandaloneCueReference $Index $path}
+    }
     foreach($path in @($Index.Cues.Keys)){
         # A reference to a missing CUE must gain its tracks when that CUE appears.
         if(-not $Index.Cues[$path].Descriptor -and $cueFiles.Contains($path)){
@@ -1183,6 +1271,11 @@ function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist) {
     }
     foreach($path in $playlists){
         if(-not $path.Equals($OwnPlaylist,[StringComparison]::OrdinalIgnoreCase) -and -not $Index.Playlists.ContainsKey($path)){Add-PlaylistReferenceEntry $Index $path}
+    }
+    foreach($path in $cueFiles){
+        # Only a descriptor actually replaced by this transaction is exempt.
+        # Its foreign playlist users, if any, retain their separate ownership.
+        if(-not (Test-PlaylistReferenceTarget $path $ReplacedTargets) -and -not $Index.StandaloneCues.ContainsKey($path)){Add-StandaloneCueReference $Index $path}
     }
     foreach($path in $links){
         if($Index.Guarded.ContainsKey($path)){
@@ -1194,9 +1287,10 @@ function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist) {
 function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceIndex=$null) {
     $existing=@($Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
     if ($existing.Count -eq 0) {return}
+    $replacedTargets=New-PlaylistReferenceTargets $Targets
     if($null -ne $ReferenceIndex -and -not $ReferenceIndex.Disabled){
         if(-not $ReferenceIndex.Root.Equals([IO.Path]::GetFullPath($Plan.Root).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)){throw 'Playlist reference index belongs to a different destination.'}
-        try {Update-PlaylistReferenceIndex $ReferenceIndex $Plan.M3uPath}
+        try {Update-PlaylistReferenceIndex $ReferenceIndex $Plan.M3uPath $replacedTargets}
         catch {
             if(-not $ReferenceIndex.LimitReached){throw}
             # Retained handles, keys, and path text are bounded. Large trees
@@ -1208,7 +1302,13 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 $tables=@($ReferenceIndex.Exact);if($target.Folder){$tables+=,$ReferenceIndex.Folders}
                 foreach($table in $tables){
                     if($table.ContainsKey($target.Destination)){
-                        foreach($owner in $table[$target.Destination]){if(-not $owner.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)){throw ('Another playlist uses this output: '+$owner+'. Output left alone; use a separate DST.')}}
+                        $cueOwner=$null
+                        foreach($owner in $table[$target.Destination]){
+                            if($owner.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)){continue}
+                            if($ReferenceIndex.StandaloneCues.ContainsKey($owner)){$cueOwner=$owner;continue}
+                            throw ('Another playlist uses this output: '+$owner+'. Output left alone; use a separate DST.')
+                        }
+                        if($cueOwner){throw ('Another CUE uses this output: '+$cueOwner+'. Output left alone; use a separate DST.')}
                     }
                 }
             }
@@ -1219,14 +1319,24 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
     $folderTargets=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach($target in $existing){[void]$exactTargets.Add($target.Destination);if($target.Folder){[void]$folderTargets.Add($target.Destination)}}
     $pending=New-Object 'System.Collections.Generic.Stack[string]'
-    $pending.Push($Plan.Root)
+    $pending.Push($Plan.Root);$count=0
     while ($pending.Count -gt 0) {
         foreach ($file in @(Get-ChildItem -LiteralPath $pending.Pop() -Force)) {
+            if(++$count -gt 100000){throw 'Output ownership inspection exceeds its entry limit.'}
             if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                if ($file.PSIsContainer -or $file.Extension -in '.m3u','.m3u8') {throw 'An output link prevents checking playlist ownership. Output left alone.'}
+                if ($file.PSIsContainer -or $file.Extension -in '.m3u','.m3u8','.cue') {throw 'An output link prevents checking playlist or CUE ownership. Output left alone.'}
                 continue
             }
             if ($file.PSIsContainer) {$pending.Push($file.FullName);continue}
+            if($file.Extension -eq '.cue'){
+                if(Test-PlaylistReferenceTarget $file.FullName $replacedTargets){continue}
+                foreach($dependency in @(Get-PlaylistCueDependencies $file.FullName $Plan.Root)){
+                    $used=$exactTargets.Contains($dependency);$parent=[IO.Path]::GetDirectoryName($dependency)
+                    while(-not $used -and $parent){$used=$folderTargets.Contains($parent);$parent=[IO.Path]::GetDirectoryName($parent)}
+                    if($used){throw ('Another CUE uses this output: '+$file.FullName+'. Output left alone; use a separate DST.')}
+                }
+                continue
+            }
             if ($file.Extension -notin '.m3u','.m3u8' -or $file.FullName.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)) {continue}
             foreach ($line in (Read-PlaylistLines $file.FullName)) {
                 $reference=$line.Trim()
@@ -1238,14 +1348,7 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
                 $references=@($full)
                 if([IO.Path]::GetExtension($full) -eq '.cue' -and $full.StartsWith($Plan.Root.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $full -PathType Leaf)){
-                    Assert-PlainOutputParents $full $Plan.Root
-                    if((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'A linked CUE prevents checking another playlist dependency; outputs left alone.'}
-                    foreach($track in @(Get-CueFiles $full)){
-                        $trackPath=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($full)) $track.Replace('/',[IO.Path]::DirectorySeparatorChar)))
-                        Assert-PlainOutputParents $trackPath $Plan.Root
-                        if((Test-Path -LiteralPath $trackPath) -and ((Get-Item -LiteralPath $trackPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'A linked CUE track prevents checking another playlist dependency; outputs left alone.'}
-                        $references+=$trackPath
-                    }
+                    $references+=@(Get-PlaylistCueDependencies $full $Plan.Root)
                 }
                 foreach($dependency in $references){
                     $used=$exactTargets.Contains($dependency)

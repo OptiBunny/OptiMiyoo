@@ -736,6 +736,7 @@ function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$Inv
         if($this.OwnsInventoryGuard -and $this.InventoryGuard){try{$this.InventoryGuard.Dispose()}catch{if(-not $failure){$failure=$_}}}
         if($failure){throw $failure}
     }
+    $transferred=$false
     try {
         if(-not $context.InventoryGuard){$context.InventoryGuard=Open-SourcePolicyInventoryGuard $Plan.Root}
         Set-SourcePolicyCleanupEligibility $Plan
@@ -762,8 +763,13 @@ function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$Inv
             }
         }
         Assert-SourcePolicyInventoryGuard $Plan $context.InventoryGuard
+        $transferred=$true
         return $context
-    } catch {$context.Dispose();throw}
+    } finally {
+        # Engine Stop bypasses catch before the caller receives this context.
+        # Dispose releases its descriptors while preserving a borrowed guard.
+        if(-not $transferred){$context.Dispose()}
+    }
 }
 
 function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Progress=$null,$InventoryGuard=$null,$CleanupContext=$null) {

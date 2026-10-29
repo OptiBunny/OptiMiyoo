@@ -1142,13 +1142,15 @@ function Get-PlaylistIndexedCue($Index,[string]$Path,[int]$PendingDescriptors=0)
     if(-not $Index.Cues.ContainsKey($Path)){
         Assert-PlaylistReferenceCapacity $Index (1+$PendingDescriptors)
         $cue=[pscustomobject]@{Descriptor=$null;Tracks=@();Users=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+        $registered=$false
         try{
             if(Test-Path -LiteralPath $Path -PathType Leaf){
                 $cue.Descriptor=Open-PlaylistReferenceDescriptor $Path $Index.Root
                 $cue.Tracks=@(Get-PlaylistCueDependencies $Path $Index.Root)
             }
             $Index.Cues[$Path]=$cue
-        }catch{Close-PlaylistReferenceDescriptor $cue.Descriptor;throw}
+            $registered=$true
+        }finally{if(-not $registered){Close-PlaylistReferenceDescriptor $cue.Descriptor}}
     }
     return $Index.Cues[$Path]
 }
@@ -1245,6 +1247,7 @@ function Close-PlaylistReferenceIndex($Index) {
 
 function Add-PlaylistReferenceEntry($Index,[string]$Path) {
     $entry=[pscustomobject]@{Descriptor=$null;ReferenceCount=0;ReferenceCharacters=0;Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Guarded=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Cues=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+    $registered=$false
     try {
         Assert-PlaylistReferenceCapacity $Index 1
         $entry.Descriptor=Open-PlaylistReferenceDescriptor $Path $Index.Root
@@ -1277,12 +1280,15 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
         foreach($cue in $entry.Cues){[void]$Index.Cues[$cue].Users.Add($Path)}
         $Index.Playlists[$Path]=$entry
         $Index.ReferenceCount+=$entry.ReferenceCount;$Index.ReferenceCharacters+=$entry.ReferenceCharacters
-    } catch {
-        Close-PlaylistReferenceDescriptor $entry.Descriptor
-        foreach($cuePath in @($Index.Cues.Keys)){
-            if(-not $Index.Cues[$cuePath].Users.Count -and -not $Index.StandaloneCues.ContainsKey($cuePath)){Close-PlaylistReferenceDescriptor $Index.Cues[$cuePath].Descriptor;$Index.Cues.Remove($cuePath)}
+        $registered=$true
+    } finally {
+        # Engine Stop bypasses catch while descriptor parsing still owns a lease.
+        if(-not $registered){
+            Close-PlaylistReferenceDescriptor $entry.Descriptor
+            foreach($cuePath in @($Index.Cues.Keys)){
+                if(-not $Index.Cues[$cuePath].Users.Count -and -not $Index.StandaloneCues.ContainsKey($cuePath)){Close-PlaylistReferenceDescriptor $Index.Cues[$cuePath].Descriptor;$Index.Cues.Remove($cuePath)}
+            }
         }
-        throw
     }
 }
 

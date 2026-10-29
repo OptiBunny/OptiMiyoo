@@ -51,6 +51,60 @@ using System.Diagnostics;
 using Microsoft.Win32.SafeHandles;
 
 namespace OptiMiyoo {
+ // Size the owning console once, before any display or isolated session starts.
+ // Terminal hosts receive a size request; native consoles use their work area.
+ public static class ApplicationConsoleWindow {
+  [StructLayout(LayoutKind.Sequential)] struct Rectangle {public int Left,Top,Right,Bottom;}
+  [StructLayout(LayoutKind.Sequential)] struct Monitor {public int Size;public Rectangle Bounds,Work;public uint Flags;}
+  [StructLayout(LayoutKind.Sequential)] struct Coordinate {public short X,Y;}
+  [StructLayout(LayoutKind.Sequential)] struct Font {public uint Index;public Coordinate Size;}
+  [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+  [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
+  [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr handle,out uint mode);
+  [DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr handle,uint mode);
+  [DllImport("kernel32.dll")] static extern bool GetCurrentConsoleFont(IntPtr output,bool maximum,out Font font);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr window);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out Rectangle rectangle);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out Rectangle rectangle);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window,uint flags);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor,ref Monitor info);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
+  public static void EnsureRoom() {
+   try {
+    if(Console.IsInputRedirected||Console.IsOutputRedirected)return;
+    IntPtr window=GetConsoleWindow();Rectangle bounds;
+    if(window==IntPtr.Zero||!IsWindowVisible(window)||!GetWindowRect(window,out bounds)||bounds.Right<=bounds.Left||bounds.Bottom<=bounds.Top) {
+     // Windows Terminal 1.23+ honors XTWINOPS; older hosts can ignore it.
+     // Request only at startup, never on a later user resize or screen change.
+     if(Console.WindowHeight>=40&&Console.WindowWidth>=100)return;
+     IntPtr output=GetStdHandle(-11);uint mode;
+     if(!GetConsoleMode(output,out mode)||!SetConsoleMode(output,mode|4))return;
+     try {Console.Write("\x1b[8;"+Math.Max(40,Console.WindowHeight)+";"+Math.Max(100,Console.WindowWidth)+"t");}
+     finally {SetConsoleMode(output,mode);}
+     return;
+    }
+    if(IsZoomed(window))return;
+    Rectangle client;Font font;Monitor monitor=new Monitor();monitor.Size=Marshal.SizeOf(typeof(Monitor));
+    if(!GetWindowRect(window,out bounds)||!GetClientRect(window,out client)||!GetCurrentConsoleFont(GetStdHandle(-11),false,out font)||font.Size.X<=0||font.Size.Y<=0||!GetMonitorInfo(MonitorFromWindow(window,2),ref monitor))return;
+    int frameWidth=(bounds.Right-bounds.Left)-(client.Right-client.Left);
+    int frameHeight=(bounds.Bottom-bounds.Top)-(client.Bottom-client.Top);
+    // Work excludes the taskbar. Leave a small margin on every side as well.
+    int maxWidth=Math.Min(Console.LargestWindowWidth,(monitor.Work.Right-monitor.Work.Left-frameWidth-16)/font.Size.X);
+    int maxHeight=Math.Min(Console.LargestWindowHeight,(monitor.Work.Bottom-monitor.Work.Top-frameHeight-16)/font.Size.Y);
+    if(maxWidth<20||maxHeight<10)return;
+    int width=Math.Min(maxWidth,Math.Max(100,Console.WindowWidth));
+    int height=Math.Min(maxHeight,Math.Max(40,Console.WindowHeight));
+    if(width>Console.BufferWidth||height>Console.BufferHeight)Console.SetBufferSize(Math.Max(width,Console.BufferWidth),Math.Max(height,Console.BufferHeight));
+    if(width!=Console.WindowWidth||height!=Console.WindowHeight)Console.SetWindowSize(width,height);
+    if(GetWindowRect(window,out bounds)) {
+     int x=Math.Max(monitor.Work.Left+8,Math.Min(bounds.Left,monitor.Work.Right-8-(bounds.Right-bounds.Left)));
+     int y=Math.Max(monitor.Work.Top+8,Math.Min(bounds.Top,monitor.Work.Bottom-8-(bounds.Bottom-bounds.Top)));
+     if(x!=bounds.Left||y!=bounds.Top)SetWindowPos(window,IntPtr.Zero,x,y,0,0,0x15);
+    }
+   } catch { /* A restricted host keeps its existing responsive layout. */ }
+  }
+ }
  public sealed class ApplicationRequest {
   public uint Id {get;internal set;}
   public string Operation {get;internal set;}

@@ -22,7 +22,7 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root,[switch]$NoA
         $prefix='"'+$powerShell+'" -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '
         # Use the user's existing default profile without creating registration
         # files or changing its font, theme, shader, or saved preferences.
-        $arguments='-w new --size 100,34 new-tab --title OptiMiyoo --suppressApplicationTitle '+$prefix+(New-OptiTerminalCommand $EntryPoint $Root -NoAnimation:$NoAnimation)
+        $arguments='-w new --size 100,40 new-tab --title OptiMiyoo --suppressApplicationTitle '+$prefix+(New-OptiTerminalCommand $EntryPoint $Root -NoAnimation:$NoAnimation)
         $client=Start-Process -FilePath $terminal.Source -ArgumentList $arguments -WindowStyle Normal -PassThru
         try {
             if ($client.WaitForExit(3000) -and $client.ExitCode -ne 0) {return $false}

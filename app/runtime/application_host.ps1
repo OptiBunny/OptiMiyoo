@@ -237,6 +237,7 @@ function Invoke-ApplicationHost {
     elseif ($Arguments.ZXConvert) {$Entry='ZX'}
     elseif ($Arguments.PrepareOnion) {$Entry='SD'}
     Initialize-ApplicationSession
+    [OptiMiyoo.ApplicationConsoleWindow]::EnsureRoom()
     $startPage='Main'
     if ($Arguments.StartPage) {$startPage=[string]$Arguments.StartPage}
     $explicitStorage=($Arguments.ContainsKey('Storage') -and $Arguments.Storage -in 'Auto','Zip','Loose','Folders')

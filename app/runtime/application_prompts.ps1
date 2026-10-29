@@ -53,8 +53,14 @@ function Get-ApplicationPromptModel {
             $names=@{Auto='Auto / keep input layout';Zip='ZIPs';Folders='Folders';Loose='Loose files'}
             $lines+=@(('Single games: '+$names[$SingleStorage]),('Playlist media: '+$names[$Storage]))
         }
-        $lines+=@('1. KEEP originals in SRC (default)','2. REMOVE originals after verified success',
-            'Skipped or failed items keep their originals.','B. Back to output settings     Q. Exit')
+        $lines+=@('Finished game files go to DST.',
+            '1. KEEP originals in SRC (default)',
+            '   Leave source files in place.',
+            '2. REMOVE originals after verified success',
+            '   Check saved output before source removal.',
+            'Skipped or failed items keep their originals.',
+            'Choosing 1 or 2 starts the batch.',
+            'B. Back to output settings     Q. Exit')
         if($Invalid){$lines+='Choose 1, 2, B or Q.'}
         return [pscustomobject]@{Title=($title+' / originals');Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
     }
@@ -84,7 +90,7 @@ function Get-ApplicationPromptModel {
     return [pscustomobject]@{Title=($title+' / existing output');Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages}
 }
 
-function Read-ApplicationConsoleChoice($Model) {
+function Read-ApplicationConsoleChoice($Model,$Session=$null) {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
@@ -115,6 +121,10 @@ function Read-ApplicationConsoleChoice($Model) {
         }
         if([Console]::KeyAvailable) {
             $key=[Console]::ReadKey($true)
+            if($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control)) {
+                if($Session){$Session.Stop()}
+                throw [OperationCanceledException]::new('Application cancelled.')
+            }
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return 'B'}
             if(-not $fits) {
@@ -153,7 +163,7 @@ function Invoke-ApplicationPolicyPrompt {
         $invalid=$false;$page=0
         while($true) {
             $model=Get-ApplicationPromptModel @parameters -Page $page -Invalid:$invalid
-            $answer=Read-ApplicationConsoleChoice $model
+            $answer=Read-ApplicationConsoleChoice $model -Session $Session
             if($Kind -eq 'Overwrite' -and $answer -in '<','>') {
                 if($answer -eq '>'){$page=[Math]::Min($model.Pages-1,$model.Page+1)}else{$page=[Math]::Max(0,$model.Page-1)}
                 continue
@@ -174,7 +184,7 @@ function Invoke-ApplicationPolicyPrompt {
         try {if($display){Restore-Display}}
         finally {
             $script:DisplayEffect=$previousEffect
-            if($paused) {
+            if($paused -and -not $Session.CancellationRequested) {
                 if($Session.HasExited){throw 'The isolated application exited before the policy choice could be delivered.'}
                 [void]$Session.ResumeRelay()
             }

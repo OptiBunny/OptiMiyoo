@@ -226,10 +226,12 @@ namespace OptiMiyoo {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CancelIoEx(SafeFileHandle handle,IntPtr overlapped);
   public const int MaximumFrameBytes=1048576;
   private static readonly UTF8Encoding Utf8=new UTF8Encoding(false,true);
-  private readonly object consoleGate=new object(),rpcGate=new object(),inputGate=new object();
+  private readonly object consoleGate=new object(),rpcGate=new object(),inputGate=new object(),eventGate=new object();
   private readonly Queue<ApplicationRequest> requests=new Queue<ApplicationRequest>();
   private readonly AutoResetEvent requestReady=new AutoResetEvent(false);
   private readonly AutoResetEvent inputReady=new AutoResetEvent(false);
+  private int eventWaiters;
+  private bool eventDisposalRequested,eventHandlesClosed;
   private readonly Queue<string> inputQueue=new Queue<string>();
   private int queuedInputCharacters;
   private readonly TerminalSequenceFilter filter=new TerminalSequenceFilter();
@@ -339,9 +341,15 @@ namespace OptiMiyoo {
   }
   private void ValidateToken(){IntPtr token;Check(OpenProcessToken(process,8,out token),"Inspect application token");try{uint returned;IntPtr flag=Marshal.AllocHGlobal(4);try{Check(GetTokenInformation(token,29,flag,4,out returned),"Inspect AppContainer flag");IsAppContainer=Marshal.ReadInt32(flag)==1;}finally{Marshal.FreeHGlobal(flag);}uint bytes;GetTokenInformation(token,30,IntPtr.Zero,0,out bytes);if(bytes<4||bytes>65536)throw new IOException("Cannot verify application capabilities.");IntPtr caps=Marshal.AllocHGlobal((int)bytes);try{Check(GetTokenInformation(token,30,caps,bytes,out returned),"Inspect application capabilities");if(!IsAppContainer||Marshal.ReadInt32(caps)!=0)throw new IOException("Application must have a zero-capability AppContainer token.");}finally{Marshal.FreeHGlobal(caps);}}finally{CloseHandle(token);}}
   private static Thread ThreadFor(ThreadStart action){Thread thread=new Thread(action);thread.IsBackground=true;thread.Start();return thread;}
+  // A relay can outlive its bounded join. Reject late signals/waits, and let
+  // the last admitted waiter close the handles without blocking disposal.
+  private void CloseEventsIfIdle(){if(eventDisposalRequested&&eventWaiters==0&&!eventHandlesClosed){eventHandlesClosed=true;requestReady.Dispose();inputReady.Dispose();}}
+  private void SignalEvent(AutoResetEvent ready){lock(eventGate){if(!eventDisposalRequested)ready.Set();}}
+  private void WaitForEvent(AutoResetEvent ready,int milliseconds){lock(eventGate){if(eventDisposalRequested)return;eventWaiters++;}try{ready.WaitOne(milliseconds);}finally{lock(eventGate){eventWaiters--;CloseEventsIfIdle();}}}
+  private void DisposeEvents(){lock(eventGate){eventDisposalRequested=true;CloseEventsIfIdle();}}
   private void SaveConsole(){Check(GetConsoleMode(GetStdHandle(-10),out previousInputMode),"Read host input mode");Check(GetConsoleMode(GetStdHandle(-11),out previousOutputMode),"Read host output mode");previousControlC=Console.TreatControlCAsInput;previousCursor=Console.CursorVisible;previousTitle=Console.Title;consoleSaved=true;Check(SetConsoleMode(GetStdHandle(-10),(previousInputMode|0x80u)&~0x40u),"Disable host QuickEdit");Check(SetConsoleMode(GetStdHandle(-11),previousOutputMode|4u),"Enable host terminal output");Console.TreatControlCAsInput=true;Console.Title="OptiMiyoo";}
-  private void Fail(string reason){lock(rpcGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);requestReady.Set();}
-  public void Stop(){CancellationRequested=true;stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);requestReady.Set();}
+  private void Fail(string reason){lock(rpcGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
+  public void Stop(){CancellationRequested=true;stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   private void OutputLoop(){
    try{byte[] bytes=new byte[8192];char[] chars=new char[8192];Decoder decoder=Utf8.GetDecoder();int count;Stopwatch rate=Stopwatch.StartNew();long received=0;
     while(true){uint available;if(!PeekNamedPipe(terminalReadHandle,IntPtr.Zero,0,IntPtr.Zero,out available,IntPtr.Zero))break;if(available==0){lock(consoleGate){lastDrained=Stopwatch.GetTimestamp();}Thread.Sleep(5);continue;}count=terminalOutput.Read(bytes,0,(int)Math.Min((uint)bytes.Length,available));if(count==0)break;Interlocked.Exchange(ref outputInFlight,1);int length=decoder.GetChars(bytes,0,count,chars,0);received+=count;if(rate.ElapsedMilliseconds>=1000){received=0;rate.Restart();}if(received>16777216)throw new IOException("Application terminal output limit exceeded.");lock(consoleGate){lastOutput=Stopwatch.GetTimestamp();if(!paused&&!stopping){string safe=filter.Feed(new string(chars,0,length));if(safe.Length!=0)WriteTerminal(safe);}else filter.Reset();Interlocked.Exchange(ref outputInFlight,0);}}
@@ -349,9 +357,9 @@ namespace OptiMiyoo {
   }
   // Never write the ConPTY pipe while holding the trusted prompt/display gate.
   // A stalled consumer gets bounded buffering, then termination, not a frozen UI.
-  private void SendKeys(string text){if(text==null||text.Length==0)return;bool overflow=false;lock(inputGate){if(stopping||paused)return;if(text.Length>8192-queuedInputCharacters)overflow=true;else{inputQueue.Enqueue(text);queuedInputCharacters+=text.Length;}}if(overflow){Fail("Application stopped consuming keyboard input.");return;}inputReady.Set();}
+  private void SendKeys(string text){if(text==null||text.Length==0)return;bool overflow=false;lock(inputGate){if(stopping||paused)return;if(text.Length>8192-queuedInputCharacters)overflow=true;else{inputQueue.Enqueue(text);queuedInputCharacters+=text.Length;}}if(overflow){Fail("Application stopped consuming keyboard input.");return;}SignalEvent(inputReady);}
   private void ClearQueuedInput(){lock(inputGate){inputQueue.Clear();queuedInputCharacters=0;}}
-  private void InputWriterLoop(){try{while(!stopping&&!HasExited){string text=null;lock(inputGate){if(!paused&&inputQueue.Count>0){text=inputQueue.Dequeue();queuedInputCharacters-=text.Length;}}if(text==null){inputReady.WaitOne(50);continue;}keyWriter.Write(text);keyWriter.Flush();}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard channel failed.");}}
+  private void InputWriterLoop(){try{while(!stopping&&!HasExited){string text=null;lock(inputGate){if(!paused&&inputQueue.Count>0){text=inputQueue.Dequeue();queuedInputCharacters-=text.Length;}}if(text==null){WaitForEvent(inputReady,50);continue;}keyWriter.Write(text);keyWriter.Flush();}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard channel failed.");}}
   private static string KeyText(ConsoleKeyInfo key){
    bool control=(key.Modifiers&ConsoleModifiers.Control)!=0,alt=(key.Modifiers&ConsoleModifiers.Alt)!=0;string value=null;
    switch(key.Key){case ConsoleKey.Enter:value="\r";break;case ConsoleKey.Backspace:value="\x7f";break;case ConsoleKey.Escape:value="\x1b";break;case ConsoleKey.UpArrow:value="\x1b[A";break;case ConsoleKey.DownArrow:value="\x1b[B";break;case ConsoleKey.RightArrow:value="\x1b[C";break;case ConsoleKey.LeftArrow:value="\x1b[D";break;case ConsoleKey.Home:value="\x1b[H";break;case ConsoleKey.End:value="\x1b[F";break;case ConsoleKey.Delete:value="\x1b[3~";break;case ConsoleKey.Insert:value="\x1b[2~";break;case ConsoleKey.PageUp:value="\x1b[5~";break;case ConsoleKey.PageDown:value="\x1b[6~";break;default:if(key.KeyChar!=0)value=key.KeyChar.ToString();break;}
@@ -374,10 +382,10 @@ namespace OptiMiyoo {
   }
   private void RequestLoop(){
    try{while(!stopping){Stopwatch deadline=new Stopwatch();byte[] prefix=ReadExact(4,true,deadline);if(prefix==null){if(!HasExited){WaitForExit(250);if(!HasExited)throw new EndOfStreamException("Application closed its broker channel early.");}break;}uint length=BitConverter.ToUInt32(prefix,0);if(length<7||length>MaximumFrameBytes)throw new IOException("Invalid broker frame length.");byte[] body=ReadExact((int)length,false,deadline);uint id=BitConverter.ToUInt32(body,0);int opLength=BitConverter.ToUInt16(body,4);if(opLength<1||opLength>64||6+opLength>body.Length)throw new IOException("Invalid broker operation length.");string op=Utf8.GetString(body,6,opLength);ValidateOperation(op);string payload=Utf8.GetString(body,6+opLength,body.Length-6-opLength);
-    lock(rpcGate){if(id==0||id!=lastRequest+1||lastRequest==UInt32.MaxValue||pendingResponse!=0||requests.Count!=0||!operations.Contains(op))throw new IOException("Unknown, concurrent or replayed broker request.");lastRequest=id;pendingResponse=id;requests.Enqueue(new ApplicationRequest{Id=id,Operation=op,Payload=payload});}requestReady.Set();
-   }}catch(Exception){if(!stopping&&!HasExited)Fail("Application sent an invalid broker request or closed its channel.");}finally{requestReady.Set();}
+    lock(rpcGate){if(id==0||id!=lastRequest+1||lastRequest==UInt32.MaxValue||pendingResponse!=0||requests.Count!=0||!operations.Contains(op))throw new IOException("Unknown, concurrent or replayed broker request.");lastRequest=id;pendingResponse=id;requests.Enqueue(new ApplicationRequest{Id=id,Operation=op,Payload=payload});}SignalEvent(requestReady);
+   }}catch(Exception){if(!stopping&&!HasExited)Fail("Application sent an invalid broker request or closed its channel.");}finally{SignalEvent(requestReady);}
   }
-  public ApplicationRequest ReadRequest(int milliseconds){if(milliseconds<0||milliseconds>1000)throw new ArgumentOutOfRangeException("milliseconds");lock(rpcGate){if(requests.Count>0)return requests.Dequeue();}requestReady.WaitOne(milliseconds);lock(rpcGate){if(requests.Count>0)return requests.Dequeue();return null;}}
+  public ApplicationRequest ReadRequest(int milliseconds){if(milliseconds<0||milliseconds>1000)throw new ArgumentOutOfRangeException("milliseconds");lock(rpcGate){if(requests.Count>0)return requests.Dequeue();}WaitForEvent(requestReady,milliseconds);lock(rpcGate){if(requests.Count>0)return requests.Dequeue();return null;}}
   public void Respond(uint id,bool success,string payload){
    byte[] data=Utf8.GetBytes(payload??"null");if(data.Length>MaximumFrameBytes-5)throw new IOException("Broker response exceeds its limit.");lock(rpcGate){if(id==0||pendingResponse!=id)throw new InvalidOperationException("Response does not match the outstanding request.");if(stopping||HasExited)throw new IOException("Application session ended before its response.");byte[] header=new byte[9];Buffer.BlockCopy(BitConverter.GetBytes((uint)(data.Length+5)),0,header,0,4);Buffer.BlockCopy(BitConverter.GetBytes(id),0,header,4,4);header[8]=success?(byte)1:(byte)0;try{Exception writeError=null;ManualResetEvent written=new ManualResetEvent(false);ThreadFor(delegate{try{responseOutput.Write(header,0,header.Length);responseOutput.Write(data,0,data.Length);responseOutput.Flush();}catch(Exception error){writeError=error;}finally{written.Set();}});if(!written.WaitOne(10000)){Fail("Application did not read its broker response.");written.WaitOne(3000);throw new IOException(Failure);}written.Dispose();if(writeError!=null)throw writeError;pendingResponse=0;}catch{Fail("Application broker response channel failed.");throw;}}
   }
@@ -387,7 +395,9 @@ namespace OptiMiyoo {
    for(int retry=0;;retry++){try{Policy("DeleteOwnedVerified",RootPath,Path.GetDirectoryName(RootPath),rootIdentity,cleanupEntryLimit);break;}catch(Win32Exception e){if(retry>=7||(e.NativeErrorCode!=5&&e.NativeErrorCode!=32&&e.NativeErrorCode!=33&&e.NativeErrorCode!=145))throw;Thread.Sleep(Math.Min(100*(1<<retry),1000));if(!Directory.Exists(RootPath))break;}}
   }
   public void Dispose(){
-   if(disposed)return;disposed=true;stopping=true;paused=true;requestReady.Set();inputReady.Set();ClearQueuedInput();if(job!=IntPtr.Zero)TerminateJobObject(job,137);if(process!=IntPtr.Zero){if(!HasExited)TerminateProcess(process,137);WaitForExit(5000);}
+   lock(eventGate){if(disposed)return;disposed=true;}
+   try{
+   stopping=true;paused=true;SignalEvent(requestReady);SignalEvent(inputReady);ClearQueuedInput();if(job!=IntPtr.Zero)TerminateJobObject(job,137);if(process!=IntPtr.Zero){if(!HasExited)TerminateProcess(process,137);WaitForExit(5000);}
    if(terminalInput!=null){try{CancelIoEx(terminalInput.SafeFileHandle,IntPtr.Zero);}catch{}}
    if(terminalInput!=null){try{terminalInput.Dispose();}catch{}}if(requestInput!=null){try{requestInput.Dispose();}catch{}}if(responseOutput!=null){try{responseOutput.Dispose();}catch{}}
    if(pseudo!=IntPtr.Zero){ClosePseudoConsole(pseudo);pseudo=IntPtr.Zero;}if(terminalOutput!=null){try{terminalOutput.Dispose();}catch{}}
@@ -395,6 +405,7 @@ namespace OptiMiyoo {
    Close(ref process);Close(ref job);if(sid!=IntPtr.Zero){FreeSid(sid);sid=IntPtr.Zero;}if(profile!=null){int hr=DeleteAppContainerProfile(profile);for(int retry=0;hr<0 && retry<3;retry++){Thread.Sleep(50*(1<<retry));hr=DeleteAppContainerProfile(profile);}if(hr<0)CleanupWarning="Application profile cleanup failed ("+hr.ToString("X8")+").";profile=null;}
    try{Cleanup();}catch(Exception e){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+e.Message+" Retained application scratch: "+RootPath;}finally{foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
    if(consoleSaved){lock(consoleGate){try{WriteTerminal("\x1b[0m\x1b[r\x1b[?25h");Console.CursorVisible=previousCursor;Console.TreatControlCAsInput=previousControlC;Console.Title=previousTitle;SetConsoleMode(GetStdHandle(-10),previousInputMode);SetConsoleMode(GetStdHandle(-11),previousOutputMode);}catch{}consoleSaved=false;}}
+   }finally{DisposeEvents();}
   }
  }
 }

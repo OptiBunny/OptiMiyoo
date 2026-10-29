@@ -167,7 +167,7 @@ function Get-ApplicationBrokerRelative([string]$Path,[string]$Root) {
     return $relative
 }
 
-function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$RequireSingleLink,[int]$MaximumEntries=100000,[switch]$MetadataOnly,[hashtable]$ExpectedFiles) {
+function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$RequireSingleLink,[int]$MaximumEntries=100000,[switch]$MetadataOnly,[hashtable]$ExpectedFiles,[hashtable]$BorrowedSourceLeases) {
     Initialize-ApplicationBrokerNative
     $files=@{};$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0;$buffer=$null
     if($MaximumEntries -lt 1 -or $MaximumEntries -gt 1000000){throw 'Invalid broker snapshot entry limit.'}
@@ -194,8 +194,13 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
                     $relative=Get-ApplicationBrokerRelative $entry.FullName $Root
                     if($entry.PSIsContainer){$directories.Add($relative);$pending.Enqueue($entry.FullName);if($CopyTo){[void][IO.Directory]::CreateDirectory((Join-Path $CopyTo $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)))};continue}
                     if($files.ContainsKey($relative)){throw 'Broker snapshot has colliding names.'}
-                    $lease=Open-SourcePolicyReadLease $entry.FullName $Root;$output=$null;$sha=$null
+                    # Final cleanup already owns eligible CUE deletion handles.
+                    # A second read handle would conflict with their DELETE access.
+                    $borrowed=$BorrowedSourceLeases -and $BorrowedSourceLeases.ContainsKey($entry.FullName)
+                    $lease=$null;if($borrowed){$lease=$BorrowedSourceLeases[$entry.FullName]}else{$lease=Open-SourcePolicyReadLease $entry.FullName $Root}
+                    $output=$null;$sha=$null
                     try {
+                        if($borrowed){$lease.Stream.Position=0}
                         $links=[OptiMiyoo.ApplicationBrokerLease]::LinkCount($lease.Stream.SafeFileHandle)
                         if($RequireSingleLink -and $links -ne 1){throw 'Broker output contains a hard link.'}
                         if($null -ne $ExpectedFiles -and (-not $ExpectedFiles.ContainsKey($relative) -or $ExpectedFiles[$relative].Length -ne $lease.Stream.Length)){throw 'Staged snapshot has unexpected file names or lengths.'}
@@ -209,7 +214,7 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
                         if($output){$output.Flush($true);$output.Dispose();$output=$null;[IO.File]::SetLastWriteTimeUtc($target,$entry.LastWriteTimeUtc)}
                         $files[$relative]=[pscustomobject]@{Hash=$hash;Length=$length;Links=$links;LastWriteTimeUtc=$entry.LastWriteTimeUtc}
                         $bytes+=$length
-                    } finally {if($output){$output.Dispose()};if($sha){$sha.Dispose()};$lease.Dispose()}
+                    } finally {if($output){$output.Dispose()};if($sha){$sha.Dispose()};if($borrowed){$lease.Stream.Position=0}else{$lease.Dispose()}}
                 }
             } finally {$directoryLease.Dispose()}
         }
@@ -467,7 +472,7 @@ function Start-ApplicationBrokerBatch {
         foreach($sourceJob in $raw){
             $sourceJob | Add-Member NoteProperty Profile $profile
             $sourceJob | Add-Member NoteProperty OutputPlan $null
-            $job=New-ApplicationBrokerJob $sourceJob.Source $sourceJob $null
+            $job=New-ApplicationBrokerJob $sourceJob.SourceKey $sourceJob $null
             try {
                 if($sourceJob.Error){throw $sourceJob.Error}
                 & $module {param($stem)Assert-GameStem $stem} $sourceJob.Stem
@@ -519,7 +524,14 @@ function Start-ApplicationBrokerBatch {
         }
     }
     if($jobs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
-    $sourcePlan=& $sourceModule {param($src,$policy)New-SourcePolicyPlan $src $policy} $src $SourcePolicy
+    $descriptorSnapshot=$null
+    if($SourcePolicy -eq 'Remove') {
+        $descriptorSnapshot=@{}
+        foreach($relative in $state.SourceSnapshot.Files.Keys) {
+            if([IO.Path]::GetExtension($relative) -ieq '.cue'){$descriptorSnapshot[(Join-Path $src $relative)]=$state.SourceSnapshot.Files[$relative]}
+        }
+    }
+    $sourcePlan=& $sourceModule {param($src,$policy,$descriptors)New-SourcePolicyPlan $src $policy -DescriptorSnapshot $descriptors} $src $SourcePolicy $descriptorSnapshot
     $jobMap=@{};$conflicts=@{}
     foreach($job in $jobs){
         if(-not $job.BlockedReason){try{Assert-ApplicationBrokerJobPaths $state $Operation $job $archives}catch{$job.BlockedReason=$_.Exception.Message}}
@@ -562,10 +574,18 @@ function Set-ApplicationBrokerOverwrite {
     else {$job.Decision=$Choice}
 }
 
-function Assert-ApplicationBrokerManifest([hashtable]$Expected,[hashtable]$Actual,$Batch,$ReceiptStore) {
+function Assert-ApplicationBrokerManifest([hashtable]$Expected,[hashtable]$Actual,$Batch,$ReceiptStore,[switch]$ExactNames) {
     if($Expected.Count -ne $Actual.Count){throw 'Staged output file count does not match the independent source plan.'}
+    $actualNames=$null
+    if($ExactNames){
+        # ZIP member names survive publication verbatim. CUE and playlist
+        # references must still resolve on the case-sensitive destination.
+        $actualNames=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach($name in $Actual.Keys){[void]$actualNames.Add($name)}
+    }
     foreach($name in $Expected.Keys){
         if(-not $Actual.ContainsKey($name)){throw 'Staged output is missing an expected member.'}
+        if($ExactNames -and -not $actualNames.Contains($name)){throw 'Staged ZIP member spelling does not match the independent source plan.'}
         $expectedFile=$Expected[$name];$actualFile=$Actual[$name]
         if($expectedFile.Converter){
             $matching=@($ReceiptStore.NativeReceipts | Where-Object {
@@ -665,7 +685,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                     if($expected.Count -ne 1){throw 'Single-file output plan has multiple members.'}
                     $name=@($expected.Keys)[0];$actual[$name]=$copied
                 }
-                Assert-ApplicationBrokerManifest $expected $actual $Batch $ReceiptStore
+                Assert-ApplicationBrokerManifest $expected $actual $Batch $ReceiptStore -ExactNames:($Job.DataKind -eq 'Zip')
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$false;Hash=$copied.Hash})
             }
         }
@@ -728,7 +748,7 @@ function Complete-ApplicationBrokerBatch {
     $batch.Completed=$true
     $src=Join-Path $state.OriginalRoot 'SRC';$dst=Join-Path $state.OriginalRoot 'DST'
     $results=New-Object 'System.Collections.Generic.List[object]'
-    $referenceIndex=$null
+    $referenceIndex=$null;$sourceInventoryGuard=$null;$sourceCleanupContext=$null
     try {
         Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
         Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
@@ -760,11 +780,23 @@ function Complete-ApplicationBrokerBatch {
                 }
             }
         }
-        # A new or changed CUE/input during the batch can change shared ownership.
-        # Reject cleanup for the entire batch before considering any removals.
-        try {Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'}
-        catch {$batch.SourcePlan.BlockReason='Original source inventory changed; all originals kept.'}
-        & $batch.SourceModule {param($plan)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalText $message)}}} $batch.SourcePlan
+        # Hold every frozen descriptor before the final inventory. Notifications
+        # cover namespace changes; verified leases prevent delayed CUE writes.
+        # Cleanup borrows this context without reopening tracked deletion leases.
+        if($batch.SourcePolicy -eq 'Remove' -and -not $batch.SourcePlan.BlockReason){
+            try {
+                $sourceInventoryGuard=Open-SourcePolicyInventoryGuard $src
+                $sourceCleanupContext=& $batch.SourceModule {param($plan,$guard)Open-SourcePolicyCleanupContext $plan -InventoryGuard $guard} $batch.SourcePlan $sourceInventoryGuard
+            } catch {$batch.SourcePlan.BlockReason='Source inventory or CUE descriptors could not be protected; all originals kept. '+$_.Exception.Message}
+        }
+        if(-not $batch.SourcePlan.BlockReason){
+            try {
+                $descriptorLeases=$null;if($sourceCleanupContext){$descriptorLeases=$sourceCleanupContext.ReferenceLeases}
+                Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src -BorrowedSourceLeases $descriptorLeases) 'Original source tree'
+            }
+            catch {$batch.SourcePlan.BlockReason='Original source inventory changed; all originals kept.'}
+        }
+        & $batch.SourceModule {param($plan,$context)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalText $message)}} -CleanupContext $context} $batch.SourcePlan $sourceCleanupContext
         foreach($job in $batch.Jobs.Values){
             if(-not $ids.Contains($job.JobId)){
                 $detail='The worker did not complete this input; original kept.'
@@ -775,7 +807,7 @@ function Complete-ApplicationBrokerBatch {
         }
         foreach($result in $results){
             $job=$batch.Jobs[$result.JobId];$playlist='';$destination='';$diskImages=0;$sourceName=$job.SourceKey
-            if($batch.Operation -in 'C64','ZX'){$sourceName=$job.SourceJob.Source}
+            if($batch.Operation -in 'Playlist','C64','ZX'){$sourceName=$job.SourceJob.Source}
             if($job.Plan){
                 if($batch.Operation -eq 'Playlist'){
                     $diskImages=@($job.Plan.DiskNames).Count;$destination=$job.Plan.RelativeData
@@ -799,7 +831,16 @@ function Complete-ApplicationBrokerBatch {
             [pscustomobject]@{State=$_.State;Reason=$reason}
         })
         return [pscustomobject]@{BatchId=$BatchId;Operation=$batch.Operation;SourcePolicy=$batch.SourcePolicy;Results=$results.ToArray();Sources=$sourceStates;Written=@($results | Where-Object {$_.Result -in 'Written','Overwritten'}).Count;Failed=@($results | Where-Object {$_.Result -eq 'Failed'}).Count;Removed=@($sourceStates | Where-Object {$_.State -eq 'Removed'}).Count;Kept=@($sourceStates | Where-Object {$_.State -ne 'Removed'}).Count;RemovalFailures=@($sourceStates | Where-Object {$_.State -eq 'Failed'}).Count}
-    } finally {if($referenceIndex){& $batch.Module {param($index)Close-PlaylistReferenceIndex $index} $referenceIndex};$Session.ActiveBatch=$null}
+    } finally {
+        try {if($sourceCleanupContext){$sourceCleanupContext.Dispose()}}
+        finally {
+            try {if($sourceInventoryGuard){$sourceInventoryGuard.Dispose()}}
+            finally {
+                try {if($referenceIndex){& $batch.Module {param($index)Close-PlaylistReferenceIndex $index} $referenceIndex}}
+                finally {$Session.ActiveBatch=$null}
+            }
+        }
+    }
 }
 
 function Close-ApplicationBrokerSession($Session) {

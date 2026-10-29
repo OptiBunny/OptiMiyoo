@@ -74,7 +74,7 @@ function New-ApplicationSdSession {
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'
     if($originalPrefix.Equals($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $originalPrefix.StartsWith($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $workPrefix.StartsWith($originalPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'SD staging must be separate from the selected SD root.'}
     if(-not [IO.Directory]::Exists($work)){throw 'SD staging must already exist and belong to the application session.'}
-    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;BackupRoot=$null}
+    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
     $workLease=$null
     try {
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
@@ -166,8 +166,13 @@ function Complete-ApplicationSdSession {
                 if(-not $state.BackupRoot){$state.BackupRoot=Join-Path $state.OriginalRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))}
                 $backup=Join-Path $state.BackupRoot $file.Folder
                 Assert-PlainOnionPath $backup $state.OriginalRoot;[void][IO.Directory]::CreateDirectory($backup)
-                $backupLease=[OptiMiyoo.OnionPathLease]::Open((Join-Path $backup 'config.json'),$state.OriginalRoot,$false,$true,$true)
+                $backupPath=Join-Path $backup 'config.json'
+                $backupLease=[OptiMiyoo.OnionPathLease]::Open($backupPath,$state.OriginalRoot,$false,$true,$true)
+                # Creating a filename is not proof of a recoverable backup. Keep
+                # failed or partial writes explicitly excluded from recovery advice.
+                $backupRecord=[pscustomobject]@{System=$file.Folder;Path=$backupPath};$state.UnverifiedBackups.Add($backupRecord)
                 & $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'SD backup'} $backupLease.Stream $file.Bytes
+                [void]$state.UnverifiedBackups.Remove($backupRecord);$state.VerifiedBackups.Add($backupRecord)
                 $writeStarted=$true
                 & $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'Updated config'} $writeLease.Stream $file.Expected
                 $changed++;$results.Add([pscustomobject]@{System=$file.Folder;State='Updated'})
@@ -175,14 +180,18 @@ function Complete-ApplicationSdSession {
                 $failed++
                 if($writeStarted -and $writeLease) {
                     try{& $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'Restored config'} $writeLease.Stream $file.Bytes;$restored=$true}
-                    catch{throw ('SD restoration failed; restore config.json from '+(ConvertTo-SafeExternalText $state.BackupRoot)+' before using this card.')}
+                    catch{
+                        $recovery='SD restoration failed; restore '+(ConvertTo-SafeExternalText $file.Path)+' from verified backup '+(ConvertTo-SafeExternalText $backupPath)+' before using this card.'
+                        foreach($unverified in $state.UnverifiedBackups){$recovery+=' Do not restore from incomplete or unverified backup: '+(ConvertTo-SafeExternalText $unverified.Path)+'.'}
+                        throw $recovery
+                    }
                 }
                 $result='Kept';if($restored){$result='Restored'}
                 $results.Add([pscustomobject]@{System=$file.Folder;State=$result})
             }finally{if($backupLease){$backupLease.Dispose()};if($writeLease){$writeLease.Dispose()}}
         }
         if($Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}
-        return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;BackupRoot=$state.BackupRoot;Results=$results.ToArray()}
+        return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;BackupRoot=$state.BackupRoot;VerifiedBackups=$state.VerifiedBackups.ToArray();UnverifiedBackups=$state.UnverifiedBackups.ToArray();Results=$results.ToArray()}
     }finally{foreach($lease in $stagedLeases){$lease.Dispose()}}
 }
 
@@ -205,9 +214,13 @@ function Get-ApplicationSdResultLines {
         if ($status -eq 'Kept') {$status='Unchanged'}
         ConvertTo-ApplicationPromptPath ($item.System+': '+$status)
     }
-    if ($Result.BackupRoot) {
-        'Original configs saved in:'
-        ConvertTo-ApplicationPromptPath $Result.BackupRoot
+    if ($Result.VerifiedBackups) {
+        'Verified original config backups:'
+        foreach($backup in $Result.VerifiedBackups){ConvertTo-ApplicationPromptPath ($backup.System+': '+$backup.Path)}
+    }
+    if ($Result.UnverifiedBackups) {
+        'Incomplete or unverified backups; do not restore:'
+        foreach($backup in $Result.UnverifiedBackups){ConvertTo-ApplicationPromptPath ($backup.System+': '+$backup.Path)}
     }
 }
 
@@ -277,7 +290,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
 }
 
 function Read-ApplicationSdConsolePath {
-    param([string]$InitialText='', [string]$ErrorMessage='')
+    param([string]$InitialText='', [string]$ErrorMessage='', $Session=$null)
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
     $title='Onion SD setup';$prompt='SD drive or folder (for example E:\) / Esc: Back'
     if ($ErrorMessage) {$prompt=$ErrorMessage}
@@ -300,6 +313,10 @@ function Read-ApplicationSdConsolePath {
         if($script:UiVT -and $dirty){Draw-MenuPanel $title $rows $prompt $text $text.Length 'wait';$dirty=$false}
         if([Console]::KeyAvailable) {
             $key=[Console]::ReadKey($true)
+            if($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control)) {
+                if($Session){$Session.Stop()}
+                throw [OperationCanceledException]::new('Application cancelled.')
+            }
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return $null}
             if($script:UiVT -and -not $layout.Fits){continue}
@@ -325,7 +342,7 @@ function Invoke-ApplicationSdFolderPrompt {
         $script:DisplayEffect=$DisplayEffect
         Initialize-Display;$display=$true;$text='';$message=''
         while ($true) {
-            $selected=Read-ApplicationSdConsolePath -InitialText $text -ErrorMessage $message
+            $selected=Read-ApplicationSdConsolePath -InitialText $text -ErrorMessage $message -Session $Session
             if ($null -eq $selected) {break}
             $choice=Resolve-ApplicationSdInput $selected
             $text=$selected
@@ -340,7 +357,7 @@ function Invoke-ApplicationSdFolderPrompt {
         }
     }finally {
         try{if($display){Restore-Display}}
-        finally{$script:DisplayEffect=$previousEffect;if($paused){if($Session.HasExited){throw 'The isolated application exited during SD selection.'};[void]$Session.ResumeRelay()}}
+        finally{$script:DisplayEffect=$previousEffect;if($paused -and -not $Session.CancellationRequested){if($Session.HasExited){throw 'The isolated application exited during SD selection.'};[void]$Session.ResumeRelay()}}
     }
     return $selected
 }

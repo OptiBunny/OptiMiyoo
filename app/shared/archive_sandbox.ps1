@@ -116,6 +116,63 @@ internal static class ArchivePayloadWorker {
     }
 }
 
+function Assert-ArchiveSandboxMemberBudget($Archive) {
+    if($Archive.Entries.Count -gt 20000){throw 'ZIP entry count exceeds the supported limit.'}
+    # A metadata-sized ZIP can otherwise amplify short components into millions
+    # of full parent strings. Bound repeated construction as well as storage
+    # before allocating name sets, splitting components, or applying regexes.
+    $separators=[char[]]@('/','\');$totalComponents=0L;$totalPrefixCharacters=0L
+    foreach($entry in $Archive.Entries) {
+        $name=[string]$entry.FullName
+        if($name.Length -gt 4096){throw 'ZIP entry name exceeds the safe path-length limit.'}
+        $directory=$name.EndsWith('/') -or $name.EndsWith('\')
+        $end=$name.Length;if($directory){$end--}
+        $components=1
+        for($separator=$name.IndexOfAny($separators);$separator -ge 0 -and $separator -lt $end;$separator=$name.IndexOfAny($separators,$separator+1)) {
+            $components++;$totalPrefixCharacters+=$separator
+            if($components -gt 128){throw 'ZIP member nesting exceeds the supported 128-component limit.'}
+            if($totalPrefixCharacters -gt 16777216){throw 'ZIP namespace exceeds the supported parent-path character limit.'}
+        }
+        if($directory){$totalPrefixCharacters+=$end}
+        $totalComponents+=$components
+        if($totalComponents -gt 200000){throw 'ZIP namespace exceeds the supported component limit.'}
+        if($totalPrefixCharacters -gt 16777216){throw 'ZIP namespace exceeds the supported parent-path character limit.'}
+    }
+}
+
+function Assert-ArchiveSandboxMemberNames($Archive,[switch]$RequireConsistentDirectoryCase) {
+    # Hash manifests and extracted files must describe the same unambiguous
+    # Windows namespace. A duplicate must never replace an earlier hash, and
+    # directories need validation even though they have no payload hash.
+    Assert-ArchiveSandboxMemberBudget $Archive
+    $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $files=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $directories=New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($entry in $Archive.Entries) {
+        $name=[string]$entry.FullName
+        $directory=$name.EndsWith('/') -or $name.EndsWith('\')
+        $normalized=$name.Replace('\','/')
+        if($directory){$normalized=$normalized.Substring(0,$normalized.Length-1)}
+        $parts=$normalized.Split('/')
+        foreach($part in $parts) {
+            if([string]::IsNullOrEmpty($part) -or $part -in '.','..' -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part -match '[<>:"|?*\x00-\x1f]' -or $part -match '^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)') {throw 'ZIP entry has an unsafe Windows path component.'}
+        }
+        if(-not $seen.Add($normalized)){throw 'Unsafe or duplicate ZIP entry path.'}
+        $directoryCount=$parts.Length-1;if($directory){$directoryCount=$parts.Length}
+        for($partIndex=1;$partIndex -le $directoryCount;$partIndex++) {
+            $directoryName=$parts[0..($partIndex-1)] -join '/'
+            if($files.Contains($directoryName)){throw 'ZIP file and directory paths overlap.'}
+            if($directories.ContainsKey($directoryName)) {
+                if($RequireConsistentDirectoryCase -and $directories[$directoryName] -cne $directoryName){throw 'ZIP directory names differ only by letter case.'}
+            } else {$directories.Add($directoryName,$directoryName)}
+        }
+        if(-not $directory) {
+            if($directories.ContainsKey($normalized)){throw 'ZIP file and directory paths overlap.'}
+            [void]$files.Add($normalized)
+        }
+    }
+}
+
 function Assert-ArchiveSandboxOutputPaths($Archive,[string]$Operation,[string]$Destination) {
     if($Operation -notin 'Extract','File'){return}
     if([string]::IsNullOrWhiteSpace($Destination)){throw 'An extraction destination is required.'}
@@ -143,19 +200,22 @@ function Invoke-ArchiveSandbox {
           [ValidateSet('Hash','Extract','Read','File')][string]$Operation='Hash',
           [int]$EntryIndex=-1,[string]$Destination,[long]$MaximumBytes=16777216,[scriptblock]$Progress=$null)
     if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationArchive @PSBoundParameters)}
-    Assert-ArchiveSandboxOutputPaths $Archive $Operation $Destination
-    Initialize-NativeSandbox;Initialize-NativeTextCapture
-    $exeBytes=Get-ArchiveSandboxExecutableBytes
     $toolRoot=Join-Path (Get-OptiScratchRoot) ('oas_'+[Guid]::NewGuid().ToString('N').Substring(0,16))
     $job=$null;$readLease=$null;$stdout=$null;$stderr=$null;$destinationLease=$null;$toolParentLease=$null;$toolLease=$null;$toolCreated=$false;$toolIdentity=$null
     try {
+        $readLease=Open-SourcePolicyReadLease $ZipPath ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ZipPath)))
+        Assert-ArchiveBudget -Stream $readLease.Stream -Profile $Profile
+        # Selected reads also originate from name-based lookups. Reject an
+        # ambiguous archive before any operation can describe one of its members.
+        Assert-ArchiveSandboxMemberNames $Archive -RequireConsistentDirectoryCase:($Operation -eq 'Extract')
+        Assert-ArchiveSandboxOutputPaths $Archive $Operation $Destination
+        Initialize-NativeSandbox;Initialize-NativeTextCapture
+        $exeBytes=Get-ArchiveSandboxExecutableBytes
         $toolParentLease=Open-SourcePolicyDirectoryLease (Get-OptiScratchRoot)
         New-SourcePolicyOwnedDirectory $toolRoot;$toolCreated=$true
         $toolLease=Open-SourcePolicyDirectoryLease $toolRoot
         $toolIdentity=$toolLease.DirectoryIdentity
         $exe=Join-Path $toolRoot 'archive.exe';[IO.File]::WriteAllBytes($exe,$exeBytes)
-        $readLease=Open-SourcePolicyReadLease $ZipPath ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ZipPath)))
-        Assert-ArchiveBudget -Stream $readLease.Stream -Profile $Profile
         $checksums=Get-ZipChecksums $ZipPath $Archive.Entries.Count
         if($EntryIndex -lt -1 -or $EntryIndex -ge $Archive.Entries.Count) {throw 'Invalid ZIP entry selection.'}
         if($Operation -in 'Read','File' -and ($EntryIndex -lt 0 -or $MaximumBytes -lt 1 -or $Archive.Entries[$EntryIndex].Length -gt $MaximumBytes)) {throw 'ZIP entry exceeds its supported size limit.'}
@@ -219,23 +279,11 @@ function Invoke-ArchiveSandbox {
             [void][IO.Directory]::CreateDirectory($Destination)
             $destinationLease=Open-SourcePolicyDirectoryLease $Destination
             $prefix=[IO.Path]::GetFullPath($Destination).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-            $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-            $directoryNames=New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
             foreach($entry in $Archive.Entries) {
                 $normalized=$entry.FullName.Replace('\','/').TrimEnd('/')
-                $parts=$normalized.Split('/')
-                foreach($part in $parts) {
-                    if([string]::IsNullOrEmpty($part) -or $part -in '.','..' -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part -match '[<>:"|?*\x00-\x1f]' -or $part -match '^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)') {throw 'ZIP entry has an unsafe Windows path component.'}
-                }
-                $directoryCount=$parts.Length-1;if($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')){$directoryCount=$parts.Length}
-                for($partIndex=1;$partIndex -le $directoryCount;$partIndex++) {
-                    $directoryName=$parts[0..($partIndex-1)] -join '/'
-                    if($directoryNames.ContainsKey($directoryName)) {if($directoryNames[$directoryName] -cne $directoryName){throw 'ZIP directory names differ only by letter case.'}}
-                    else {$directoryNames.Add($directoryName,$directoryName)}
-                }
                 $relative=$normalized.Replace('/',[IO.Path]::DirectorySeparatorChar)
                 $target=[IO.Path]::GetFullPath((Join-Path $Destination $relative))
-                if([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or -not $target.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or -not $seen.Add($target)) {throw 'Unsafe or duplicate ZIP entry path.'}
+                if([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or -not $target.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'ZIP entry leaves its extraction folder.'}
                 Assert-PlainOutputParents $target $Destination
                 if($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {[void][IO.Directory]::CreateDirectory($target)}
             }

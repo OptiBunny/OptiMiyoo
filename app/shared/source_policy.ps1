@@ -40,6 +40,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Threading;
 using Microsoft.Win32.SafeHandles;
 namespace OptiMiyoo {
     public sealed class SourceRemovalLeaseV128 : IDisposable {
@@ -119,6 +120,19 @@ namespace OptiMiyoo {
                 return lease;
             } catch { foreach (SafeFileHandle handle in relaxed) handle.Dispose(); lease.Dispose(); throw; }
         }
+        public static SourceRemovalLeaseV128 OpenDirectoryRead(string path) {
+            RequireWindows();
+            SourceRemovalLeaseV128 lease = new SourceRemovalLeaseV128();
+            try {
+                string full = Path.GetFullPath(path);
+                List<string> chain = Ancestors(full); chain.Add(full);
+                // Enumeration needs strict read sharing only. Unlike a transaction
+                // directory lease, it must not create a watched marker file.
+                foreach (string ancestor in chain) lease.parents.Add(OpenHandle(ancestor, true, false));
+                lease.DirectoryIdentity = Identity(Inspect(lease.parents[lease.parents.Count - 1]));
+                return lease;
+            } catch { lease.Dispose(); throw; }
+        }
         public static SourceRemovalLeaseV128 OpenDirectory(string path) {
             RequireWindows();
             SourceRemovalLeaseV128 lease = new SourceRemovalLeaseV128();
@@ -155,6 +169,125 @@ namespace OptiMiyoo {
             ancestors.Reverse();
             return ancestors;
         }
+        // Observe the long verification window without scanning or hashing the
+        // collection before each removal. This is a change detector, not an
+        // atomic lock against every possible last-instant namespace mutation.
+        public sealed class InventoryGuard : IDisposable {
+            [StructLayout(LayoutKind.Sequential)]
+            private struct Overlapped {
+                public IntPtr Internal, InternalHigh;
+                public uint Offset, OffsetHigh;
+                public IntPtr Event;
+            }
+            [DllImport("kernel32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool ReadDirectoryChangesW(SafeFileHandle directory, IntPtr buffer, uint length,
+                [MarshalAs(UnmanagedType.Bool)] bool subtree, uint filter, IntPtr bytes, IntPtr overlapped, IntPtr completion);
+            [DllImport("kernel32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool GetOverlappedResult(SafeFileHandle directory, IntPtr overlapped, out uint bytes,
+                [MarshalAs(UnmanagedType.Bool)] bool wait);
+            [DllImport("kernel32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool CancelIoEx(SafeFileHandle directory, IntPtr overlapped);
+            private const int BufferSize = 65536;
+            private readonly List<SafeFileHandle> parents = new List<SafeFileHandle>();
+            private SafeFileHandle directory;
+            private ManualResetEvent ready;
+            private IntPtr buffer, overlapped;
+            private bool pending, disposed;
+            private string failure;
+            internal static InventoryGuard Open(string path) {
+                RequireWindows();
+                string full = Path.GetFullPath(path);
+                if (full.StartsWith(@"\\", StringComparison.Ordinal) || new DriveInfo(Path.GetPathRoot(full)).DriveType == DriveType.Network)
+                    throw new IOException("Source inventory notifications require a local drive; originals kept.");
+                InventoryGuard guard = new InventoryGuard();
+                try {
+                    foreach (string parent in Ancestors(full)) guard.parents.Add(OpenHandle(parent, true, false));
+                    // Share-read pins the source directory while allowing normal
+                    // child creation/removal, whose names the notification tracks.
+                    guard.directory = CreateFileW(NativePath(full), 0x81, 1, IntPtr.Zero, 3, 0x42200000, IntPtr.Zero);
+                    if (guard.directory.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not monitor the source inventory; originals kept.");
+                    if ((Inspect(guard.directory).Attributes & 0x410U) != 0x10U)
+                        throw new IOException("Source inventory root is linked or is not a directory; originals kept.");
+                    guard.ready = new ManualResetEvent(false);
+                    guard.buffer = Marshal.AllocHGlobal(BufferSize);
+                    guard.overlapped = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(Overlapped)));
+                    guard.Arm();
+                    return guard;
+                } catch { guard.Dispose(); throw; }
+            }
+            private void Arm() {
+                ready.Reset();
+                Marshal.StructureToPtr(new Overlapped { Event = ready.SafeWaitHandle.DangerousGetHandle() }, overlapped, false);
+                // FILE_NAME | DIR_NAME for the whole subtree. Descriptor bytes
+                // are held through verified leases, not delayed write notices.
+                if (!ReadDirectoryChangesW(directory, buffer, BufferSize, true, 0x3, IntPtr.Zero, overlapped, IntPtr.Zero))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Source inventory notifications are unavailable; originals kept.");
+                pending = true;
+            }
+            public void AssertUnchanged() {
+                if (disposed) throw new ObjectDisposedException("Source inventory guard");
+                if (failure != null) throw new IOException(failure);
+                try {
+                    // Drain only completed kernel operations, never delayed
+                    // PowerShell/.NET callbacks. Bound a continuously busy tree.
+                    for (int batch = 0; batch < 8; batch++) {
+                        uint bytes;
+                        if (!GetOverlappedResult(directory, overlapped, out bytes, false)) {
+                            int error = Marshal.GetLastWin32Error();
+                            if (error == 996) return; // ERROR_IO_INCOMPLETE: no names changed.
+                            pending = false;
+                            throw new Win32Exception(error, "Source inventory monitoring failed; originals kept.");
+                        }
+                        pending = false;
+                        if (bytes == 0 || bytes > BufferSize)
+                            throw new IOException("Source inventory notifications overflowed; originals kept.");
+                        int offset = 0;
+                        while (true) {
+                            if (offset < 0 || offset > (int)bytes - 12) throw new IOException("Invalid source inventory notification; originals kept.");
+                            uint next = unchecked((uint)Marshal.ReadInt32(buffer, offset));
+                            uint action = unchecked((uint)Marshal.ReadInt32(buffer, offset + 4));
+                            uint nameBytes = unchecked((uint)Marshal.ReadInt32(buffer, offset + 8));
+                            if (nameBytes == 0 || (nameBytes & 1) != 0 || nameBytes > bytes - (uint)offset - 12)
+                                throw new IOException("Invalid source inventory notification; originals kept.");
+                            // Deletions and parent metadata updates are expected.
+                            // A directory named Collection.cue is not a descriptor;
+                            // all actual descriptor contents are pinned separately.
+                            if (action != 2 && action != 3)
+                                throw new IOException("Source files or directories were added or renamed during verification; originals kept.");
+                            if (next == 0) break;
+                            if ((next & 3) != 0 || next < 12 + nameBytes || next > bytes - (uint)offset - 12)
+                                throw new IOException("Invalid source inventory notification; originals kept.");
+                            offset += (int)next;
+                        }
+                        // Windows retains changes between reads in this handle's
+                        // kernel buffer; a zero-byte/failed read is never accepted.
+                        Arm();
+                    }
+                    throw new IOException("Source inventory kept changing during verification; originals kept.");
+                } catch (Exception error) { failure = error.Message; throw; }
+            }
+            public void Dispose() {
+                if (disposed) return;
+                disposed = true;
+                if (pending && directory != null && !directory.IsInvalid) {
+                    CancelIoEx(directory, overlapped);
+                    uint ignored;
+                    // Native memory must remain alive until cancellation completes.
+                    GetOverlappedResult(directory, overlapped, out ignored, true);
+                    pending = false;
+                }
+                if (directory != null) directory.Dispose();
+                if (ready != null) ready.Dispose();
+                if (overlapped != IntPtr.Zero) Marshal.FreeHGlobal(overlapped);
+                if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+                for (int i = parents.Count - 1; i >= 0; i--) parents[i].Dispose();
+                parents.Clear();
+            }
+        }
+        public static InventoryGuard WatchInventory(string root) { return InventoryGuard.Open(root); }
         private sealed class OwnedEntry : IDisposable {
             internal string Path;
             internal bool Directory;
@@ -316,9 +449,31 @@ function Open-SourcePolicyRemovalLease([string]$Path,[string]$Root) {
     return [OptiMiyoo.SourceRemovalLeaseV128]::Open($Path,$Root)
 }
 
+function Open-SourcePolicyInventoryGuard([string]$Root) {
+    # Explicit test boundary, like the source/output lease factories. Production
+    # refuses removal if the real source tree cannot be monitored safely.
+    Initialize-SourcePolicyNative
+    return [OptiMiyoo.SourceRemovalLeaseV128]::WatchInventory($Root)
+}
+
+function Assert-SourcePolicyInventoryGuard($Plan,$Guard) {
+    try {
+        if (-not $Guard) {throw 'Source inventory guard is unavailable.'}
+        $Guard.AssertUnchanged()
+    } catch {
+        $Plan.BlockReason='Source inventory changed or could not be monitored during final verification; remaining originals kept. '+$_.Exception.Message
+        throw $Plan.BlockReason
+    }
+}
+
 function Open-SourcePolicyDirectoryLease([string]$Path) {
     Initialize-SourcePolicyNative
     return [OptiMiyoo.SourceRemovalLeaseV128]::OpenDirectory($Path)
+}
+
+function Open-SourcePolicyReadDirectoryLease([string]$Path) {
+    Initialize-SourcePolicyNative
+    return [OptiMiyoo.SourceRemovalLeaseV128]::OpenDirectoryRead($Path)
 }
 
 function Remove-SourcePolicyOwnedPath([string]$Path,[string]$Root,[string]$Identity,[int]$MaximumEntries=0) {
@@ -411,8 +566,79 @@ function Open-SourcePolicyOutputs([object[]]$Outputs,[scriptblock]$Progress=$nul
     }
 }
 
-function New-SourcePolicyPlan([string]$Root,[string]$Policy) {
-    return [pscustomobject]@{Root=$Root; Policy=$Policy; Files=@{}; Jobs=@{}; References=@{}; ReferenceHashes=@{}; BlockReason=''}
+function Get-SourcePolicyDescriptorPaths([string]$Root) {
+    # One bounded inventory per planning/final-protection boundary, never per
+    # candidate. Inspect directories as directories, regardless of their suffix.
+    $rootLease=Open-SourcePolicyReadDirectoryLease $Root
+    $pending=New-Object 'System.Collections.Generic.Queue[string]'
+    $paths=New-Object 'System.Collections.Generic.List[string]'
+    $pending.Enqueue([IO.Path]::GetFullPath($Root));$entries=0
+    try {
+        while($pending.Count) {
+            $directory=$pending.Dequeue();$lease=Open-SourcePolicyReadDirectoryLease $directory
+            try {
+                foreach($path in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
+                    if(++$entries -gt 100000){throw 'Source descriptor inventory exceeds the 100,000-entry limit. Split the collection and retry; originals kept.'}
+                    $entry=Get-Item -LiteralPath $path -Force -ErrorAction Stop
+                    if($entry.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Source descriptor inventory contains a link; originals kept.'}
+                    if($entry.PSIsContainer){$pending.Enqueue($entry.FullName)}
+                    elseif($entry.Extension -ieq '.cue') {
+                        if($paths.Count -ge 1024){throw 'Source descriptor inventory exceeds the 1,024-CUE limit. Split the collection and retry; originals kept.'}
+                        $paths.Add($entry.FullName)
+                    }
+                }
+            } finally {$lease.Dispose()}
+        }
+        return ,$paths.ToArray()
+    } finally {$rootLease.Dispose()}
+}
+
+function Assert-SourcePolicyDescriptorBudget([string]$Root,[hashtable]$Snapshot) {
+    if($Snapshot.Count -gt 1024){throw 'Source descriptor inventory exceeds the 1,024-CUE limit. Split the collection and retry; originals kept.'}
+    $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    $bytes=0L;$ancestors=0L
+    foreach($path in $Snapshot.Keys) {
+        $full=[IO.Path]::GetFullPath($path);$record=$Snapshot[$path]
+        if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetExtension($full) -ine '.cue'){throw 'Invalid source descriptor snapshot path; originals kept.'}
+        if($record.Length -lt 0 -or $record.Length -gt 1048576 -or [string]$record.Hash -cnotmatch '^[0-9A-Fa-f]{64}$'){throw 'Source descriptor snapshot is invalid or exceeds the 1 MiB CUE limit; originals kept.'}
+        $bytes+=[long]$record.Length
+        if($bytes -gt 67108864){throw 'Source descriptors exceed the 64 MiB combined limit. Split the collection and retry; originals kept.'}
+        $parent=[IO.Path]::GetDirectoryName($full)
+        while($parent) {
+            if(++$ancestors -gt 16384){throw 'Source descriptors exceed the 16,384 ancestor-handle limit. Shorten the folders or split the collection; originals kept.'}
+            $next=[IO.Directory]::GetParent($parent);$parent=$null;if($next){$parent=$next.FullName}
+        }
+    }
+}
+
+function Get-SourcePolicyDescriptorSnapshot([string]$Root) {
+    # Deliberate filesystem boundary for planning-only tests. Direct callers must
+    # freeze untracked descriptors too; an unknown descriptor at cleanup is unsafe.
+    $snapshot=@{};$totalBytes=0L
+    foreach($path in (Get-SourcePolicyDescriptorPaths $Root)) {
+        $lease=Open-SourcePolicyReadLease $path $Root
+        try {
+            if($lease.Stream.Length -gt 1048576){throw 'CUE exceeds the supported 1 MiB text limit; originals kept.'}
+            $totalBytes+=$lease.Stream.Length
+            if($totalBytes -gt 67108864){throw 'Source descriptors exceed the 64 MiB combined limit. Split the collection and retry; originals kept.'}
+            $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($lease.Stream,$null)
+            $snapshot[$path]=[pscustomobject]@{Hash=$hash;Length=$lease.Stream.Length}
+        } finally {$lease.Dispose()}
+    }
+    Assert-SourcePolicyDescriptorBudget $Root $snapshot
+    return $snapshot
+}
+
+function New-SourcePolicyPlan([string]$Root,[string]$Policy,[hashtable]$DescriptorSnapshot=$null) {
+    $plan=[pscustomobject]@{Root=$Root; Policy=$Policy; Files=@{}; Jobs=@{}; References=@{}; ReferenceHashes=@{}; DescriptorSnapshot=@{}; BlockReason=''}
+    if($Policy -eq 'Remove') {
+        try {
+            if($null -eq $DescriptorSnapshot){$DescriptorSnapshot=Get-SourcePolicyDescriptorSnapshot $Root}
+            Assert-SourcePolicyDescriptorBudget $Root $DescriptorSnapshot
+            foreach($path in $DescriptorSnapshot.Keys){$record=$DescriptorSnapshot[$path];$plan.DescriptorSnapshot[$path]=[pscustomobject]@{Hash=[string]$record.Hash;Length=[long]$record.Length}}
+        } catch {$plan.BlockReason='Source descriptors could not be frozen safely; originals kept. '+$_.Exception.Message}
+    }
+    return $plan
 }
 
 function Add-SourcePolicyJob($Plan,[string]$Id,[string[]]$Paths,[string]$BlockReason='') {
@@ -450,6 +676,12 @@ function Add-SourcePolicyJob($Plan,[string]$Id,[string[]]$Paths,[string]$BlockRe
             $sha=[Security.Cryptography.SHA256]::Create()
             $hash=[BitConverter]::ToString($sha.ComputeHash($snapshot)).Replace('-','')
             if ($Plan.ReferenceHashes.ContainsKey($full) -and $Plan.ReferenceHashes[$full] -ne $hash) {throw 'A shared CUE changed during planning.'}
+            if ($Plan.DescriptorSnapshot.ContainsKey($full)) {
+                if($Plan.DescriptorSnapshot[$full].Hash -cne $hash -or $Plan.DescriptorSnapshot[$full].Length -ne $snapshot.Length){throw 'A source CUE changed from the frozen descriptor baseline.'}
+            } else {
+                $Plan.DescriptorSnapshot[$full]=[pscustomobject]@{Hash=$hash;Length=$snapshot.Length}
+                Assert-SourcePolicyDescriptorBudget $Plan.Root $Plan.DescriptorSnapshot
+            }
             $Plan.ReferenceHashes[$full]=$hash
         } catch {$Plan.BlockReason='Source references could not be frozen safely; originals kept for this batch. '+$_.Exception.Message}
         finally {if ($sha) {$sha.Dispose()}; if ($snapshot) {$snapshot.Dispose()}}
@@ -461,16 +693,7 @@ function Complete-SourcePolicyJob($Plan,[string]$Id,[hashtable]$Hashes,[object[]
     $job.Hashes=$Hashes; $job.Outputs=$Outputs; $job.Succeeded=$true
 }
 
-function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Progress=$null) {
-    if ($Plan.Policy -ne 'Remove') {return}
-    if ($Plan.BlockReason) {
-        foreach ($file in $Plan.Files.Values) {
-            $file.Reason=$Plan.BlockReason
-            if (@($file.Owners | Where-Object {$Plan.Jobs[$_].Succeeded}).Count -gt 0) {$file.State='Failed'}
-        }
-        & $Report 'WARNING' $Plan.BlockReason
-        return
-    }
+function Set-SourcePolicyCleanupEligibility($Plan) {
     $invalidJobs=@{}
     foreach ($id in $Plan.Jobs.Keys) {
         $job=$Plan.Jobs[$id]
@@ -500,6 +723,61 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
         }
         if ($eligible) {$file.State='Ready'}
     }
+}
+
+function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null) {
+    if($Plan.Policy -ne 'Remove'){throw 'A cleanup context requires Remove policy.'}
+    if($Plan.BlockReason){throw $Plan.BlockReason}
+    $context=[pscustomobject]@{Plan=$Plan;InventoryGuard=$InventoryGuard;OwnsInventoryGuard=($null -eq $InventoryGuard);ReferenceLeases=@{};Disposed=$false}
+    $context | Add-Member ScriptMethod Dispose {
+        if($this.Disposed){return};$this.Disposed=$true;$failure=$null
+        foreach($lease in $this.ReferenceLeases.Values){try{$lease.Dispose()}catch{if(-not $failure){$failure=$_}}}
+        $this.ReferenceLeases.Clear()
+        if($this.OwnsInventoryGuard -and $this.InventoryGuard){try{$this.InventoryGuard.Dispose()}catch{if(-not $failure){$failure=$_}}}
+        if($failure){throw $failure}
+    }
+    try {
+        if(-not $context.InventoryGuard){$context.InventoryGuard=Open-SourcePolicyInventoryGuard $Plan.Root}
+        Set-SourcePolicyCleanupEligibility $Plan
+        Assert-SourcePolicyDescriptorBudget $Plan.Root $Plan.DescriptorSnapshot
+        $actual=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach($path in (Get-SourcePolicyDescriptorPaths $Plan.Root)){[void]$actual.Add($path)}
+        if($actual.Count -ne $Plan.DescriptorSnapshot.Count){throw 'Source CUE inventory changed since planning; retry with the updated source collection. Originals kept.'}
+        foreach($path in @($Plan.DescriptorSnapshot.Keys | Sort-Object)) {
+            if(-not $actual.Contains($path)){throw 'Source CUE inventory changed since planning; retry with the updated source collection. Originals kept.'}
+            $record=$Plan.DescriptorSnapshot[$path]
+            $removable=$Plan.Files.ContainsKey($path) -and $Plan.Files[$path].State -eq 'Ready'
+            $lease=Open-VerifiedSourcePolicyFile $path $record.Hash $Plan.Root $Progress -ReadOnly:(-not $removable)
+            $context.ReferenceLeases[$path]=$lease
+            if($lease.Stream.Length -ne $record.Length){throw 'Source CUE length differs from its frozen descriptor baseline; originals kept.'}
+        }
+        # A retained or untracked descriptor is not automatically represented in
+        # job ownership. Reject any overlooked dependency while its bytes are held.
+        foreach($path in $context.ReferenceLeases.Keys) {
+            if($Plan.Files.ContainsKey($path) -and $Plan.Files[$path].State -eq 'Ready'){continue}
+            if(-not (Get-Command Get-CueFiles -ErrorAction SilentlyContinue)){throw 'CUE reference validation is unavailable; originals kept.'}
+            foreach($name in @(Get-CueFiles $path)) {
+                $reference=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($path)) $name))
+                if($Plan.Files.ContainsKey($reference) -and $Plan.Files[$reference].State -eq 'Ready'){throw 'A retained or untracked CUE still references an original selected for removal; include its complete source set before retrying. Originals kept.'}
+            }
+        }
+        Assert-SourcePolicyInventoryGuard $Plan $context.InventoryGuard
+        return $context
+    } catch {$context.Dispose();throw}
+}
+
+function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Progress=$null,$InventoryGuard=$null,$CleanupContext=$null) {
+    if ($Plan.Policy -ne 'Remove') {return}
+    if ($Plan.BlockReason) {
+        foreach ($file in $Plan.Files.Values) {
+            $file.Reason=$Plan.BlockReason
+            if (@($file.Owners | Where-Object {$Plan.Jobs[$_].Succeeded}).Count -gt 0) {$file.State='Failed'}
+        }
+        & $Report 'WARNING' $Plan.BlockReason
+        return
+    }
+    if(-not $CleanupContext){Set-SourcePolicyCleanupEligibility $Plan}
+    elseif($CleanupContext.Disposed -or -not [object]::ReferenceEquals($Plan,$CleanupContext.Plan)){throw 'Source cleanup context is closed or belongs to another plan.'}
     if (@($Plan.Files.Values | Where-Object {$_.State -eq 'Ready'}).Count -eq 0) {
         foreach ($file in @($Plan.Files.Values | Sort-Object Path)) {
             $kind='KEPT'; if ($file.State -eq 'Failed') {$kind='WARNING'}
@@ -507,20 +785,16 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
         }
         return
     }
-    $referenceLeases=@{}
+    $referenceLeases=@{}; $ownsCleanupContext=$false
     try {
-        # CUEs describe shared dependencies, including those of skipped jobs.
-        # Hold all of these small descriptors until cleanup ends so the ownership
-        # graph cannot change between otherwise independent source components.
-        foreach ($path in @($Plan.ReferenceHashes.Keys | Sort-Object)) {
-            try {$referenceLeases[$path]=Open-VerifiedSourcePolicyFile $path $Plan.ReferenceHashes[$path] $Plan.Root $Progress -ReadOnly:($Plan.Files[$path].State -ne 'Ready')}
-            catch {
-                $reason='A CUE changed or could not be locked; all originals kept to preserve source references. '+$_.Exception.Message
-                foreach ($file in $Plan.Files.Values) {if ($file.State -eq 'Ready') {$file.State='Kept'}; $file.Reason=$reason}
-                if ($Plan.Files.ContainsKey($path)) {$Plan.Files[$path].State='Failed'}
-                $Plan.BlockReason=$reason
-                break
-            }
+        try {
+            # The host holds the complete context across its final snapshot.
+            # Direct callers capture and own the same protection here.
+            if(-not $CleanupContext){$CleanupContext=Open-SourcePolicyCleanupContext $Plan $Progress -InventoryGuard $InventoryGuard;$ownsCleanupContext=$true}
+            $InventoryGuard=$CleanupContext.InventoryGuard;$referenceLeases=$CleanupContext.ReferenceLeases
+            Assert-SourcePolicyInventoryGuard $Plan $InventoryGuard
+        } catch {
+            if (-not $Plan.BlockReason) {$Plan.BlockReason='Source inventory or CUE descriptors could not be protected; remaining originals kept. '+$_.Exception.Message}
         }
         if (-not $Plan.BlockReason) {
             # Validate connected ownership components together. A changed source
@@ -528,6 +802,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
             # games use bounded sets of source/output handles, not whole-batch locks.
             $visited=@{}; $expandedJobs=@{}
             foreach ($start in @($Plan.Files.Keys | Sort-Object)) {
+                if ($Plan.BlockReason) {break}
                 if ($visited.ContainsKey($start)) {continue}
                 $pending=New-Object 'System.Collections.Generic.Queue[string]'
                 $component=New-Object 'System.Collections.Generic.List[object]'
@@ -558,6 +833,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                 try {
                     if ($outputs.Count -eq 0) {throw 'Verified outputs are missing; originals kept.'}
                     $locks=Open-SourcePolicyOutputs $outputs $Progress
+                    Assert-SourcePolicyInventoryGuard $Plan $inventoryGuard
                     foreach ($file in $candidates) {
                         try {
                             $expected=$Plan.Jobs[$file.Owners[0]].Hashes[$file.Path]
@@ -573,6 +849,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                         foreach ($file in $candidates) {if ($file.State -eq 'Ready') {$file.State='Kept'; $file.Reason='A dependent original changed or could not be verified; complete source set kept.'}}
                         continue
                     }
+                    Assert-SourcePolicyInventoryGuard $Plan $inventoryGuard
                     $descriptorFailed=$false
                     # Remove CUE descriptors first. If one must remain, retain all
                     # its tracks even when deletion (not verification) is denied.
@@ -580,21 +857,28 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                         if ($descriptorFailed) {$file.State='Kept'; $file.Reason='A CUE could not be removed; its remaining source set was kept.'; continue}
                         try {
                             if ($Progress) {try {& $Progress 'Removing verified originals' $file.Path 0 0 | Out-Null} catch {}}
+                            Assert-SourcePolicyInventoryGuard $Plan $inventoryGuard
                             Remove-SourcePolicyFile $file.Path $leases[$file.Path]
                             $file.State='Removed'; $file.Reason='All dependent outputs verified; original removed.'
                         } catch {
                             $file.State='Failed'; $file.Reason=$_.Exception.Message
+                            if ($Plan.BlockReason) {break}
                             if ([IO.Path]::GetExtension($file.Path) -ieq '.cue') {$descriptorFailed=$true}
                         }
                     }
-                } catch {foreach ($file in $candidates) {$file.State='Failed'; $file.Reason=$_.Exception.Message}}
+                } catch {foreach ($file in $candidates) {if ($file.State -ne 'Removed') {$file.State='Failed'; $file.Reason=$_.Exception.Message}}}
                 finally {
                     foreach ($path in $leases.Keys) {if (-not $referenceLeases.ContainsKey($path)) {$leases[$path].Dispose()}}
                     if ($locks) {foreach ($lock in $locks) {$lock.Dispose()}}
                 }
             }
         }
-    } finally {foreach ($lease in $referenceLeases.Values) {$lease.Dispose()}}
+        if ($Plan.BlockReason) {
+            foreach ($file in $Plan.Files.Values) {if ($file.State -eq 'Ready') {$file.State='Failed'; $file.Reason=$Plan.BlockReason}}
+        }
+    } finally {
+        if ($ownsCleanupContext -and $CleanupContext) {$CleanupContext.Dispose()}
+    }
     foreach ($file in @($Plan.Files.Values | Sort-Object Path)) {
         $kind='KEPT'; if ($file.State -eq 'Removed') {$kind='REMOVED'} elseif ($file.State -eq 'Failed') {$kind='WARNING'}
         & $Report $kind ($file.Path+' | '+$file.Reason)

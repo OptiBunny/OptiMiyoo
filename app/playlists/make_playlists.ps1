@@ -293,6 +293,7 @@ function Copy-FileVerified([string]$Source,[string]$Destination,[string]$Name) {
     }
 }
 function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
+    Assert-ArchiveSandboxMemberBudget $Archive
     $seen=New-Object 'System.Collections.Generic.Dictionary[string,bool]' ([StringComparer]::OrdinalIgnoreCase)
     $disks=New-Object 'System.Collections.Generic.List[string]'
     foreach ($entry in $Archive.Entries) {
@@ -336,6 +337,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     return @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}})
 }
 function Assert-ZipExtractionNames([IO.Compression.ZipArchive]$Archive) {
+    Assert-ArchiveSandboxMemberBudget $Archive
     # Windows merges directory spellings such as Disks/ and disks/. A playlist
     # retaining both spellings would then fail on the case-sensitive handheld.
     # Include implicit parents, not just explicit ZIP directory entries.
@@ -437,7 +439,7 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
     foreach ($file in $zipFiles) {
         Show-PreparationProgress 'Grouping ZIP inputs' $file.Name $queued $zipFiles.Count 'ZIPs'
         $relative=$file.FullName.Substring($prefix.Length).Replace('\','/')
-        [pscustomobject]@{System=$Profile.Folder; Source=$relative; Stem=$relative.Substring(0,$relative.Length-4); Zip=$file.FullName; Disks=@(); Error=$null}
+        [pscustomobject]@{System=$Profile.Folder; Source=$relative; SourceKey=('zip:'+$relative); Stem=$relative.Substring(0,$relative.Length-4); Zip=$file.FullName; Disks=@(); Error=$null}
         $queued++; Show-PreparationProgress 'Grouping ZIP inputs' $file.Name $queued $zipFiles.Count 'ZIPs'
     }
     $cueTracks=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -482,7 +484,9 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
         }
         $stem=$title; if ($parent) {$stem=$parent+'/'+$title}
         if (-not $groups.ContainsKey($stem)) {
-            $groups[$stem]=[pscustomobject]@{System=$Profile.Folder; Source=$stem; Stem=$stem; Zip=$null; Disks=(New-Object 'System.Collections.Generic.List[object]'); Error=$null}
+            # A loose title may equal a ZIP's displayed filename. Keep its
+            # transaction identity separate while preserving visible names.
+            $groups[$stem]=[pscustomobject]@{System=$Profile.Folder; Source=$stem; SourceKey=('files:'+$stem); Stem=$stem; Zip=$null; Disks=(New-Object 'System.Collections.Generic.List[object]'); Error=$null}
         }
         $group=$groups[$stem]
         $group.Disks.Add([pscustomobject]@{Path=$file.FullName; Name=($file.BaseName+$file.Extension.ToLowerInvariant()); Tag=$tag; Tagged=$tagged})
@@ -694,37 +698,87 @@ function Get-PreservedPlaylistLines([string[]]$DiskNames,[string]$Stem,[string]$
 }
 
 function Set-PlaylistOutputConflicts([object[]]$Jobs) {
-    # Index each actual write/retirement once. Case-insensitive equality and
+    # Index each planned target and visible candidate once. Case-insensitive equality and
     # ancestor lookups preserve the pairwise overlap rules without O(n^2) scans.
     $owners=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    $writeOwners=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    $visibleOwners=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    $activeTargets=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $inspectedTargets=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     Show-PreparationProgress 'Indexing output paths' 'Collecting installation and retirement paths.' 0 $Jobs.Count 'sets'
     for ($i=0;$i -lt $Jobs.Count;$i++) {
         if ($Jobs[$i].OutputPlan) {
+            $seenWrites=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            foreach ($target in @($Jobs[$i].OutputPlan.Writes)) {
+                $key=[IO.Path]::GetFullPath($target.Destination).TrimEnd('\','/')
+                [void]$activeTargets.Add($key)
+                if ($seenWrites.Add($key)) {
+                    if (-not $writeOwners.ContainsKey($key)) {$writeOwners[$key]=New-Object 'System.Collections.Generic.List[int]'}
+                    $writeOwners[$key].Add($i)
+                }
+            }
+            $seenVisible=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            if ($Jobs[$i].OutputPlan.PSObject.Properties['VisibleCandidates']) {
+                foreach ($target in $Jobs[$i].OutputPlan.VisibleCandidates) {
+                    $key=[IO.Path]::GetFullPath($target.Destination).TrimEnd('\','/')
+                    if (-not $seenVisible.Add($key)) {continue}
+                    if (-not $visibleOwners.ContainsKey($key)) {$visibleOwners[$key]=New-Object 'System.Collections.Generic.List[int]'}
+                    $visibleOwners[$key].Add($i)
+                }
+            }
             $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
             foreach ($target in (@($Jobs[$i].OutputPlan.Writes)+@($Jobs[$i].OutputPlan.Retired))) {
                 $key=[IO.Path]::GetFullPath($target.Destination).TrimEnd('\','/')
                 if (-not $seen.Add($key)) {continue}
+                if (-not $activeTargets.Contains($key) -and $inspectedTargets.Add($key)) {
+                    try {
+                        $null=Get-Item -LiteralPath $key -Force -ErrorAction Stop
+                        [void]$activeTargets.Add($key)
+                    } catch [System.Management.Automation.ItemNotFoundException] {
+                        # Only a missing path is an inactive retirement candidate.
+                        # Access and other inspection failures stop planning.
+                    }
+                }
                 if (-not $owners.ContainsKey($key)) {$owners[$key]=New-Object 'System.Collections.Generic.List[int]'}
                 $owners[$key].Add($i)
             }
         }
         Show-PreparationProgress 'Indexing output paths' $Jobs[$i].Stem ($i+1) $Jobs.Count 'sets'
     }
-    $keys=@($owners.Keys); $checked=0
+    $allKeys=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($key in $owners.Keys) {[void]$allKeys.Add($key)}
+    foreach ($key in $visibleOwners.Keys) {[void]$allKeys.Add($key)}
+    $keys=@($allKeys); $checked=0
     $message='Several input games write or retire overlapping output paths. Separate or rename the inputs; no conflicting game was written.'
+    $visibleMessage='Several input games create conflicting visible output paths. Separate or rename the inputs; no conflicting game was written.'
+    # Visible candidates reserve no output themselves. Reject only a different
+    # job's write, which would make later ownership checks depend on job order.
+    $rejectVisibleOverlap={param($Candidates,$Writers)
+        if ($Candidates.Count -gt 1 -or $Writers.Count -gt 1 -or $Candidates[0] -ne $Writers[0]) {
+            foreach ($i in $Candidates) {$Jobs[$i].Error=$visibleMessage}
+            foreach ($i in $Writers) {$Jobs[$i].Error=$visibleMessage}
+        }
+    }
     Show-PreparationProgress 'Checking output path conflicts' 'Checking shared paths and parent collections.' 0 $keys.Count 'paths'
     foreach ($key in $keys) {
-        $participants=$owners[$key]
-        if ($participants.Count -gt 1) {foreach ($i in $participants) {$Jobs[$i].Error=$message}}
+        $participants=$null
+        if ($owners.ContainsKey($key)) {$participants=$owners[$key]}
+        # Legacy layout candidates can coincide without either ever existing.
+        # They conflict only with an actual output or a planned write; retain
+        # absent candidates in the index so write/retirement overlaps still fail.
+        if ($null -ne $participants -and $participants.Count -gt 1 -and $activeTargets.Contains($key)) {foreach ($i in $participants) {$Jobs[$i].Error=$message}}
+        if ($visibleOwners.ContainsKey($key) -and $writeOwners.ContainsKey($key)) {& $rejectVisibleOverlap $visibleOwners[$key] $writeOwners[$key]}
         $parent=[IO.Path]::GetDirectoryName($key)
         while ($parent) {
-            if ($owners.ContainsKey($parent)) {
+            if ($null -ne $participants -and $owners.ContainsKey($parent) -and ($activeTargets.Contains($key) -or $activeTargets.Contains($parent))) {
                 $ancestors=$owners[$parent]
                 if ($participants.Count -gt 1 -or $ancestors.Count -gt 1 -or $participants[0] -ne $ancestors[0]) {
                     foreach ($i in $participants) {$Jobs[$i].Error=$message}
                     foreach ($i in $ancestors) {$Jobs[$i].Error=$message}
                 }
             }
+            if ($visibleOwners.ContainsKey($key) -and $writeOwners.ContainsKey($parent)) {& $rejectVisibleOverlap $visibleOwners[$key] $writeOwners[$parent]}
+            if ($writeOwners.ContainsKey($key) -and $visibleOwners.ContainsKey($parent)) {& $rejectVisibleOverlap $visibleOwners[$parent] $writeOwners[$key]}
             $parent=[IO.Path]::GetDirectoryName($parent)
         }
         $checked++; Show-PreparationProgress 'Checking output path conflicts' $key $checked $keys.Count 'paths'
@@ -1626,7 +1680,7 @@ try {
     Complete-PreparationProgress
     $playlistReferenceIndex=New-PlaylistReferenceIndex (Join-Path $Root 'DST')
     foreach ($job in $jobs) {
-        Set-ApplicationCurrentJob $job.Source
+        Set-ApplicationCurrentJob $job.SourceKey
         $profile=$job.Profile; $script:DiskExtensions=@($profile.Extensions)
         $script:UiGame=$job.Stem; $script:UiSystem=$job.System; $script:UiLastStage=''
         Write-Event 'GAME' ('{0}/{1} | {2}/{3}' -f ($script:Processed+1),$script:Total,$job.System,$job.Source)

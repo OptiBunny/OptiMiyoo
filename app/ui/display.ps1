@@ -764,27 +764,36 @@ function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0) {
     [Console]::Write($frame.ToString())
 }
 
-function Get-MenuRows([string[]]$Lines,[int]$Width) {
+function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$SourceDefaults) {
     $rows=[System.Collections.Generic.List[string]]::new()
+    $defaults=[System.Collections.Generic.List[bool]]::new()
+    $sourceIndex=0
     foreach ($text in $Lines) {
         $line=($text -replace '[\x00-\x1f\x7f-\x9f]',' ').TrimStart()
+        $isDefault=($line -match '^\d+\..*\(default\)')
+        if ($SourceDefaults -and $sourceIndex -lt $SourceDefaults.Count) {$isDefault=$SourceDefaults[$sourceIndex]}
         while ((Get-TextWidth $line) -gt $Width) {
             $prefix=Get-TextPrefix $line $Width
             $cut=$prefix.LastIndexOf(' ')
             if ($cut -lt [int]($prefix.Length/2)) {$cut=$prefix.Length}
             $rows.Add($line.Substring(0,$cut))
+            $defaults.Add($isDefault)
             $line=$line.Substring($cut).TrimStart()
         }
         $rows.Add($line)
+        $defaults.Add($isDefault)
+        $sourceIndex++
     }
+    if ($DefaultRows) {$DefaultRows.Value=$defaults.ToArray()}
     return $rows.ToArray()
 }
 
-function Get-MenuLayout([string[]]$Rows,[switch]$NoInput) {
+function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
     # Keep source rows intact so a later wider window can unwrap them again.
     # Reserve top padding, the compact banner, borders, prompt and a spare row.
     $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
     $key=('{0}|{1}|{2}|{3}' -f $width,$script:UiColumns,$script:UiHeight,[bool]$NoInput)
+    $key+='|'+($DefaultRows -join ',')
     $cached=$script:UiMenuLayoutCache
     if ($cached -and $cached.Key -ceq $key -and $cached.Rows.Count -eq $Rows.Count) {
         $same=$true
@@ -794,17 +803,19 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput) {
     $overhead=8;if ($NoInput) {$overhead=7}
     $result=$null
     if ($width -ge 72) {
-        $wrapped=@(Get-MenuRows $Rows ($width-28))
+        $wrappedDefaults=$null
+        $wrapped=@(Get-MenuRows $Rows ($width-28) ([ref]$wrappedDefaults) $DefaultRows)
         $body=[Math]::Max(12,$wrapped.Count)
         if ($script:UiHeight -ge $body+$overhead) {
-            $result=[pscustomobject]@{Rows=$wrapped;Width=$width;TextWidth=($width-28);BodyRows=$body;RequiredHeight=($body+$overhead);ShowMio=$true;Fits=$true}
+            $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-28);BodyRows=$body;RequiredHeight=($body+$overhead);ShowMio=$true;Fits=$true}
         }
     }
     # Reclaim the mascot column and empty padding before asking for more room.
     if (-not $result) {
-        $wrapped=@(Get-MenuRows $Rows ($width-4))
+        $wrappedDefaults=$null
+        $wrapped=@(Get-MenuRows $Rows ($width-4) ([ref]$wrappedDefaults) $DefaultRows)
         $required=$wrapped.Count+$overhead
-        $result=[pscustomobject]@{Rows=$wrapped;Width=$width;TextWidth=($width-4);BodyRows=$wrapped.Count;RequiredHeight=$required;ShowMio=$false;Fits=($script:UiColumns -ge 44 -and $script:UiHeight -ge $required)}
+        $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-4);BodyRows=$wrapped.Count;RequiredHeight=$required;ShowMio=$false;Fits=($script:UiColumns -ge 44 -and $script:UiHeight -ge $required)}
     }
     $script:UiMenuLayoutCache=[pscustomobject]@{Key=$key;Rows=@($Rows);Layout=$result}
     return $result
@@ -812,8 +823,8 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput) {
 
 function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
                         [string]$InputText,[int]$Caret,[string]$Mood='idle',
-                        [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK') {
-    $menuLayout=Get-MenuLayout $Rows -NoInput:$NoInput
+                        [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK',[bool[]]$DefaultRows) {
+    $menuLayout=Get-MenuLayout $Rows -NoInput:$NoInput -DefaultRows $DefaultRows
     if (-not $menuLayout.Fits) {
         Draw-ResizePanel $Title $Prompt $InputText $Caret $menuLayout.RequiredHeight 44
         return
@@ -838,7 +849,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $patchable=($menuLayout.ShowMio -and $script:UiVT -and -not $script:UiDemo -and -not $NoInput -and
         ($script:UiIdlePoseOverride -or $script:UiSparseCrtPhase -ge 0 -or $script:UiIdleMenuCache.SparseCrt) -and $mio.Count -eq 12 -and
         (-not $script:UiPendingEvents -or $script:UiPendingEvents.Count -eq 0))
-    $rowsKey=$Rows -join [char]0
+    $rowsKey=($Rows -join [char]0)+'|'+($menuLayout.DefaultRows -join ',')
     $cached=$script:UiIdleMenuCache
     if ($patchable -and $cached -and $script:UiPinned -and
         $cached.Width -eq $w -and $cached.Height -eq $script:UiHeight -and
@@ -909,7 +920,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
             }
         }
         $rgb='218;224;244'
-        if ($text -match '^\d+\..*\(default\)') {$rgb='255;221;144'}
+        if ($i -lt $menuLayout.DefaultRows.Count -and $menuLayout.DefaultRows[$i]) {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
         elseif ($unverifiedRow) {$rgb='255;190;96'}
         elseif ($NoInput -and $text -match '^\[[#.]+\] \d+%$') {$rgb='107;216;245'}
@@ -940,6 +951,54 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     }
 }
 
+function Get-ProgressTextRows([string]$Text,[int]$Width,[int]$Count) {
+    # A path or tool message must not add terminal controls or new panel rows.
+    $safe=$Text -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $rows=@(Get-MenuRows @($safe) $Width)
+    if ($rows.Count -gt $Count) {
+        $rows=@($rows[0..($Count-1)])
+        $rows[$Count-1]=(Fit-Text $rows[$Count-1] ($Width-3)).TrimEnd()+'...'
+    }
+    while ($rows.Count -lt $Count) {$rows+=@('')}
+    return $rows
+}
+
+function Get-OnionProgressRows([string]$Stage,[string]$Detail='',
+                               [long]$Completed=0,[long]$Total=-1,[string]$Unit='systems',
+                               [int]$Width=68,[switch]$Compact) {
+    $Stage=$Stage -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $Unit=$Unit -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $Unit=(Fit-Text $Unit 20).TrimEnd()
+    $Completed=[Math]::Max(0,$Completed)
+    if ($Total -ge 0) {$Completed=[Math]::Min($Completed,$Total)}
+    $count='Working...';$bar='';$basis='The total for this step is not known yet.'
+    $remaining='';$next='Progress is for this step, not the whole SD setup.'
+    if ($Total -ge 0) {
+        $count=('{0} / {1} {2} complete' -f $Completed,$Total,$Unit)
+        $percent=100.0;if ($Total -gt 0) {$percent=100.0*$Completed/$Total}
+        $filled=[int][Math]::Floor(28*$percent/100)
+        $bar='['+('#'*$filled)+('.'*(28-$filled))+('] {0:N0}%' -f $percent)
+        $basis='Current step: measured progress'
+        $remaining=('Remaining in this step: {0} {1}' -f ($Total-$Completed),$Unit)
+        if ($Completed -eq $Total) {$next='100% finishes this step only; SD setup may still be running.'}
+    }
+    if ($Stage -in 'Checking selected cores','Preparing file types') {
+        $basis='Systems processed in this setup pass'
+        $next='Each system is checked before its file types are prepared.'
+        if ($Total -ge 0) {$remaining=('Remaining in this pass: {0} {1}' -f ($Total-$Completed),$Unit)}
+    }
+    if ($Stage -eq 'SD setup finished') {$next='Review the results before returning to the main menu.'}
+    $detailRows=@(Get-ProgressTextRows $Detail $Width 4)
+    # Do not force four blank detail rows when the reported message is short.
+    while ($detailRows.Count -gt 1 -and -not $detailRows[-1]) {$detailRows=@($detailRows[0..($detailRows.Count-2)])}
+    $stageRows=@(Get-ProgressTextRows $Stage $Width 2)
+    if (-not $stageRows[1]) {$stageRows=@($stageRows[0])}
+    $rows=$stageRows+@('')+$detailRows+@('',$count,$bar)
+    if (-not $Compact) {$rows+=@($basis,$remaining,'',$next)}
+    $rows+=@('','Games and emulator cores stay unchanged.')
+    return @(Get-MenuRows $rows $Width)
+}
+
 function Show-OnionProgress([string]$Stage,[string]$Detail='',
                             [long]$Completed=0,[long]$Total=-1,[string]$Unit='systems',[switch]$Force) {
     # Refresh only when work reports progress; no background animation loop.
@@ -964,14 +1023,10 @@ function Show-OnionProgress([string]$Stage,[string]$Detail='',
     [void](Update-DisplaySize)
     $width=[Math]::Max(12,$script:UiWidth-28)
     if ($script:UiWidth -lt 72) {$width=[Math]::Max(12,$script:UiWidth-4)}
-    $detailRows=@(Get-MenuRows @($Detail) $width)
-    if ($detailRows.Count -gt 4) {$detailRows=@($detailRows[0..3]);$detailRows[3]=(Fit-Text $detailRows[3] ($width-3))+'...'}
-    $rows=@($Stage,'')+$detailRows+@('',$count,$bar,'','Games and emulator cores stay unchanged.')
+    $rows=@(Get-OnionProgressRows $Stage $Detail $Completed $Total $Unit $width -Compact:($script:UiHeight -lt 35))
     if (-not (Get-MenuLayout $rows -NoInput).ShowMio) {
         $width=[Math]::Max(12,$script:UiWidth-4)
-        $detailRows=@(Get-MenuRows @($Detail) $width)
-        if ($detailRows.Count -gt 4) {$detailRows=@($detailRows[0..3]);$detailRows[3]=(Fit-Text $detailRows[3] ($width-3))+'...'}
-        $rows=@($Stage,'')+$detailRows+@('',$count,$bar,'','Games and emulator cores stay unchanged.')
+        $rows=@(Get-OnionProgressRows $Stage $Detail $Completed $Total $Unit $width -Compact:($script:UiHeight -lt 35))
     }
     Draw-MenuPanel -Title 'Onion SD setup / progress' -Rows $rows -Prompt 'Please wait...' -Caret -1 -Mood 'scan' -NoInput -Channel 'ONION SD SETUP'
 }
@@ -1127,12 +1182,12 @@ function Draw-DisplayPanel([switch]$Force) {
     $w=$script:UiWidth; $left=$w-28; $inner=$w-4
     $compact=(-not $script:UiPanel)
     if ($compact) {$left=$inner}
-    $border=Get-BorderStyle $w 17
+    $expanded=(-not $compact -and $script:UiHeight -ge 35)
     $mio=@(Get-DisplayMioFrame $script:UiMood $script:UiPoseOverride)
     $count=[Math]::Min($script:Total,$script:Processed+1)
     $clock='00:00:00'; if ($script:Clock) {$clock=Format-Duration $script:Clock.Elapsed.TotalSeconds}
     $pct='working'; if ($script:UiPercent -ge 0) {$pct=('{0,3:N0}%' -f $script:UiPercent)}
-    $barPrefix=''; if ($script:UiDemo) {$barPrefix='Stage '}
+    $barPrefix=''; if ($script:UiDemo -or $expanded) {$barPrefix='Stage '}
     $barWidth=$left-13-$barPrefix.Length
     $barTick=$script:UiTick
     if ($script:UiDemo) {$barTick=$script:UiDemoProgressTick}
@@ -1152,7 +1207,7 @@ function Draw-DisplayPanel([switch]$Force) {
     $setLine=('SET '+$count+' / '+$script:Total+'  '+$script:UiGame)
     if ($script:Total -eq 0 -and $script:UiStage -ne 'Preparation finished') {$queue='Queue: scanning source files'; $setLine=$script:UiGame}
     $eta='ETA: pending first completed set'
-    if ($script:UiStage -eq 'Preparation finished') {$eta='Final verification pending'}
+    if ($script:UiStage -eq 'Preparation finished' -or ($script:Total -gt 0 -and $script:Processed -ge $script:Total)) {$eta='Final verification pending'}
     elseif ($script:Processed -ge 1 -and $script:Clock -and $script:Total -gt $script:Processed) {
         $eta='ETA ~'+(Format-Duration ($script:Clock.Elapsed.TotalSeconds/$script:Processed*($script:Total-$script:Processed)))+' (by completed sets)'
     }
@@ -1189,6 +1244,28 @@ function Draw-DisplayPanel([switch]$Force) {
         ('Elapsed '+$clock),
         $eta
     )
+    $stageIndex=3;$barIndex=5;$queueBarIndex=7
+    if ($expanded) {
+        $basis='Current step: waiting for measured progress'
+        if ($script:UiPercent -ge 0) {$basis='Current step: measured progress'}
+        $remaining=('Sets remaining: {0} (including current)' -f [Math]::Max(0,$script:Total-$script:Processed))
+        if ($script:UiPreparing) {
+            $basis='Preparing the queue / total not known yet';$remaining='The batch starts after these checks finish.'
+            if ($script:UiPreparationTotal -ge 0) {
+                $basis='Current check: measured progress'
+                $remaining=('Checks remaining: {0} {1}' -f [Math]::Max(0,$script:UiPreparationTotal-$script:UiPreparationCompleted),$script:UiPreparationUnit)
+            }
+        }
+        if ($script:UiDemo) {
+            $basis='Sample step progress / no real files processed'
+            $remaining='Total bar tracks demo scenes, not game files.'
+        }
+        $data=@($script:UiSystem)+@(Get-ProgressTextRows $setLine $left 2)+@('')+
+              @(Get-ProgressTextRows $script:UiStage $left 2)+
+              @(Get-ProgressTextRows $script:UiDetail $left 3)+
+              @($bar,$basis,$queue,$queueBar,$remaining,$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock),$eta)
+        $stageIndex=4;$barIndex=9;$queueBarIndex=12
+    }
     if ($compact) {
         if ($script:UiDemo -and $script:UiDemoProgressStatus) {$data[5]='Status: '+$script:UiDemoProgressStatus}
         $plain=@($data | ForEach-Object {$_ -replace '\x1b\[[0-9;?]*[ -/]*[@-~]',''} | Where-Object {$_})
@@ -1196,25 +1273,28 @@ function Draw-DisplayPanel([switch]$Force) {
         return
     }
     $lines=[System.Collections.Generic.List[string]]::new()
+    $bodyCount=$data.Count
+    $border=Get-BorderStyle $w ($bodyCount+5)
     $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$title+' ') ($w-2)
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
     $mioStatus='    MIO // READY'
     if ($script:UiMood -in 'work','scan','check') {$mioStatus='   MIO // WORKING'}
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
-    for ($i=0;$i -lt 12;$i++) {
-        $right=$mio[$i]
-        $content=Fit-Text $data[$i] $left
-        if ($i -eq 5) {
+    for ($i=0;$i -lt $bodyCount;$i++) {
+        $right=' '*22;if ($i -lt $mio.Count) {$right=$mio[$i]}
+        $content=Fit-Text ($data[$i] -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' ') $left
+        if ($i -eq $barIndex) {
             if ($script:UiDemo -and $script:UiDemoProgressStatus) {$content=Color-Text (Fit-Text ('Status: '+$script:UiDemoProgressStatus) $left) '218;224;244'}
             else {$content=$bar+(' '*[Math]::Max(0,$left-($barPrefix.Length+$barWidth+2+1+$pct.Length)))}
         }
-        elseif ($i -eq 7 -and $showQueueBar) {$content=$queueBar+(' '*[Math]::Max(0,$left-(6+$queueBarWidth+2+1+$queuePct.Length)))}
-        else {$content=Color-Text $content $(if ($i -eq 0) {'107;216;245'} elseif ($i -eq 3) {'249;172;204'} else {'218;224;244'})}
+        elseif ($i -eq $queueBarIndex -and $showQueueBar) {$content=$queueBar+(' '*[Math]::Max(0,$left-(6+$queueBarWidth+2+1+$queuePct.Length)))}
+        else {$content=Color-Text $content $(if ($i -eq 0) {'107;216;245'} elseif ($i -eq $stageIndex) {'249;172;204'} else {'218;224;244'})}
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+$content+(Color-Text ' | ' '91;104;151')+$right+(Format-BorderText '|' ($w-1) ($i+2) $border))
     }
-    $lines.Add('  '+(Format-BorderText '+' 0 14 $border)+(Format-DisplayStripe ('-'*($w-2)) $true)+(Format-BorderText '+' ($w-1) 14 $border))
-    $lines.Add('  '+(Format-BorderText '|' 0 15 $border)+' '+(Color-Text (Fit-Text ('MIO > '+$script:UiSay) $inner) '249;202;226')+' '+(Format-BorderText '|' ($w-1) 15 $border))
-    $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 16 $border $true))
+    $lines.Add('  '+(Format-BorderText '+' 0 ($bodyCount+2) $border)+(Format-DisplayStripe ('-'*($w-2)) $true)+(Format-BorderText '+' ($w-1) ($bodyCount+2) $border))
+    $safeSay=$script:UiSay -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
+    $lines.Add('  '+(Format-BorderText '|' 0 ($bodyCount+3) $border)+' '+(Color-Text (Fit-Text ('MIO > '+$safeSay) $inner) '249;202;226')+' '+(Format-BorderText '|' ($w-1) ($bodyCount+3) $border))
+    $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($bodyCount+4) $border $true))
     try {[Console]::CursorVisible=$false} catch {}
     Write-TerminalPanel $lines.ToArray()
 }
@@ -1574,10 +1654,10 @@ function Get-MioPreviewMenuRows([hashtable]$Scene) {
     } elseif ($Scene.SdProgress) {
         $total=[int]$Scene.SdTotal
         $done=[Math]::Min($total,[int][Math]::Floor($total*$script:UiPercent/100.0))
-        $percent=100.0*$done/[Math]::Max(1,$total)
-        $filled=[int][Math]::Floor(28*$percent/100.0)
-        $bar='['+('#'*$filled)+('.'*(28-$filled))+('] {0:N0}%' -f $percent)
-        $rows=@($Scene.Stage,'',$Scene.Detail,'',('{0} / {1} {2}' -f $done,$total,$Scene.SdUnit),$bar,'','Games and emulator cores stay unchanged.','Sample SD data / no card is accessed.')
+        $width=[Math]::Max(12,$script:UiWidth-28)
+        if ($script:UiWidth -lt 72) {$width=[Math]::Max(12,$script:UiWidth-4)}
+        $rows=@(Get-OnionProgressRows $Scene.Stage $Scene.Detail $done $total $Scene.SdUnit $width -Compact:($script:UiHeight -lt 35))+
+              @('Sample SD data / no card is accessed.')
     }
     if ($Scene.Lesson) {$rows+=@('',$Scene.Lesson)}
     return $rows
@@ -1586,32 +1666,37 @@ function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
     $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
     if ($width -lt 72 -or $script:UiHeight -lt 26) {
         # Small windows retain the normal compact layout and resize prompt.
-        return [pscustomobject]@{Rows=@($Rows);Index=0;Count=1;Anchor=-1}
+        return [pscustomobject]@{Rows=@($Rows);DefaultRows=@();Index=0;Count=1;Anchor=-1}
     }
     # Reserve the full logo, top margin, borders, controls and spare bottom row.
     # Page the text rather than switching artwork on and off between scenes.
     $capacity=$script:UiHeight-14
-    $allWrapped=@(Get-MenuRows $Rows ($width-28))
-    if ($allWrapped.Count -le $capacity) {return [pscustomobject]@{Rows=$allWrapped;Index=0;Count=1;Anchor=0L}}
+    $allDefaults=$null
+    $allWrapped=@(Get-MenuRows $Rows ($width-28) ([ref]$allDefaults))
+    if ($allWrapped.Count -le $capacity) {return [pscustomobject]@{Rows=$allWrapped;DefaultRows=$allDefaults;Index=0;Count=1;Anchor=0L}}
     $pages=[System.Collections.Generic.List[object]]::new()
     $current=[System.Collections.Generic.List[string]]::new()
+    $currentDefaults=[System.Collections.Generic.List[bool]]::new()
     $offset=0L; $pageAnchor=0L
     foreach ($line in $Rows) {
-        $wrapped=@(Get-MenuRows @($line) ($width-28))
+        $lineDefaults=$null
+        $wrapped=@(Get-MenuRows @($line) ($width-28) ([ref]$lineDefaults))
         # Keep a wrapped choice or warning together whenever it fits on a page.
         if ($current.Count -and $wrapped.Count -le $capacity -and $current.Count+$wrapped.Count -gt $capacity) {
-            $pages.Add([pscustomobject]@{Rows=$current.ToArray();Anchor=$pageAnchor})
-            $current.Clear(); $pageAnchor=$offset
+            $pages.Add([pscustomobject]@{Rows=$current.ToArray();DefaultRows=$currentDefaults.ToArray();Anchor=$pageAnchor})
+            $current.Clear(); $currentDefaults.Clear(); $pageAnchor=$offset
         }
+        $wrappedIndex=0
         foreach ($row in $wrapped) {
             if ($current.Count -eq $capacity) {
-                $pages.Add([pscustomobject]@{Rows=$current.ToArray();Anchor=$pageAnchor})
-                $current.Clear(); $pageAnchor=$offset
+                $pages.Add([pscustomobject]@{Rows=$current.ToArray();DefaultRows=$currentDefaults.ToArray();Anchor=$pageAnchor})
+                $current.Clear(); $currentDefaults.Clear(); $pageAnchor=$offset
             }
-            $current.Add($row); $offset+=($row -replace '\s','').Length
+            $current.Add($row); $currentDefaults.Add($lineDefaults[$wrappedIndex]); $wrappedIndex++
+            $offset+=($row -replace '\s','').Length
         }
     }
-    if ($current.Count -or -not $pages.Count) {$pages.Add([pscustomobject]@{Rows=$current.ToArray();Anchor=$pageAnchor})}
+    if ($current.Count -or -not $pages.Count) {$pages.Add([pscustomobject]@{Rows=$current.ToArray();DefaultRows=$currentDefaults.ToArray();Anchor=$pageAnchor})}
     $count=$pages.Count
     if ($Anchor -ge 0) {
         # Wrapping changes row numbers, so preserve the first visible text's
@@ -1621,7 +1706,7 @@ function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
     }
     if ($Page -lt 0) {$Page=$count-1}
     $index=[Math]::Max(0,[Math]::Min($count-1,$Page))
-    return [pscustomobject]@{Rows=$pages[$index].Rows;Index=$index;Count=$count;Anchor=$pages[$index].Anchor}
+    return [pscustomobject]@{Rows=$pages[$index].Rows;DefaultRows=$pages[$index].DefaultRows;Index=$index;Count=$count;Anchor=$pages[$index].Anchor}
 }
 function Get-MioPreviewControls([bool]$Paused,[bool]$NeedsSpace=$false) {
     $action='pause';if ($Paused) {$action='resume'}
@@ -1715,7 +1800,7 @@ function Show-MioPreview([string]$Section='Tour') {
                         $page=Get-MioPreviewMenuPage $rows $pageIndex $anchor
                         $pageIndex=$page.Index; $pageCount=$page.Count; $pageAnchor=$page.Anchor
                         $script:UiDemoPage=$pageIndex+1; $script:UiDemoPageCount=$pageCount
-                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $page.Rows $script:UiSay '' -1 $scene.Mood
+                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $page.Rows $script:UiSay '' -1 $scene.Mood -DefaultRows $page.DefaultRows
                     } else {Draw-DisplayPanel -Force}
                     $wasResizePaused=$resizePaused
                     $resizePaused=[bool]$script:UiDemoNeedsSpace

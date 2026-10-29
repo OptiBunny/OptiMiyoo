@@ -129,7 +129,13 @@ function Invoke-ApplicationHostLoop($State) {
         if (-not $request) {continue}
         $success=$true;$result=$null
         try {$result=Invoke-ApplicationHostRequest $State $request}
-        catch {$success=$false;$result=@{error=$_.Exception.Message}}
+        catch {
+            if ($session.Failure) {throw $session.Failure}
+            # A trusted prompt stops its worker before cancelling. There is no
+            # live requester to answer, and a pipe error would hide that choice.
+            if ($session.CancellationRequested -and $_.Exception -is [OperationCanceledException]) {throw}
+            $success=$false;$result=@{error=$_.Exception.Message}
+        }
         $json=ConvertTo-Json -InputObject $result -Depth 24 -Compress
         $session.Respond($request.Id,$success,$json)
         if ($State.StopRequested) {
@@ -141,6 +147,7 @@ function Invoke-ApplicationHostLoop($State) {
         }
     }
     if ($session.Failure) {throw $session.Failure}
+    if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
     return $session.ExitCode
 }
 
@@ -236,6 +243,18 @@ function Invoke-ApplicationHost {
     if ($Arguments.C64Convert) {$Entry='C64'}
     elseif ($Arguments.ZXConvert) {$Entry='ZX'}
     elseif ($Arguments.PrepareOnion) {$Entry='SD'}
+    if ($Entry -eq 'SD') {
+        $originalArguments.OnionRoot=$null
+        if (-not [string]::IsNullOrWhiteSpace([string]$Arguments.OnionRoot)) {
+            # Resolve against the caller's PowerShell location before capturing
+            # the card path; the process working directory can be different.
+            $onionProvider=$null;$onionDrive=$null
+            $onionPath=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+                [string]$Arguments.OnionRoot,[ref]$onionProvider,[ref]$onionDrive)
+            if ($onionProvider.Name -ne 'FileSystem') {throw 'The SD root must be a filesystem path.'}
+            $originalArguments.OnionRoot=$onionPath
+        }
+    }
     Initialize-ApplicationSession
     [OptiMiyoo.ApplicationConsoleWindow]::EnsureRoom()
     $startPage='Main'
@@ -263,7 +282,7 @@ function Invoke-ApplicationHost {
         if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
         while ($again) {
             $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
-            $progressDisplay=$false;$previousEffect=$script:DisplayEffect
+            $progressDisplay=$false;$previousEffect=$script:DisplayEffect;$cancelled=$false
             try {
                 if ($Entry -eq 'SD') {
                     $script:DisplayEffect=$displayEffect
@@ -328,10 +347,14 @@ function Invoke-ApplicationHost {
             } catch {
                 $failure=$_
                 if ($progressDisplay) {$progressDisplay=$false;try {Restore-Display} catch {}}
-                $failureMessage='OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $failure.Exception.Message)
-                if ($consoleScreen) {$deferredFailures.Add($failureMessage)}
-                else {Write-Host $failureMessage -ForegroundColor Red}
-                $exitCode=1
+                if ($session -and $session.CancellationRequested -and -not $session.Failure -and $failure.Exception -is [OperationCanceledException]) {
+                    $cancelled=$true;$exitCode=137
+                } else {
+                    $failureMessage='OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $failure.Exception.Message)
+                    if ($consoleScreen) {$deferredFailures.Add($failureMessage)}
+                    else {Write-Host $failureMessage -ForegroundColor Red}
+                    $exitCode=1
+                }
             }
             finally {
                 try {if ($progressDisplay) {Restore-Display}} catch {}
@@ -353,6 +376,7 @@ function Invoke-ApplicationHost {
                     }
                 }
             }
+            if ($cancelled) {break}
             if ($state) {$displayEffect=$state.DisplayEffect}
             if ($state -and $state.Result) {
                 $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count

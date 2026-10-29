@@ -26,7 +26,7 @@ function Initialize-Display {
     $script:OptiLogoMotionOrder=[System.Collections.Generic.Queue[string]]::new()
     $script:OptiLogoRowCache=@{}
     $script:OptiLogoRowOrder=[System.Collections.Generic.Queue[string]]::new()
-    $script:UiLastLogoRows=@()
+    $script:UiLastLogoRows=@(); $script:UiLastLogoRow=0
     Reset-MioSparseCrt
     Initialize-MioIdleScheduler
     $script:MioRenderCache=@{}
@@ -96,7 +96,7 @@ namespace OptiMiyoo {
     if ($script:UiVT) {
         $script:UiColumns=[Console]::WindowWidth; $script:UiHeight=[Console]::WindowHeight
     }
-    $script:UiPanel=($script:UiVT -and $script:UiWidth -ge 72 -and $script:UiHeight -ge 19)
+    $script:UiPanel=($script:UiVT -and $script:UiWidth -ge 72 -and $script:UiHeight -ge 20)
     # Menus use brief idle gestures and cached sweeps, never continuous redraws.
     Sync-DisplayPreference
     if ($script:UiVT) {Initialize-FrameTimer}
@@ -177,7 +177,7 @@ function Update-DisplaySize([switch]$Throttled) {
     $script:UiIdleMenuCache=$null
     $script:UiMenuLayoutCache=$null
     $script:UiWidth=[Math]::Min(296,[Math]::Max(16,$columns-4))
-    $script:UiPanel=($script:UiWidth -ge 72 -and $height -ge 19)
+    $script:UiPanel=($script:UiWidth -ge 72 -and $height -ge 20)
     return $true
 }
 
@@ -678,10 +678,11 @@ function Get-ProgressBar([double]$Percent,[int]$Width,[int]$Tick) {
     return ('['+$text+']')
 }
 function Get-TerminalFrame([string[]]$Lines) {
-    # Leave a row below the frame so a subsequent plain message cannot scroll
-    # its first line. A compact banner keeps short windows usable.
-    $available=$script:UiHeight-$Lines.Count-1
-    $banner=@(Get-DisplayBanner ($available -ge 7 -and $script:UiHeight -ge 9 -and $script:UiWidth -ge 72))
+    # Keep one blank row above every screen and one spare row below it.
+    # A compact banner preserves both margins in short windows.
+    $available=$script:UiHeight-$Lines.Count-2
+    $fullBanner=($available -ge 7 -and $script:UiWidth -ge 72)
+    $banner=@('')+@(Get-DisplayBanner $fullBanner)
     $rows=[System.Collections.Generic.List[string]]::new()
     foreach ($row in $banner) {$rows.Add($row)}
     $noticeCount=[Math]::Max(0,[Math]::Min(3,$script:UiHeight-$banner.Count-$Lines.Count-1))
@@ -697,7 +698,7 @@ function Get-TerminalFrame([string[]]$Lines) {
         }
     }
     foreach ($row in $Lines) {$rows.Add($row)}
-    return [pscustomobject]@{Lines=$rows.ToArray(); BannerRows=$banner.Count}
+    return [pscustomobject]@{Lines=$rows.ToArray(); BannerRows=$banner.Count;LogoRow=$(if ($fullBanner) {2} else {0})}
 }
 function Flush-DisplayEvents {
     if ($script:UiPendingEvents) {
@@ -712,7 +713,11 @@ function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0) {
     Flush-DisplayEvents
     $layout=Get-TerminalFrame $Lines
     $script:UiLastLogoRows=@()
-    if ($layout.BannerRows -eq 7) {$script:UiLastLogoRows=@($layout.Lines[0..4] | ForEach-Object {$_.Substring(2)})}
+    $script:UiLastLogoRow=$layout.LogoRow
+    if ($layout.LogoRow -gt 0) {
+        $first=$layout.LogoRow-1
+        $script:UiLastLogoRows=@($layout.Lines[$first..($first+4)] | ForEach-Object {$_.Substring(2)})
+    }
     $script:UiLastFrameRows=$layout.Lines.Count
     # Anchor the whole frame to the viewport. No trailing newline: even a
     # frame ending at the bottom must never scroll its own banner away.
@@ -754,7 +759,7 @@ function Get-MenuRows([string[]]$Lines,[int]$Width) {
 
 function Get-MenuLayout([string[]]$Rows,[switch]$NoInput) {
     # Keep source rows intact so a later wider window can unwrap them again.
-    # Reserve the compact banner, borders, prompt and one unused terminal row.
+    # Reserve top padding, the compact banner, borders, prompt and a spare row.
     $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
     $key=('{0}|{1}|{2}|{3}' -f $width,$script:UiColumns,$script:UiHeight,[bool]$NoInput)
     $cached=$script:UiMenuLayoutCache
@@ -763,7 +768,7 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput) {
         for ($i=0;$i -lt $Rows.Count;$i++) {if ($Rows[$i] -cne $cached.Rows[$i]) {$same=$false;break}}
         if ($same) {return $cached.Layout}
     }
-    $overhead=7;if ($NoInput) {$overhead=6}
+    $overhead=8;if ($NoInput) {$overhead=7}
     $result=$null
     if ($width -ge 72) {
         $wrapped=@(Get-MenuRows $Rows ($width-28))
@@ -800,7 +805,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $placeholder=New-Object 'string[]' $panelRows
         $layout=Get-TerminalFrame $placeholder
         $bunnyRow=$layout.Lines.Count-$placeholder.Count+3
-        $logoRow=0; if ($layout.BannerRows -eq 7) {$logoRow=1}
+        $logoRow=$layout.LogoRow
         $script:MioSparseCrtGeometry=@{Key=($logoRow.ToString()+'|'+$bunnyRow);LogoRow=$logoRow;BunnyRow=$bunnyRow}
         $script:MioSparseCrtGeometryKey=$geometryKey
     }
@@ -901,7 +906,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
             InputText=$InputText;Caret=$Caret;Mood=$Mood;Ansi=$script:UiAnsi;Version=$script:AppVersion
             Effect=$script:DisplayEffect;MenuActive=$script:UiMenuActive;EventCount=$script:UiEventRows.Count
             Mio=$mio;SparseCrt=($script:UiSparseCrtPhase -ge 0);Logo=$script:UiLastLogoRows
-            LogoRow=$(if ($script:UiBannerRows -eq 7) {1} else {0})
+            LogoRow=$script:UiLastLogoRow
             InputColumn=(11+$inputView.Caret);BunnyRow=($script:UiLastFrameRows-$lines.Count+3)
         }
     }
@@ -944,9 +949,9 @@ function Show-OnionProgress([string]$Stage,[string]$Detail='',
 }
 
 function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
-                          [int]$Caret=-1,[int]$RequiredHeight=19,[int]$RequiredWidth=76) {
+                          [int]$Caret=-1,[int]$RequiredHeight=20,[int]$RequiredWidth=76) {
     if ($script:UiDemo) {$script:UiDemoNeedsSpace=$true}
-    if ($script:UiColumns -lt 20 -or $script:UiHeight -lt 6) {return}
+    if ($script:UiColumns -lt 20 -or $script:UiHeight -lt 7) {return}
     $width=[Math]::Min(92,$script:UiColumns-4)
     $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Fit-Text ('OptiMiyoo / '+$Title) $width))

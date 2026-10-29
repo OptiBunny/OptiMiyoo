@@ -260,7 +260,7 @@ function Invoke-ApplicationHost {
                 $script:DisplayEffect=$displayEffect
                 Initialize-Display;$progressDisplay=$true
                 $null=& $sdProgress 'Preparing SD setup' 'Starting isolated checks.' 0 -1 systems
-            } else {Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
+            } else {Write-Host '';Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
             $session=[OptiMiyoo.ApplicationSession]::Create()
             $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
             if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress}

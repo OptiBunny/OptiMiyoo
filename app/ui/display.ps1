@@ -848,7 +848,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$Title+' ') ($w-2)
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
     if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
-    $mioStatus='    MIO // READY';if ($NoInput) {$mioStatus='   MIO // WORKING'}
+    $mioStatus='    MIO // READY';if ($Mood -in 'work','scan','check') {$mioStatus='   MIO // WORKING'}
     $channelRight=' '
     if ($menuLayout.ShowMio) {$channelRight=(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')}
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+$channelRight+(Format-BorderText '|' ($w-1) 1 $border))
@@ -1137,8 +1137,13 @@ function Draw-DisplayPanel([switch]$Force) {
     }
     $resultsLine=('Ready '+$script:Ok+'   Skipped '+$script:Skipped+'   Failed '+$script:Failed)
     if ($script:UiDemo) {$resultsLine='Sample: '+$resultsLine}
+    $title='Progress'; $channel='SRC -> DST / LOCAL DISK LINK'
+    if ($script:UiDemo) {
+        $title='DEMO / '+$script:UiStage
+        $channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)
+    }
     $data=@(
-        ('MEDIA VIEWER // '+$script:UiSystem),
+        $script:UiSystem,
         $setLine,
         '',
         $script:UiStage,
@@ -1154,12 +1159,15 @@ function Draw-DisplayPanel([switch]$Force) {
     if ($compact) {
         if ($script:UiDemo -and $script:UiDemoProgressStatus) {$data[5]='Status: '+$script:UiDemoProgressStatus}
         $plain=@($data | ForEach-Object {$_ -replace '\x1b\[[0-9;?]*[ -/]*[@-~]',''} | Where-Object {$_})
-        Draw-MenuPanel -Title 'Progress' -Rows $plain -Prompt ('MIO > '+$script:UiSay) -Caret -1 -Mood $script:UiMood -NoInput
+        Draw-MenuPanel -Title $title -Rows $plain -Prompt ('MIO > '+$script:UiSay) -Caret -1 -Mood $script:UiMood -NoInput -Channel $channel
         return
     }
     $lines=[System.Collections.Generic.List[string]]::new()
-    $lines.Add('  '+(Format-BorderText (('+-- OptiMiyoo // LOCAL DISK LINK ').PadRight($w-1,'-')+'+') 0 0 $border))
-    $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text 'MEDIA CHANNEL // 140.85' $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text '    MIO // ONLINE' 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
+    $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$title+' ') ($w-2)
+    $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
+    $mioStatus='    MIO // READY'
+    if ($script:UiMood -in 'work','scan','check') {$mioStatus='   MIO // WORKING'}
+    $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
     for ($i=0;$i -lt 12;$i++) {
         $right=$mio[$i]
         $content=Fit-Text $data[$i] $left

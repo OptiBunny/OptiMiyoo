@@ -75,7 +75,7 @@ function New-ApplicationSdSession {
     if($originalPrefix.Equals($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $originalPrefix.StartsWith($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $workPrefix.StartsWith($originalPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'SD staging must be separate from the selected SD root.'}
     if(-not [IO.Directory]::Exists($work)){throw 'SD staging must already exist and belong to the application session.'}
     $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
-    $workLease=$null
+    $workLease=$null;$registered=$false
     try {
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
         $cores=Join-Path $original 'RetroArch/.retroarch/cores'
@@ -120,12 +120,18 @@ function New-ApplicationSdSession {
         if($Progress){$null=& $Progress 'Checking supported file types' 'Ready for isolated setup checks.' $profiles.Count $profiles.Count 'systems'}
         $handle=[pscustomobject]@{Id=([Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'));StagedRoot=$state.StagedRoot}
         $state.Handle=$handle;$script:ApplicationSdStates[$handle.Id]=$state
+        $registered=$true
         return $handle
-    }catch {
-        foreach($file in $state.Files.Values){if($file.Lease){$file.Lease.Dispose()}}
-        if($state.RootLease){$state.RootLease.Dispose()}
-        throw
-    }finally{if($workLease){$workLease.Dispose()}}
+    }finally{
+        try {
+            # Engine Stop bypasses catch; startup retains ownership until its
+            # complete state is registered for Close-ApplicationSdSession.
+            if(-not $registered){
+                foreach($file in $state.Files.Values){if($file.Lease){$file.Lease.Dispose();$file.Lease=$null}}
+                if($state.RootLease){$state.RootLease.Dispose();$state.RootLease=$null}
+            }
+        }finally{if($workLease){$workLease.Dispose()}}
+    }
 }
 
 function Test-ApplicationSdCancellation($ApplicationSession) {

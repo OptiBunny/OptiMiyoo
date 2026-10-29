@@ -140,6 +140,7 @@ function Invoke-ApplicationArchiveRequest {
             InputRelativePath=$Payload.ZipRelativePath;DestinationRelativePath=$Payload.DestinationRelativePath;RootLease=$null;InputLease=$null;DestinationLease=$null;
             PowerShell=$null;Async=$null;HashCancellation=$null;Queue=(New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]');Clock=[Diagnostics.Stopwatch]::StartNew();
             Rows=@();Bytes=$null;Offset=0;Completed=$false;Closed=$false;Error=$null;ReceiptId=$null}
+        $taskRegistered=$false
         try {
             $task.HashCancellation=New-Object Threading.CancellationTokenSource
             $task.RootLease=Open-SourcePolicyDirectoryLease $state.WorkRoot
@@ -204,8 +205,13 @@ try {
             [void]$task.PowerShell.AddScript($script)
             [void]$task.PowerShell.AddArgument($script:ApplicationArchiveCodeRoot).AddArgument($inputPath).AddArgument($task.InputLease).AddArgument([string]$Payload.Profile).AddArgument([string]$Payload.ArchiveOperation).AddArgument([int]$index).AddArgument($destination).AddArgument([long]$maximum).AddArgument($task.Queue).AddArgument($task.HashCancellation.Token).AddArgument($workerBytes)
             $task.Async=$task.PowerShell.BeginInvoke();$script:ApplicationArchiveTasks[$key]=$task
+            $taskRegistered=$true
             return [pscustomobject]@{State='Running';TaskId=$task.TaskId;Offset=0}
-        } catch {Close-ApplicationArchiveTask $task;throw}
+        } finally {
+            # Engine Stop bypasses catch. Until registration, session cleanup
+            # cannot discover this task or release its setup leases/runspace.
+            if(-not $taskRegistered){Close-ApplicationArchiveTask $task}
+        }
     }
     if(-not $script:ApplicationArchiveTasks.ContainsKey($key)){throw 'Unknown archive task.'}
     $task=$script:ApplicationArchiveTasks[$key]

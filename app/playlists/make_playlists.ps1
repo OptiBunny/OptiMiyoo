@@ -65,10 +65,21 @@ function Move-OutputPath([string]$Source, [string]$Destination, [bool]$Folder) {
 }
 
 function Get-NaturalDiskKey([string]$Name) {
-    # Compare numbers numerically: Disk 2 sorts before Disk 10.
+    # Normalize decimal digits only in the key; filenames remain unchanged.
+    # Compare digit count before value, without overflowing a numeric type or
+    # padding every run to the largest possible filename length.
     return [regex]::Replace($Name.ToLowerInvariant(), '\d+', {
         param($match)
-        $match.Value.TrimStart('0').PadLeft(20, '0')
+        $digits=$match.Value
+        if($digits -match '[^0-9]') {
+            $normalized=New-Object Text.StringBuilder
+            foreach($character in $digits.ToCharArray()) {
+                [void]$normalized.Append([char](48+[Globalization.CharUnicodeInfo]::GetDecimalDigitValue($character)))
+            }
+            $digits=$normalized.ToString()
+        }
+        $digits=$digits.TrimStart('0');if(-not $digits){$digits='0'}
+        $digits.Length.ToString('D10',[Globalization.CultureInfo]::InvariantCulture)+$digits
     })
 }
 

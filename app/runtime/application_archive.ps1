@@ -41,15 +41,22 @@ function Get-ApplicationArchivePath([string]$Root,$Relative) {
 function Close-ApplicationArchiveTask($Task) {
     if(-not $Task -or $Task.Closed){return}
     $Task.Closed=$true
+    $hashCancellation=$null
+    if($Task.PSObject.Properties['HashCancellation']){$hashCancellation=$Task.HashCancellation}
     try {
+        if($hashCancellation){$hashCancellation.Cancel()}
         if($Task.PowerShell) {
             try {if($Task.Async -and -not $Task.Async.IsCompleted){$Task.PowerShell.Stop()}}
             finally {$Task.PowerShell.Dispose();$Task.PowerShell=$null}
         }
     } finally {
-        if($Task.DestinationLease){$Task.DestinationLease.Dispose();$Task.DestinationLease=$null}
-        if($Task.InputLease){$Task.InputLease.Dispose();$Task.InputLease=$null}
-        if($Task.RootLease){$Task.RootLease.Dispose();$Task.RootLease=$null}
+        try {
+            if($Task.DestinationLease){$Task.DestinationLease.Dispose();$Task.DestinationLease=$null}
+            if($Task.InputLease){$Task.InputLease.Dispose();$Task.InputLease=$null}
+            if($Task.RootLease){$Task.RootLease.Dispose();$Task.RootLease=$null}
+        } finally {
+            if($hashCancellation){$hashCancellation.Dispose();$Task.HashCancellation=$null}
+        }
     }
 }
 
@@ -131,9 +138,10 @@ function Invoke-ApplicationArchiveRequest {
         elseif($Payload.DestinationRelativePath){throw 'This archive operation does not accept a destination.'}
         $task=[pscustomobject]@{Session=$BrokerSession;BatchId=$batchId;TaskId=[Guid]::NewGuid().ToString('N');Operation=$Payload.ArchiveOperation;
             InputRelativePath=$Payload.ZipRelativePath;DestinationRelativePath=$Payload.DestinationRelativePath;RootLease=$null;InputLease=$null;DestinationLease=$null;
-            PowerShell=$null;Async=$null;Queue=(New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]');Clock=[Diagnostics.Stopwatch]::StartNew();
+            PowerShell=$null;Async=$null;HashCancellation=$null;Queue=(New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]');Clock=[Diagnostics.Stopwatch]::StartNew();
             Rows=@();Bytes=$null;Offset=0;Completed=$false;Closed=$false;Error=$null;ReceiptId=$null}
         try {
+            $task.HashCancellation=New-Object Threading.CancellationTokenSource
             $task.RootLease=Open-SourcePolicyDirectoryLease $state.WorkRoot
             $task.InputLease=Open-SourcePolicyReadLease $inputPath $state.WorkRoot
             if($destination) {
@@ -154,7 +162,7 @@ function Invoke-ApplicationArchiveRequest {
             # from a request, so repeated archive calls do not rerun csc.
             $workerBytes=Get-ArchiveSandboxExecutableBytes
             $script=@'
-param($CodeRoot,$InputPath,$InputLease,$Profile,$Operation,$EntryIndex,$Destination,$MaximumBytes,$ProgressQueue,[byte[]]$TrustedWorkerBytes)
+param($CodeRoot,$InputPath,$InputLease,$Profile,$Operation,$EntryIndex,$Destination,$MaximumBytes,$ProgressQueue,[Threading.CancellationToken]$HashCancellationToken,[byte[]]$TrustedWorkerBytes)
 $ErrorActionPreference='Stop'
 foreach($helper in 'shared/compile_support.ps1','shared/source_policy.ps1','shared/archive_limits.ps1','shared/zip_integrity.ps1','shared/native_process.ps1','shared/archive_sandbox.ps1'){. (Join-Path $CodeRoot $helper)}
 $script:ArchiveSandboxExecutableBytes=[byte[]]$TrustedWorkerBytes.Clone()
@@ -168,7 +176,11 @@ foreach($name in 'Assert-PlainOutputParents') {
     if($definitions.Count -ne 1){throw 'Installed archive helper is missing or ambiguous.'}
     . ([scriptblock]::Create($definitions[0].Extent.Text))
 }
-$inputHash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($InputLease.Stream,$null)
+$HashCancellationToken.ThrowIfCancellationRequested()
+# Reject oversized or malformed metadata on the held input before its full read.
+Assert-ArchiveBudget -Stream $InputLease.Stream -Profile $Profile
+$hashProgress=[Action[long,long]]{param($done,$length) $HashCancellationToken.ThrowIfCancellationRequested()}
+$inputHash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($InputLease.Stream,$hashProgress)
 $InputLease.Stream.Position=0
 $archive=Open-ArchiveWithBudget -Path $InputPath -Profile $Profile
 try {
@@ -190,7 +202,7 @@ try {
 '@
             $task.PowerShell=[PowerShell]::Create()
             [void]$task.PowerShell.AddScript($script)
-            [void]$task.PowerShell.AddArgument($script:ApplicationArchiveCodeRoot).AddArgument($inputPath).AddArgument($task.InputLease).AddArgument([string]$Payload.Profile).AddArgument([string]$Payload.ArchiveOperation).AddArgument([int]$index).AddArgument($destination).AddArgument([long]$maximum).AddArgument($task.Queue).AddArgument($workerBytes)
+            [void]$task.PowerShell.AddArgument($script:ApplicationArchiveCodeRoot).AddArgument($inputPath).AddArgument($task.InputLease).AddArgument([string]$Payload.Profile).AddArgument([string]$Payload.ArchiveOperation).AddArgument([int]$index).AddArgument($destination).AddArgument([long]$maximum).AddArgument($task.Queue).AddArgument($task.HashCancellation.Token).AddArgument($workerBytes)
             $task.Async=$task.PowerShell.BeginInvoke();$script:ApplicationArchiveTasks[$key]=$task
             return [pscustomobject]@{State='Running';TaskId=$task.TaskId;Offset=0}
         } catch {Close-ApplicationArchiveTask $task;throw}

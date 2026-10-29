@@ -246,7 +246,12 @@ function Invoke-ApplicationHost {
     $application=[IO.Path]::GetFullPath($ApplicationRoot)
     Initialize-ApplicationVersion $application
     $originalRoot=$application
-    if ($Arguments.Root) {$originalRoot=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath([string]$Arguments.Root)}
+    if ($Arguments.Root) {
+        $rootProvider=$null;$rootDrive=$null
+        $originalRoot=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            [string]$Arguments.Root,[ref]$rootProvider,[ref]$rootDrive)
+        if ($rootProvider.Name -ne 'FileSystem') {throw 'The collection root must be a filesystem path.'}
+    }
     $originalArguments=$Arguments.Clone()
     $menu=($Entry -eq 'Playlist' -and -not $Arguments.System -and -not $Arguments.C64Convert -and -not $Arguments.ZXConvert -and -not $Arguments.PrepareOnion -and -not $Arguments.Preview)
     if ($Arguments.C64Convert) {$Entry='C64'}

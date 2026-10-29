@@ -354,6 +354,8 @@ function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job) {
             foreach($source in $sources){
                 $key=Get-ApplicationBrokerRelative $source.Path $sourceRoot
                 if(-not $State.SourceSnapshot.Files.ContainsKey($key)){throw 'A required source file was not present in the frozen snapshot.'}
+                # Enforce the worker's required-file check before authorizing output or source removal.
+                if($State.SourceSnapshot.Files[$key].Length -eq 0){throw ('Empty file: '+$source.Name)}
                 Add-ApplicationBrokerExpectedFile $manifest $source.Name $State.SourceSnapshot.Files[$key]
             }
         }
@@ -574,6 +576,41 @@ function Set-ApplicationBrokerOverwrite {
     else {$job.Decision=$Choice}
 }
 
+function New-ApplicationBrokerReceiptIndex($Batch,$ReceiptStore) {
+    # Publication starts after native work ends. Copy receipt values into a
+    # private snapshot; never attach a stale cache to the mutable live store.
+    $kinds=New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    foreach($receipt in $ReceiptStore.NativeReceipts) {
+        if($receipt.Success -ne $true -or $receipt.BatchId -cne $Batch.BatchId){continue}
+        if($receipt.Kind -isnot [string] -or $receipt.InputHash -isnot [string] -or $receipt.OutputHash -isnot [string]){throw 'Invalid host-owned native receipt.'}
+        $length=[long]$receipt.Length
+        if(-not $kinds.ContainsKey($receipt.Kind)){$kinds.Add($receipt.Kind,(New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)))}
+        $inputs=$kinds[$receipt.Kind]
+        if(-not $inputs.ContainsKey($receipt.InputHash)) {
+            $inputs.Add($receipt.InputHash,[pscustomobject]@{
+                Lengths=(New-Object 'Collections.Generic.List[long]');SeenLengths=(New-Object 'Collections.Generic.HashSet[long]')
+                Outputs=(New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal))
+            })
+        }
+        $bucket=$inputs[$receipt.InputHash]
+        if($bucket.SeenLengths.Add($length)){$bucket.Lengths.Add($length)}
+        if(-not $bucket.Outputs.ContainsKey($receipt.OutputHash)){$bucket.Outputs.Add($receipt.OutputHash,(New-Object 'Collections.Generic.HashSet[long]'))}
+        [void]$bucket.Outputs[$receipt.OutputHash].Add($length)
+    }
+    foreach($inputs in $kinds.Values){foreach($bucket in $inputs.Values){$bucket.Lengths=$bucket.Lengths.ToArray();$bucket.PSObject.Properties.Remove('SeenLengths')}}
+    $index=[pscustomobject]@{BatchId=[string]$Batch.BatchId;Kinds=$kinds}
+    $index.PSObject.TypeNames.Insert(0,'OptiMiyoo.ApplicationBrokerReceiptIndex')
+    return $index
+}
+
+function Get-ApplicationBrokerReceiptBucket($Expected,$Batch,$Index) {
+    if($Index.BatchId -cne $Batch.BatchId -or $Expected.Converter -isnot [string] -or $Expected.InputHash -isnot [string]){return $null}
+    if(-not $Index.Kinds.ContainsKey($Expected.Converter)){return $null}
+    $inputs=$Index.Kinds[$Expected.Converter]
+    if(-not $inputs.ContainsKey($Expected.InputHash)){return $null}
+    return $inputs[$Expected.InputHash]
+}
+
 function Assert-ApplicationBrokerManifest([hashtable]$Expected,[hashtable]$Actual,$Batch,$ReceiptStore,[switch]$ExactNames) {
     if($Expected.Count -ne $Actual.Count){throw 'Staged output file count does not match the independent source plan.'}
     $actualNames=$null
@@ -588,20 +625,33 @@ function Assert-ApplicationBrokerManifest([hashtable]$Expected,[hashtable]$Actua
         if($ExactNames -and -not $actualNames.Contains($name)){throw 'Staged ZIP member spelling does not match the independent source plan.'}
         $expectedFile=$Expected[$name];$actualFile=$Actual[$name]
         if($expectedFile.Converter){
-            $matching=@($ReceiptStore.NativeReceipts | Where-Object {
-                $_.Success -eq $true -and $_.BatchId -ceq $Batch.BatchId -and $_.Kind -ceq $expectedFile.Converter -and
-                $_.InputHash -ceq $expectedFile.InputHash -and $_.OutputHash -ceq $actualFile.Hash -and [long]$_.Length -eq [long]$actualFile.Length
-            })
-            if($matching.Count -eq 0){throw 'Converted output has no matching host-owned converter receipt; original kept.'}
+            $matched=$false
+            if($ReceiptStore.PSObject.TypeNames[0] -ceq 'OptiMiyoo.ApplicationBrokerReceiptIndex') {
+                $bucket=Get-ApplicationBrokerReceiptBucket $expectedFile $Batch $ReceiptStore
+                $matched=$null -ne $bucket -and $actualFile.Hash -is [string] -and $bucket.Outputs.ContainsKey($actualFile.Hash) -and $bucket.Outputs[$actualFile.Hash].Contains([long]$actualFile.Length)
+            } else {
+                $matching=@($ReceiptStore.NativeReceipts | Where-Object {
+                    $_.Success -eq $true -and $_.BatchId -ceq $Batch.BatchId -and $_.Kind -ceq $expectedFile.Converter -and
+                    $_.InputHash -ceq $expectedFile.InputHash -and $_.OutputHash -ceq $actualFile.Hash -and [long]$_.Length -eq [long]$actualFile.Length
+                })
+                $matched=$matching.Count -gt 0
+            }
+            if(-not $matched){throw 'Converted output has no matching host-owned converter receipt; original kept.'}
         } elseif($expectedFile.Hash -cne $actualFile.Hash -or $expectedFile.Length -ne $actualFile.Length){throw 'Staged output differs from the frozen original content.'}
     }
 }
 
 function Get-ApplicationBrokerExpectedLengths($Expected,$Batch,$ReceiptStore) {
     if(-not $Expected.Converter){return ,([long[]]@($Expected.Length))}
-    $lengths=@($ReceiptStore.NativeReceipts | Where-Object {$_.Success -eq $true -and $_.BatchId -ceq $Batch.BatchId -and $_.Kind -ceq $Expected.Converter -and $_.InputHash -ceq $Expected.InputHash} | ForEach-Object {[long]$_.Length} | Select-Object -Unique)
+    $lengths=@()
+    if($ReceiptStore.PSObject.TypeNames[0] -ceq 'OptiMiyoo.ApplicationBrokerReceiptIndex') {
+        $bucket=Get-ApplicationBrokerReceiptBucket $Expected $Batch $ReceiptStore
+        if($null -ne $bucket){$lengths=$bucket.Lengths}
+    } else {
+        $lengths=@($ReceiptStore.NativeReceipts | Where-Object {$_.Success -eq $true -and $_.BatchId -ceq $Batch.BatchId -and $_.Kind -ceq $Expected.Converter -and $_.InputHash -ceq $Expected.InputHash} | ForEach-Object {[long]$_.Length} | Select-Object -Unique)
+    }
     if(-not $lengths.Count){throw 'Converted output has no matching host-owned receipt.'}
-    return ,([long[]]$lengths)
+    return ,([long[]]$lengths.Clone())
 }
 
 function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot,$ReferenceIndex=$null) {
@@ -752,11 +802,12 @@ function Complete-ApplicationBrokerBatch {
     try {
         Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
         Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
+        $receiptIndex=New-ApplicationBrokerReceiptIndex $batch $ReceiptStore
         if($batch.Operation -eq 'Playlist'){$referenceIndex=& $batch.Module {param($root)New-PlaylistReferenceIndex $root} $dst}
         foreach($id in $CompletedJobIds){
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
             try {
-                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $ReceiptStore $referenceIndex
+                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex
                 Assert-ApplicationBrokerOwnership $batch $job $dst $referenceIndex
                 # Reuse the verified publication and rollback logic for all output layouts.
                 $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock

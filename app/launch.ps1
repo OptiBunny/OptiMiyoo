@@ -67,7 +67,12 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root,[switch]$NoA
     $terminal=Resolve-OptiTerminalExecutable
     if (-not $terminal) {return $false}
     try {
-        if ($Root) {$Root=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root)}
+        if ($Root) {
+            $rootProvider=$null;$rootDrive=$null
+            $Root=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+                $Root,[ref]$rootProvider,[ref]$rootDrive)
+            if ($rootProvider.Name -ne 'FileSystem') {throw 'The collection root must be a filesystem path.'}
+        }
         $powerShell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
         $prefix='"'+$powerShell+'" -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '
         # Use the user's existing default profile without creating registration

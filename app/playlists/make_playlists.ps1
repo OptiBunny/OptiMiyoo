@@ -326,6 +326,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
             $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
             $trackEntry=$Archive.GetEntry($relative)
             if ($null -eq $trackEntry -or $trackEntry.FullName.EndsWith('/')) {throw ('Missing CUE track or spelling/case mismatch: '+$relative)}
+            if ($trackEntry.Length -eq 0) {throw ('Empty CUE track: '+$relative)}
             [void]$tracks.Add($relative)
         }
     }

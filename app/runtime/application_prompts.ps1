@@ -53,14 +53,7 @@ function Get-ApplicationPromptModel {
             $names=@{Auto='Auto / keep input layout';Zip='ZIPs';Folders='Folders';Loose='Loose files'}
             $lines+=@(('Single games: '+$names[$SingleStorage]),('Playlist media: '+$names[$Storage]))
         }
-        $lines+=@('Finished game files go to DST.','',
-            '1. KEEP originals in SRC (default)',
-            '   Leave source files in place.','',
-            '2. REMOVE originals after verified success',
-            '   Check saved output before source removal.',
-            'Skipped or failed items keep their originals.','',
-            'Choosing 1 or 2 starts the batch.',
-            'B. Back to output settings     Q. Exit')
+        $lines+=@(Get-OptiOriginalsRows)
         if($Invalid){$lines+='Choose 1, 2, B or Q.'}
         return [pscustomobject]@{Title=($title+' / originals');Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
     }

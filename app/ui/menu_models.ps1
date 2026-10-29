@@ -4,6 +4,19 @@ if (-not (Get-Command Get-PlaylistSupport -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 }
 
+function Get-OptiOriginalsRows {
+    # The demo and trusted prompt describe the same choices. This helper only
+    # returns text; confirmation and source-removal authority stay in the parent.
+    return @('Finished game files go to DST.','',
+        '1. KEEP originals in SRC (default)',
+        '   Leave source files in place.','',
+        '2. REMOVE originals after verified success',
+        '   Check saved output before source removal.',
+        'Skipped or failed items keep their originals.','',
+        'Choosing 1 or 2 starts the batch.',
+        'B. Back to output settings     Q. Exit')
+}
+
 function Get-OptiStorageDefaults {
     param([Parameter(Mandatory=$true)]$Profile)
     $single='2'; if ($Profile.Folder -in 'CPC','PS','SEGACD') {$single='4'}

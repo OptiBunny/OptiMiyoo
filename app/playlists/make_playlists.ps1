@@ -541,6 +541,12 @@ function Get-SbiCompanions([string]$DiskPath) {
     }
 }
 
+function Get-SbiMemberName([string]$DiskName) {
+    # Loose sidecars use the producer's disc spelling inside new game outputs.
+    # Their physical source paths remain separate for Auto and source policy.
+    return [IO.Path]::GetFileNameWithoutExtension($DiskName)+'.sbi'
+}
+
 function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
     if ($Lines.Count -gt 16384) {throw "CUE has more than 16,384 lines: $CuePath"}
     $found=New-Object 'System.Collections.Generic.List[string]'
@@ -638,7 +644,7 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
         $contentNames=@($diskNames)
         foreach ($disk in $Job.Disks) {
             if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
-            $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {$_.Name})
+            $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {Get-SbiMemberName $disk.Name})
         }
     }
     return [pscustomobject]@{DiskNames=$diskNames;ContentNames=$contentNames}
@@ -655,7 +661,7 @@ function Get-PreservedMediaWrites($Job,$Media,[string]$SourceRoot,[string]$Desti
                 $members+=[pscustomobject]@{Name=$name;Path=(Join-Path $parent $name.Replace('/',[IO.Path]::DirectorySeparatorChar))}
             }
         }
-        foreach ($sbi in @(Get-SbiCompanions $disk.Path)) {$members+=[pscustomobject]@{Name=$sbi.Name;Path=$sbi.FullName}}
+        foreach ($sbi in @(Get-SbiCompanions $disk.Path)) {$members+=[pscustomobject]@{Name=(Get-SbiMemberName $disk.Name);Path=$sbi.FullName}}
         foreach ($member in $members) {
             $sourcePath=[IO.Path]::GetFullPath($member.Path)
             if (-not $sourcePath.StartsWith($sourcePrefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Auto source file is outside SRC.'}
@@ -1326,7 +1332,7 @@ function Copy-LooseSet($Job,[string]$Directory,[hashtable]$SourceHashes=@{}) {
         }
         $sbiFiles=@(Get-SbiCompanions $disk.Path)
         if ($sbiFiles.Count -gt 1) {throw 'Several SBI sidecars match one disc.'}
-        foreach ($sbi in $sbiFiles) {Add-CopiedFile $sbi.FullName ([IO.Path]::GetFileNameWithoutExtension($disk.Name)+'.sbi') $Directory $manifest $SourceHashes}
+        foreach ($sbi in $sbiFiles) {Add-CopiedFile $sbi.FullName (Get-SbiMemberName $disk.Name) $Directory $manifest $SourceHashes}
     }
     return $manifest
 }

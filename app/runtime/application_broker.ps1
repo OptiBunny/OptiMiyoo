@@ -349,7 +349,7 @@ function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job) {
             $sources+=@(& $Module {param($disk)
                 $parent=[IO.Path]::GetDirectoryName($disk.Path)
                 if([IO.Path]::GetExtension($disk.Name) -eq '.cue'){foreach($name in @(Get-CueFiles $disk.Path)){[pscustomobject]@{Name=$name;Path=(Join-Path $parent $name)}}}
-                foreach($sbi in @(Get-SbiCompanions $disk.Path)){[pscustomobject]@{Name=$sbi.Name;Path=$sbi.FullName}}
+                foreach($sbi in @(Get-SbiCompanions $disk.Path)){[pscustomobject]@{Name=(Get-SbiMemberName $disk.Name);Path=$sbi.FullName}}
             } $disk)
             foreach($source in $sources){
                 $key=Get-ApplicationBrokerRelative $source.Path $sourceRoot

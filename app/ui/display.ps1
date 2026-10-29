@@ -875,7 +875,12 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $lines=[System.Collections.Generic.List[string]]::new()
     $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$Title+' ') ($w-2)
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
-    if ($script:UiDemo) {$channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)}
+    if ($script:UiDemo) {
+        $channel=('DEMO scene {0}/{1} / SIMULATION' -f $script:UiDemoScene,$script:UiDemoCount)
+        if ($script:UiDemoPageCount -gt 1) {
+            $channel=('DEMO scene {0}/{1} / page {2}/{3}' -f $script:UiDemoScene,$script:UiDemoCount,$script:UiDemoPage,$script:UiDemoPageCount)
+        }
+    }
     $mioStatus='    MIO // READY';if ($Mood -in 'work','scan','check') {$mioStatus='   MIO // WORKING'}
     $channelRight=' '
     if ($menuLayout.ShowMio) {$channelRight=(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')}
@@ -1391,8 +1396,8 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'A guided tour of every menu and the main features.',
             'All games, progress and results here are examples.',
             'No game files or SD cards are read or changed.','',
-            'Space: pause / resume','N / Right / Enter: next scene',
-            'P / Left: previous scene','R: restart this section',
+            'Space: pause / resume','N / Right / Enter: next',
+            'P / Left: previous','R: restart this section',
             'E: turn the CRT effect on or off','B / Q / Esc: return to demo selection');Detail='Use the controls below at any time.';Duration=13000},
         @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';MenuPage='Main';Lesson='S prepares an SD card. C/Z convert. Numbers create playlists.';Duration=12000},
         @{Group='Tour';Mood='idle';Stage='Choose a demo';System='MENU';MenuPage='Demo';Lesson='Each section can also be watched on its own.';Duration=10000},
@@ -1577,6 +1582,47 @@ function Get-MioPreviewMenuRows([hashtable]$Scene) {
     if ($Scene.Lesson) {$rows+=@('',$Scene.Lesson)}
     return $rows
 }
+function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
+    $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+    if ($width -lt 72 -or $script:UiHeight -lt 26) {
+        # Small windows retain the normal compact layout and resize prompt.
+        return [pscustomobject]@{Rows=@($Rows);Index=0;Count=1;Anchor=-1}
+    }
+    # Reserve the full logo, top margin, borders, controls and spare bottom row.
+    # Page the text rather than switching artwork on and off between scenes.
+    $capacity=$script:UiHeight-14
+    $allWrapped=@(Get-MenuRows $Rows ($width-28))
+    if ($allWrapped.Count -le $capacity) {return [pscustomobject]@{Rows=$allWrapped;Index=0;Count=1;Anchor=0L}}
+    $pages=[System.Collections.Generic.List[object]]::new()
+    $current=[System.Collections.Generic.List[string]]::new()
+    $offset=0L; $pageAnchor=0L
+    foreach ($line in $Rows) {
+        $wrapped=@(Get-MenuRows @($line) ($width-28))
+        # Keep a wrapped choice or warning together whenever it fits on a page.
+        if ($current.Count -and $wrapped.Count -le $capacity -and $current.Count+$wrapped.Count -gt $capacity) {
+            $pages.Add([pscustomobject]@{Rows=$current.ToArray();Anchor=$pageAnchor})
+            $current.Clear(); $pageAnchor=$offset
+        }
+        foreach ($row in $wrapped) {
+            if ($current.Count -eq $capacity) {
+                $pages.Add([pscustomobject]@{Rows=$current.ToArray();Anchor=$pageAnchor})
+                $current.Clear(); $pageAnchor=$offset
+            }
+            $current.Add($row); $offset+=($row -replace '\s','').Length
+        }
+    }
+    if ($current.Count -or -not $pages.Count) {$pages.Add([pscustomobject]@{Rows=$current.ToArray();Anchor=$pageAnchor})}
+    $count=$pages.Count
+    if ($Anchor -ge 0) {
+        # Wrapping changes row numbers, so preserve the first visible text's
+        # position instead. Ignore whitespace removed by word wrapping.
+        $Page=0
+        for ($i=1;$i -lt $count;$i++) {if ($pages[$i].Anchor -gt $Anchor) {break}; $Page=$i}
+    }
+    if ($Page -lt 0) {$Page=$count-1}
+    $index=[Math]::Max(0,[Math]::Min($count-1,$Page))
+    return [pscustomobject]@{Rows=$pages[$index].Rows;Index=$index;Count=$count;Anchor=$pages[$index].Anchor}
+}
 function Get-MioPreviewControls([bool]$Paused,[bool]$NeedsSpace=$false) {
     $action='pause';if ($Paused) {$action='resume'}
     $prefix='DEMO';if ($Paused) {$prefix='PAUSED'}
@@ -1615,7 +1661,7 @@ function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[
 function Show-MioPreview([string]$Section='Tour') {
     $scenes=@(Get-MioPreviewScenes $Section)
     $saved=@{}
-    foreach ($name in 'Total','Processed','Ok','Skipped','Failed','Clock','UiSystem','UiGame','UiStage','UiDetail','UiPercent','UiMood','UiSay','UiTick','UiLastStage','UiPoseOverride','UiDemo','UiDemoPaused','UiDemoScene','UiDemoCount','UiDemoProgressTick','UiDemoProgressStatus','UiPreparing','UiPreparationCompleted','UiPreparationTotal','UiPreparationUnit','UiDemoNeedsSpace') {
+    foreach ($name in 'Total','Processed','Ok','Skipped','Failed','Clock','UiSystem','UiGame','UiStage','UiDetail','UiPercent','UiMood','UiSay','UiTick','UiLastStage','UiPoseOverride','UiDemo','UiDemoPaused','UiDemoScene','UiDemoCount','UiDemoPage','UiDemoPageCount','UiDemoProgressTick','UiDemoProgressStatus','UiPreparing','UiPreparationCompleted','UiPreparationTotal','UiPreparationUnit','UiDemoNeedsSpace') {
         $value=Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
         $saved[$name]=$null; if ($value) {$saved[$name]=$value.Value}
     }
@@ -1625,9 +1671,12 @@ function Show-MioPreview([string]$Section='Tour') {
         $script:UiPreparing=$false; $script:UiDemoNeedsSpace=$false
         $animateDemo=$script:UiVT
         $script:Clock=[Diagnostics.Stopwatch]::StartNew()
-        $index=0; $paused=$false
+        $index=0; $paused=$false; $requestedPage=0
         while ($index -ge 0 -and $index -lt $scenes.Count) {
             $scene=$scenes[$index]; $script:UiDemoScene=$index+1
+            $pageIndex=0; if ($scene.Menu) {$pageIndex=$requestedPage}
+            $requestedPage=0; $pageCount=1; $pageAnchor=-1L
+            $script:UiDemoPage=1; $script:UiDemoPageCount=1
             $script:UiSystem='DEMO / '+$scene.System; $script:UiGame=$scene.Game
             $script:UiStage=$scene.Stage; $script:UiDetail=$scene.Detail
             $script:UiMood=$scene.Mood; $script:UiPoseOverride=$scene.Pose; $script:UiPercent=-1
@@ -1648,7 +1697,8 @@ function Show-MioPreview([string]$Section='Tour') {
             if (($scene.Menu -and -not $scene.SdProgress) -or $scene.IdleGesture) {$periodic=$false}
             elseif ($scene.Status -or $scene.Complete) {$frameInterval=1000}
             while ($true) {
-                if (Update-DisplaySize -Throttled) {$dirty=$true}
+                $resized=Update-DisplaySize -Throttled
+                if ($resized) {$dirty=$true}
                 if ($scene.IdleGesture -and -not $NoAnimation -and -not $paused -and -not $resizePaused) {
                     $pose=Get-MioIdleGesturePose $scene.IdleGesture ($timer.ElapsedMilliseconds-400)
                     if ($pose -cne $script:UiPoseOverride) {$dirty=$true}
@@ -1661,7 +1711,11 @@ function Show-MioPreview([string]$Section='Tour') {
                     $script:UiDemoNeedsSpace=$false
                     if ($scene.Menu) {
                         $rows=@(Get-MioPreviewMenuRows $scene)
-                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $rows $script:UiSay '' -1 $scene.Mood
+                        $anchor=-1L; if ($resized) {$anchor=$pageAnchor}
+                        $page=Get-MioPreviewMenuPage $rows $pageIndex $anchor
+                        $pageIndex=$page.Index; $pageCount=$page.Count; $pageAnchor=$page.Anchor
+                        $script:UiDemoPage=$pageIndex+1; $script:UiDemoPageCount=$pageCount
+                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $page.Rows $script:UiSay '' -1 $scene.Mood
                     } else {Draw-DisplayPanel -Force}
                     $wasResizePaused=$resizePaused
                     $resizePaused=[bool]$script:UiDemoNeedsSpace
@@ -1669,7 +1723,10 @@ function Show-MioPreview([string]$Section='Tour') {
                     else {$timer.Start();$script:Clock.Start()}
                     $dirty=($wasResizePaused -ne $resizePaused)
                 }
-                if (-not $paused -and -not $resizePaused -and $timer.ElapsedMilliseconds -ge $duration) {break}
+                if (-not $paused -and -not $resizePaused -and $timer.ElapsedMilliseconds -ge $duration) {
+                    if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1}
+                    break
+                }
                 if ([Console]::KeyAvailable) {
                     $key=[Console]::ReadKey($true)
                     if ($key.Key -in [ConsoleKey]::B,[ConsoleKey]::Q,[ConsoleKey]::Escape) {return}
@@ -1678,8 +1735,15 @@ function Show-MioPreview([string]$Section='Tour') {
                         if ($paused -or $resizePaused) {$timer.Stop();$script:Clock.Stop()} else {$timer.Start();$script:Clock.Start()}
                         $script:UiDemoPaused=$paused; $dirty=$true
                     }
-                    elseif ($key.Key -in [ConsoleKey]::N,[ConsoleKey]::RightArrow,[ConsoleKey]::Enter) {break}
-                    elseif ($key.Key -in [ConsoleKey]::P,[ConsoleKey]::LeftArrow) {$next=[Math]::Max(0,$index-1); break}
+                    elseif ($key.Key -in [ConsoleKey]::N,[ConsoleKey]::RightArrow,[ConsoleKey]::Enter) {
+                        if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1}
+                        break
+                    }
+                    elseif ($key.Key -in [ConsoleKey]::P,[ConsoleKey]::LeftArrow) {
+                        if ($pageIndex -gt 0) {$next=$index; $requestedPage=$pageIndex-1}
+                        else {$next=[Math]::Max(0,$index-1); if ($index -gt 0) {$requestedPage=-1}}
+                        break
+                    }
                     elseif ($key.Key -eq [ConsoleKey]::R) {$next=0; $script:Clock.Restart();if ($paused) {$script:Clock.Stop()};break}
                     elseif ($key.Key -eq [ConsoleKey]::E) {Switch-DisplayEffect; $dirty=$true}
                 } else {

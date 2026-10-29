@@ -34,7 +34,7 @@ using Microsoft.Win32.SafeHandles;
 internal static class ArchivePayloadWorker {
     private static readonly uint[] Table=MakeTable();
     private static uint[] MakeTable() {uint[] t=new uint[256];for(uint i=0;i<256;i++){uint c=i;for(int b=0;b<8;b++)c=(c>>1)^((c&1)==0?0:0xedb88320U);t[i]=c;}return t;}
-    private sealed class Request {internal long Length;internal uint Crc;internal bool Directory;}
+    private sealed class Request {internal long Length;internal uint Crc;internal bool Directory,Inspect;}
     private static int Main(string[] args) {
         try {
             if(args.Length!=1) throw new InvalidDataException("Invalid archive worker arguments.");
@@ -48,8 +48,9 @@ internal static class ArchivePayloadWorker {
             for(int i=0;i<requests.Length;i++) {
                 string[] p=lines[i+3].Split('|');if(p.Length!=3) throw new InvalidDataException("Invalid archive entry request.");
                 long length=long.Parse(p[0],CultureInfo.InvariantCulture);uint crc=uint.Parse(p[1],NumberStyles.HexNumber,CultureInfo.InvariantCulture);
-                if(length<0 || length>17179869184L || declaredTotal>68719476736L-length || (p[2]!="D" && p[2]!="F")) throw new InvalidDataException("Archive limits exceeded.");
-                declaredTotal+=length;requests[i]=new Request{Length=length,Crc=crc,Directory=p[2]=="D"};
+                if(length<0 || length>17179869184L || declaredTotal>68719476736L-length || (p[2]!="D" && p[2]!="F" && p[2]!="I")) throw new InvalidDataException("Archive limits exceeded.");
+                if(p[2]=="I" && (mode!="hash" || length>67108864L)) throw new InvalidDataException("Invalid inspected archive payload.");
+                declaredTotal+=length;requests[i]=new Request{Length=length,Crc=crc,Directory=p[2]=="D",Inspect=p[2]=="I"};
             }
             using(FileStream input=new FileStream(new SafeFileHandle(new IntPtr(handle),true),FileAccess.Read))
             using(ZipArchive archive=new ZipArchive(input,ZipArchiveMode.Read,false))
@@ -65,7 +66,7 @@ internal static class ArchivePayloadWorker {
                     string output="payload-"+index.ToString("D5",CultureInfo.InvariantCulture)+".bin";
                     long total=0;uint crc=0xffffffffU;
                     using(Stream contents=entry.Open())
-                    using(Stream destination=mode=="hash"?Stream.Null:new FileStream(output,FileMode.CreateNew,FileAccess.Write))
+                    using(Stream destination=mode=="hash"&&!request.Inspect?Stream.Null:new FileStream(output,FileMode.CreateNew,FileAccess.Write))
                     using(SHA256 sha=SHA256.Create()) {
                         int count;while((count=contents.Read(buffer,0,buffer.Length))>0) {
                             if(count>request.Length-total) throw new InvalidDataException("ZIP entry expanded beyond its declared length.");
@@ -198,8 +199,14 @@ function Invoke-ArchiveSandbox {
           [Parameter(Mandatory=$true)][IO.Compression.ZipArchive]$Archive,
           [ValidateSet('Media','Floppy')][string]$Profile='Media',
           [ValidateSet('Hash','Extract','Read','File')][string]$Operation='Hash',
-          [int]$EntryIndex=-1,[string]$Destination,[long]$MaximumBytes=16777216,[scriptblock]$Progress=$null)
-    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {return (Invoke-ApplicationArchive @PSBoundParameters)}
+          [int]$EntryIndex=-1,[string]$Destination,[long]$MaximumBytes=16777216,[scriptblock]$Progress=$null,
+          [ValidateSet('.g64','.dsk')][string[]]$InspectExtensions=@(),[scriptblock]$InspectPayload=$null)
+    if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {
+        if($InspectExtensions.Count -or $InspectPayload){throw 'Archive payload inspection is host-only.'}
+        return (Invoke-ApplicationArchive @PSBoundParameters)
+    }
+    if(($InspectExtensions.Count -gt 0) -ne ($null -ne $InspectPayload) -or ($InspectPayload -and ($Operation -ne 'Hash' -or $EntryIndex -ne -1))){throw 'Invalid trusted archive inspection request.'}
+    $inspection=New-Object 'Collections.Generic.HashSet[int]'
     $toolRoot=Join-Path (Get-OptiScratchRoot) ('oas_'+[Guid]::NewGuid().ToString('N').Substring(0,16))
     $job=$null;$readLease=$null;$stdout=$null;$stderr=$null;$destinationLease=$null;$toolParentLease=$null;$toolLease=$null;$toolCreated=$false;$toolIdentity=$null
     try {
@@ -209,6 +216,15 @@ function Invoke-ArchiveSandbox {
         # ambiguous archive before any operation can describe one of its members.
         Assert-ArchiveSandboxMemberNames $Archive -RequireConsistentDirectoryCase:($Operation -eq 'Extract')
         Assert-ArchiveSandboxOutputPaths $Archive $Operation $Destination
+        if($InspectPayload){
+            [long]$inspectedBytes=0;[long]$inspectionLimit=64GB;if($Profile -eq 'Floppy'){$inspectionLimit=8GB}
+            for($i=0;$i -lt $Archive.Entries.Count;$i++){
+                $entry=$Archive.Entries[$i]
+                if($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\') -or [IO.Path]::GetExtension($entry.FullName) -notin $InspectExtensions){continue}
+                if($entry.Length -gt 64MB -or $entry.Length -gt $inspectionLimit-$inspectedBytes){throw 'Inspected disk image exceeds its supported size limit.'}
+                $inspectedBytes+=$entry.Length;[void]$inspection.Add($i)
+            }
+        }
         Initialize-NativeSandbox;Initialize-NativeTextCapture
         $exeBytes=Get-ArchiveSandboxExecutableBytes
         $toolParentLease=Open-SourcePolicyDirectoryLease (Get-OptiScratchRoot)
@@ -229,7 +245,7 @@ function Invoke-ArchiveSandbox {
         $request.Add('OptiMiyooArchive1');$request.Add($workerOperation);$request.Add([string]$EntryIndex)
         foreach($entry in $Archive.Entries) {
             $directory=$entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')
-            $kind='F';if($directory){$kind='D'}
+            $kind='F';if($directory){$kind='D'}elseif($inspection.Contains($request.Count-3)){$kind='I'}
             $request.Add(('{0}|{1:X8}|{2}' -f $entry.Length,$checksums[$request.Count-3],$kind))
         }
         [IO.File]::WriteAllLines((Join-Path $job.WorkPath 'request.txt'),$request,[Text.Encoding]::ASCII)
@@ -296,7 +312,7 @@ function Invoke-ArchiveSandbox {
         $manifest=@{};$readBytes=$null
         foreach($index in $rows.Keys) {
             $entry=$Archive.Entries[$index];$row=$rows[$index]
-            if($Operation -ne 'Hash') {
+            if($Operation -ne 'Hash' -or $inspection.Contains($index)) {
                 $payload=Join-Path $job.WorkPath ('payload-{0:D5}.bin' -f $index)
                 $payloadLease=Open-SourcePolicyReadLease $payload $job.WorkPath
                 try {
@@ -304,7 +320,16 @@ function Invoke-ArchiveSandbox {
                     $actual=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($payloadLease.Stream,$null)
                     if($actual -cne $row.Hash) {throw 'Archive sandbox payload hash mismatch.'}
                     $payloadLease.Stream.Position=0
-                    if($Operation -eq 'Read') {
+                    if($inspection.Contains($index)) {
+                        # Only installed trusted planning supplies this callback.
+                        # It receives the same pinned bytes just hashed above;
+                        # an exception, null, false or extra output cannot grant
+                        # format validity or a complete archive manifest.
+                        try {
+                            $valid=& $InspectPayload $payloadLease.Stream $row.Length $entry.FullName
+                            if($valid -isnot [bool] -or -not $valid){throw 'Archive media payload failed structural validation.'}
+                        } finally {$payloadLease.Stream.Position=0}
+                    } elseif($Operation -eq 'Read') {
                         $memory=New-Object IO.MemoryStream
                         try {$payloadLease.Stream.CopyTo($memory);$readBytes=$memory.ToArray()} finally {$memory.Dispose()}
                     } else {

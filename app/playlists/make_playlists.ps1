@@ -343,7 +343,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     foreach ($disk in $disks) {
         if (-not $stems.Add([IO.Path]::ChangeExtension($disk,$null))) {throw "Multiple formats of the same game file in one ZIP: $disk. Keep one playable version."}
     }
-    return @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}})
+    return @(Get-OrderedTapeMembers @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}}))
 }
 function Assert-ZipExtractionNames([IO.Compression.ZipArchive]$Archive) {
     Assert-ArchiveSandboxMemberBudget $Archive
@@ -411,7 +411,7 @@ function New-Playlist([string[]]$DiskNames,[string]$RelativeStem,[string]$Destin
 }
 
 function Get-TapeGrouping([string]$Title) {
-    $pattern='(?i)\s*[\(\[]\s*(?:(?:tape|cassette)\s*(?<tape>\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?(?:\s+side\s*(?<side>\d+|[a-z]))?|side\s*(?<side>\d+|[a-z]))\s*[\)\]]'
+    $pattern='(?i)\s*[\(\[]\s*(?:(?:tape|cassette)\s*(?<tape>\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?(?:\s+side\s*(?<side>\d+|[a-z])(?:\s*(?:of|/)\s*\d+)?)?|side\s*(?<side>\d+|[a-z])(?:\s*(?:of|/)\s*\d+)?)\s*[\)\]]'
     $found=[regex]::Matches($Title,$pattern)
     $tapes=@($found | Where-Object {$_.Groups['tape'].Success})
     $sides=@($found | Where-Object {$_.Groups['side'].Success})
@@ -419,9 +419,68 @@ function Get-TapeGrouping([string]$Title) {
     $errorText=$null
     if ($tapes.Count -gt 1 -or $sides.Count -gt 1) {$errorText='Ambiguous tape/side tags. Keep one release per set or put it in a game ZIP.'}
     $tag=''; if ($tapes.Count) {$tag=$tapes[0].Groups['tape'].Value}
-    if ($sides.Count) {$tag+='.'+$sides[0].Groups['side'].Value}
+    if ($sides.Count) {if($tag){$tag+='.'};$tag+=$sides[0].Groups['side'].Value}
     $name=[regex]::Replace([regex]::Replace($Title,$pattern,''),'\s{2,}',' ').Trim()
     [pscustomobject]@{Title=$name; Tag=$tag; Error=$errorText}
+}
+
+function Get-PlaylistMediaIdentity([string]$Relative) {
+    $parent=([string][IO.Path]::GetDirectoryName($Relative.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
+    $title=[IO.Path]::GetFileNameWithoutExtension($Relative);$tag='';$tagged=$false;$usedFolderTitle=$false;$errorText=$null
+    $tapeGrouping=$null
+    if ([IO.Path]::GetExtension($Relative) -in '.tap','.t64') {
+        $tapeGrouping=Get-TapeGrouping $title
+        if ($null -eq $tapeGrouping -and $parent) {
+            # A bare Side A or Tape 1 Side A inside its game folder has the
+            # same identity as Game (Side A) or Game (Tape 1 Side A).
+            $bareGrouping=Get-TapeGrouping ('('+$title+')')
+            if ($null -ne $bareGrouping -and -not $bareGrouping.Title) {
+                $tapeGrouping=$bareGrouping;$usedFolderTitle=$true
+                $tapeGrouping.Title=[IO.Path]::GetFileName($parent)
+                $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+            }
+        }
+    }
+    $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
+    $found=[regex]::Matches($title,$pattern)
+    if ($null -ne $tapeGrouping) {
+        $tag=$tapeGrouping.Tag;$tagged=$true;$title=$tapeGrouping.Title;$errorText=$tapeGrouping.Error
+    } elseif ($found.Count -eq 1) {
+        $tag=$found[0].Groups[1].Value.ToLowerInvariant();$tagged=$true
+        $title=[regex]::Replace($title,$pattern,'').Trim()
+        $title=[regex]::Replace($title,'\s{2,}',' ')
+    } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])$') {
+        $tag=$Matches[1].ToLowerInvariant();$tagged=$true
+        $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
+        $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+    }
+    if ($null -eq $tapeGrouping -and $found.Count -gt 1) {$errorText='Multiple disk tags in a loose filename. Put the complete game in one ZIP to specify its grouping.'}
+    if(-not $usedFolderTitle -and $parent -and [IO.Path]::GetFileName($parent).Equals($title,[StringComparison]::OrdinalIgnoreCase)){
+        $title=[IO.Path]::GetFileName($parent)
+        $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+    }
+    $stem=$title;if($parent){$stem=$parent+'/'+$title}
+    return [pscustomobject]@{Stem=$stem;Tag=$tag;Tagged=$tagged;Error=$errorText}
+}
+
+function Get-OrderedTapeMembers([string[]]$Names) {
+    # An archive can intentionally contain unrelated or untagged media. Only
+    # use tape labels when every member describes the same tagged game set.
+    if($Names.Count -lt 2){return $Names}
+    $members=New-Object 'System.Collections.Generic.List[object]';$stem=$null
+    foreach($name in $Names) {
+        if([IO.Path]::GetExtension($name) -notin '.tap','.t64'){return $Names}
+        $identity=Get-PlaylistMediaIdentity $name
+        if(-not $identity.Tagged -or $identity.Error){return $Names}
+        if($null -eq $stem){$stem=$identity.Stem}
+        elseif(-not $stem.Equals($identity.Stem,[StringComparison]::OrdinalIgnoreCase)){return $Names}
+        $members.Add([pscustomobject]@{Name=$name;Tag=$identity.Tag})
+    }
+    $tags=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($member in $members) {
+        if(-not $tags.Add((Get-NaturalDiskKey $member.Tag))){throw 'Ambiguous tape set: repeated tape/side label. Separate alternate releases.'}
+    }
+    return @($members | Sort-Object @{Expression={Get-NaturalDiskKey $_.Tag}},@{Expression={Get-NaturalDiskKey $_.Name}} | ForEach-Object {$_.Name})
 }
 
 function Get-TapeSupportIssue([string[]]$Names,$Support) {
@@ -470,37 +529,15 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
     Show-PreparationProgress 'Grouping loose media' 'Matching disk and tape labels.' 0 $looseFiles.Count 'files'
     foreach ($file in $looseFiles) {
         $relative=$file.FullName.Substring($prefix.Length).Replace('\','/')
-        $parent=([string][IO.Path]::GetDirectoryName($relative.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
-        $title=$file.BaseName; $tag=''; $tagged=$false; $usedFolderTitle=$false
-        $tapeGrouping=$null
-        if ($file.Extension -in '.tap','.t64') {$tapeGrouping=Get-TapeGrouping $title}
-        $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
-        $found=[regex]::Matches($title,$pattern)
-        if ($null -ne $tapeGrouping) {
-            $tag=$tapeGrouping.Tag; $tagged=$true; $title=$tapeGrouping.Title
-        } elseif ($found.Count -eq 1) {
-            $tag=$found[0].Groups[1].Value.ToLowerInvariant(); $tagged=$true
-            $title=[regex]::Replace($title,$pattern,'').Trim()
-            $title=[regex]::Replace($title,'\s{2,}',' ')
-        } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])$') {
-            $tag=$Matches[1].ToLowerInvariant(); $tagged=$true
-            $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
-            $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
-        }
-        if(-not $usedFolderTitle -and $parent -and [IO.Path]::GetFileName($parent).Equals($title,[StringComparison]::OrdinalIgnoreCase)){
-            $title=[IO.Path]::GetFileName($parent)
-            $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
-        }
-        $stem=$title; if ($parent) {$stem=$parent+'/'+$title}
+        $identity=Get-PlaylistMediaIdentity $relative;$stem=$identity.Stem
         if (-not $groups.ContainsKey($stem)) {
             # A loose title may equal a ZIP's displayed filename. Keep its
             # transaction identity separate while preserving visible names.
             $groups[$stem]=[pscustomobject]@{System=$Profile.Folder; Source=$stem; SourceKey=('files:'+$stem); Stem=$stem; Zip=$null; Disks=(New-Object 'System.Collections.Generic.List[object]'); Error=$null}
         }
         $group=$groups[$stem]
-        $group.Disks.Add([pscustomobject]@{Path=$file.FullName; Name=($file.BaseName+$file.Extension.ToLowerInvariant()); Tag=$tag; Tagged=$tagged})
-        if ($null -ne $tapeGrouping) {if ($tapeGrouping.Error) {$group.Error=$tapeGrouping.Error}}
-        elseif ($found.Count -gt 1) {$group.Error='Multiple disk tags in a loose filename. Put the complete game in one ZIP to specify its grouping.'}
+        $group.Disks.Add([pscustomobject]@{Path=$file.FullName; Name=($file.BaseName+$file.Extension.ToLowerInvariant()); Tag=$identity.Tag; Tagged=$identity.Tagged})
+        if ($identity.Error) {$group.Error=$identity.Error}
         $grouped++; Show-PreparationProgress 'Grouping loose media' $file.Name $grouped $looseFiles.Count 'files'
     }
     $orderedGroups=@($groups.Values | Sort-Object Stem); $ordered=0

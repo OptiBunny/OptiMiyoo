@@ -321,12 +321,33 @@ function Get-ApplicationBrokerFile([string]$Path,[string]$Root,[string]$CopyTo,[
     } finally {if($output){$output.Dispose()};$lease.Dispose()}
 }
 
-function Get-ApplicationBrokerArchive($Module,[string]$Path) {
-    return (& $Module {param($path)
-        $archive=Open-ArchiveWithBudget -Path $path -Profile Media
-        try {return Invoke-ArchiveSandbox -ZipPath $path -Archive $archive -Profile Media -Operation Hash}
+function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64','ZX')][string]$InspectMedia='') {
+    return (& $Module {param($path,$inspectMedia)
+        $profile='Media';$inspection=@{}
+        if($inspectMedia){
+            $profile='Floppy';$extension='.g64';if($inspectMedia -eq 'ZX'){$extension='.dsk'}
+            $inspection=@{InspectExtensions=@($extension);InspectPayload={param($stream,$length,$name)
+                if([IO.Path]::GetExtension($name) -ieq '.g64'){Assert-G64 -InputStream $stream;return $true}
+                return (Test-DskStream $stream $length)
+            }}
+        }
+        $archive=Open-ArchiveWithBudget -Path $path -Profile $profile
+        try {return Invoke-ArchiveSandbox -ZipPath $path -Archive $archive -Profile $profile -Operation Hash @inspection}
         finally {$archive.Dispose()}
-    } $Path)
+    } $Path $InspectMedia)
+}
+
+function Assert-ApplicationBrokerPassthroughMedia($Module,$Lease,[string]$Operation) {
+    if(-not $Lease -or -not $Lease.Stream -or -not $Lease.Stream.CanRead){throw 'Verified source lease is unavailable for media validation.'}
+    $position=$Lease.Stream.Position
+    try {
+        $Lease.Stream.Position=0
+        $valid=& $Module {param($stream,$kind)
+            if($kind -eq 'C64'){Assert-G64 -InputStream $stream;return $true}
+            return (Test-DskStream $stream $stream.Length)
+        } $Lease.Stream $Operation
+        if($valid -isnot [bool] -or -not $valid){throw 'Existing disk image structure is invalid; original kept.'}
+    } finally {$Lease.Stream.Position=$position}
 }
 
 function Add-ApplicationBrokerExpectedFile([hashtable]$Manifest,[string]$Name,$File,[string]$Converter='') {
@@ -522,18 +543,18 @@ function Start-ApplicationBrokerBatch {
     Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
     Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'SRC') -MaximumEntries ([Math]::Max(1,$state.SourceSnapshot.Files.Count+$state.SourceSnapshot.Directories.Count)) -ExpectedFiles $state.SourceSnapshot.Files) 'Staged source tree'
     Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'DST') -MaximumEntries ([Math]::Max(1,$state.DestinationSnapshot.Files.Count+$state.DestinationSnapshot.Directories.Count)) -ExpectedFiles $state.DestinationSnapshot.Files) 'Staged output tree'
-    $sourcePins=New-Object 'System.Collections.Generic.List[IDisposable]'
+    $sourcePins=New-Object 'System.Collections.Generic.Dictionary[string,IDisposable]' ([StringComparer]::OrdinalIgnoreCase)
     try {
     # Bind all trusted parsing to the initial copied bytes. Rehashing before and
     # after parsing alone would permit a change-and-revert race during a ZIP or
     # CUE read, producing a plan unrelated to the source-removal baseline.
     foreach($relative in $state.SourceSnapshot.Files.Keys){
         $path=Join-Path $src $relative
-        $sourcePins.Add((Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.SourceSnapshot.Files[$relative].Hash -Root $src -ReadOnly))
+        $sourcePins.Add([IO.Path]::GetFullPath($path),(Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.SourceSnapshot.Files[$relative].Hash -Root $src -ReadOnly))
     }
     foreach($relative in $state.DestinationSnapshot.Files.Keys){
         $path=Join-Path $dst $relative
-        $sourcePins.Add((Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.DestinationSnapshot.Files[$relative].Hash -Root $dst -ReadOnly))
+        $sourcePins.Add([IO.Path]::GetFullPath($path),(Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.DestinationSnapshot.Files[$relative].Hash -Root $dst -ReadOnly))
     }
     $module=Get-ApplicationBrokerModule $Operation;$sourceModule=Get-ApplicationBrokerModule 'Playlist'
     $jobs=New-Object 'System.Collections.Generic.List[object]';$profile=$null;$archives=@{}
@@ -580,11 +601,12 @@ function Start-ApplicationBrokerBatch {
                     if(-not $state.SourceSnapshot.Files.ContainsKey($key)){throw 'Converter input was not present in the frozen source manifest.'}
                     $input=$state.SourceSnapshot.Files[$key]
                     if($member.Type -eq 'Zip'){
-                        if(-not $archives.ContainsKey($member.InputPath)){$archives[$member.InputPath]=Get-ApplicationBrokerArchive $module $member.InputPath}
+                        if(-not $archives.ContainsKey($member.InputPath)){$archives[$member.InputPath]=Get-ApplicationBrokerArchive $module $member.InputPath -InspectMedia $Operation}
                         $input=$archives[$member.InputPath][$member.EntryName]
                     }
                     if(-not $input){throw 'Converter archive member was not present in the frozen source manifest.'}
                     if($input.Length -gt 512MB){throw 'Disk image exceeds the 512 MiB input limit; original kept.'}
+                    if($member.Media -and -not $member.Converter -and $member.Type -ne 'Zip'){Assert-ApplicationBrokerPassthroughMedia $module $sourcePins[[IO.Path]::GetFullPath($member.InputPath)] $Operation}
                     Add-ApplicationBrokerExpectedFile $job.Files $member.Name $input
                     if($member.Converter){$job.Files[$member.Name].Converter=$member.Converter;$job.Files[$member.Name].Hash='';$job.Files[$member.Name].Length=-1L}
                 }
@@ -625,7 +647,7 @@ function Start-ApplicationBrokerBatch {
     $view=[pscustomobject]@{BatchId=$batch.BatchId;WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;SourcePolicy=$SourcePolicy;Existing=$Existing;Jobs=@($jobs | ForEach-Object {[pscustomobject]@{JobId=$_.JobId;SourceKey=$_.SourceKey;ConflictId=$_.ConflictId;BlockedReason=$_.BlockedReason}})}
     $Session.ActiveBatch=$view
     return $view
-    } finally {foreach($sourcePin in $sourcePins){$sourcePin.Dispose()}}
+    } finally {foreach($sourcePin in $sourcePins.Values){$sourcePin.Dispose()}}
 }
 
 function Get-ApplicationBrokerBatch($Session,[string]$BatchId) {

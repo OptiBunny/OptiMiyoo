@@ -78,11 +78,13 @@ function Write-Log([string]$Message) {
     }
 }
 
-function Assert-G64([string]$Path) {
+function Assert-G64([string]$Path,[IO.Stream]$InputStream=$null) {
     # Some nibconv failures return exit code zero: validate actual output too.
-    $stream = [IO.File]::OpenRead($Path)
-    $reader = New-Object IO.BinaryReader($stream)
+    $stream=$InputStream;if(-not $stream){$stream=[IO.File]::OpenRead($Path)}
+    $reader=$null;$position=$stream.Position
     try {
+        $stream.Position=0
+        $reader=New-Object IO.BinaryReader($stream,[Text.Encoding]::ASCII,$true)
         if ($stream.Length -gt 64MB) {throw 'G64 output exceeds the supported image-size limit.'}
         if ($stream.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)) -ne 'GCR-1541') { throw 'G64 image header is invalid.' }
         if ($reader.ReadByte() -ne 0) { throw 'Unsupported G64 version.' }
@@ -102,7 +104,7 @@ function Assert-G64([string]$Path) {
             if ($speeds[$i] -gt 3 -and ($speeds[$i] -lt $dataStart -or
                     ($speeds[$i] + [Math]::Ceiling($length / 4.0)) -gt $stream.Length)) { throw 'Invalid G64 speed map.' }
         }
-    } finally { $reader.Dispose() }
+    } finally {if($reader){$reader.Dispose()};if($InputStream){$stream.Position=$position}else{$stream.Dispose()}}
 }
 
 function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Index, [int]$Count, [string]$DisplayName) {

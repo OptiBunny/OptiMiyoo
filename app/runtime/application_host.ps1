@@ -306,7 +306,7 @@ function Invoke-ApplicationHost {
                 $session=[OptiMiyoo.ApplicationSession]::Create()
                 $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
                 if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress}
-                $receipts=[pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=(New-Object Collections.ArrayList)}
+                $receipts=New-ApplicationReceiptStore
                 if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
                     $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
                     $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts

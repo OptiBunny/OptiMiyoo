@@ -4,6 +4,14 @@
 if(-not (Get-Variable ApplicationArchiveTasks -Scope Script -ErrorAction SilentlyContinue)){$script:ApplicationArchiveTasks=@{}}
 $script:ApplicationArchiveCodeRoot=Split-Path -Parent $PSScriptRoot
 
+function New-ApplicationReceiptStore {
+    $archives=New-Object Collections.ArrayList
+    # Only this host-owned, append-only collection uses incremental accounting.
+    # Raw stores supplied by direct callers keep the full validation scan.
+    return [pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=$archives;
+        ArchiveBudget=[pscustomobject]@{Collection=$archives;Count=0;Rows=0L}}
+}
+
 function Assert-ApplicationArchiveFields($Payload,[string[]]$Allowed,[string[]]$Required) {
     if($Payload -is [Collections.IDictionary]){$names=@($Payload.Keys)}
     elseif($null -ne $Payload -and $Payload -is [pscustomobject]) {
@@ -70,10 +78,21 @@ function Complete-ApplicationArchiveTask($Task,$ReceiptStore) {
             Operation=$Task.Operation;InputRelativePath=$Task.InputRelativePath;DestinationRelativePath=$Task.DestinationRelativePath;
             Entries=$Task.Rows;Success=$true}
         if(-not $ReceiptStore -or $null -eq $ReceiptStore.ArchiveReceipts){throw 'Host archive receipt store is unavailable.'}
-        $receiptRows=$Task.Rows.Count
-        foreach($previous in $ReceiptStore.ArchiveReceipts){$receiptRows+=@($previous.Entries).Count}
+        $budget=$null
+        if($ReceiptStore.PSObject.Properties['ArchiveBudget']){$budget=$ReceiptStore.ArchiveBudget}
+        [long]$receiptRows=$Task.Rows.Count
+        if($budget -and [object]::ReferenceEquals($budget.Collection,$ReceiptStore.ArchiveReceipts) -and $budget.Count -eq $ReceiptStore.ArchiveReceipts.Count){
+            $receiptRows+=$budget.Rows
+        } else {
+            foreach($previous in $ReceiptStore.ArchiveReceipts){$receiptRows+=@($previous.Entries).Count}
+        }
         if($ReceiptStore.ArchiveReceipts.Count -ge 16384 -or $receiptRows -gt 200000){throw 'Archive receipts exceed this application session limit.'}
         [void]$ReceiptStore.ArchiveReceipts.Add($receipt)
+        if($budget){
+            # Publish the entire cache after Add. An interruption between them
+            # leaves a count mismatch, so the next completion rebuilds safely.
+            $ReceiptStore.ArchiveBudget=[pscustomobject]@{Collection=$ReceiptStore.ArchiveReceipts;Count=$ReceiptStore.ArchiveReceipts.Count;Rows=$receiptRows}
+        }
         $Task.ReceiptId=$receipt.ReceiptId;$Task.Completed=$true
     } catch {
         $Task.Error=$_.Exception.Message;$Task.Completed=$true

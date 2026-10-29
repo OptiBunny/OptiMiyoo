@@ -235,6 +235,7 @@ namespace OptiMiyoo {
   private readonly Queue<string> inputQueue=new Queue<string>();
   private int queuedInputCharacters;
   private readonly TerminalSequenceFilter filter=new TerminalSequenceFilter();
+  private readonly object outcomeGate=new object();
   private readonly List<SafeFileHandle> pins=new List<SafeFileHandle>();
   private IDisposable parentLease;
   private IntPtr process,job,pseudo,sid;
@@ -348,8 +349,9 @@ namespace OptiMiyoo {
   private void WaitForEvent(AutoResetEvent ready,int milliseconds){lock(eventGate){if(eventDisposalRequested)return;eventWaiters++;}try{ready.WaitOne(milliseconds);}finally{lock(eventGate){eventWaiters--;CloseEventsIfIdle();}}}
   private void DisposeEvents(){lock(eventGate){eventDisposalRequested=true;CloseEventsIfIdle();}}
   private void SaveConsole(){Check(GetConsoleMode(GetStdHandle(-10),out previousInputMode),"Read host input mode");Check(GetConsoleMode(GetStdHandle(-11),out previousOutputMode),"Read host output mode");previousControlC=Console.TreatControlCAsInput;previousCursor=Console.CursorVisible;previousTitle=Console.Title;consoleSaved=true;Check(SetConsoleMode(GetStdHandle(-10),(previousInputMode|0x80u)&~0x40u),"Disable host QuickEdit");Check(SetConsoleMode(GetStdHandle(-11),previousOutputMode|4u),"Enable host terminal output");Console.TreatControlCAsInput=true;Console.Title="OptiMiyoo";}
-  private void Fail(string reason){lock(rpcGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
-  public void Stop(){CancellationRequested=true;stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
+  private void Fail(string reason){lock(outcomeGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
+  private void FailResponse(string reason){lock(outcomeGate){if(!CancellationRequested)Fail(reason);}}
+  public void Stop(){lock(outcomeGate){CancellationRequested=true;stopping=true;paused=true;}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   private void OutputLoop(){
    try{byte[] bytes=new byte[8192];char[] chars=new char[8192];Decoder decoder=Utf8.GetDecoder();int count;Stopwatch rate=Stopwatch.StartNew();long received=0;
     while(true){uint available;if(!PeekNamedPipe(terminalReadHandle,IntPtr.Zero,0,IntPtr.Zero,out available,IntPtr.Zero))break;if(available==0){lock(consoleGate){lastDrained=Stopwatch.GetTimestamp();}Thread.Sleep(5);continue;}count=terminalOutput.Read(bytes,0,(int)Math.Min((uint)bytes.Length,available));if(count==0)break;Interlocked.Exchange(ref outputInFlight,1);int length=decoder.GetChars(bytes,0,count,chars,0);received+=count;if(rate.ElapsedMilliseconds>=1000){received=0;rate.Restart();}if(received>16777216)throw new IOException("Application terminal output limit exceeded.");lock(consoleGate){lastOutput=Stopwatch.GetTimestamp();if(!paused&&!stopping){string safe=filter.Feed(new string(chars,0,length));if(safe.Length!=0)WriteTerminal(safe);}else filter.Reset();Interlocked.Exchange(ref outputInFlight,0);}}
@@ -387,7 +389,29 @@ namespace OptiMiyoo {
   }
   public ApplicationRequest ReadRequest(int milliseconds){if(milliseconds<0||milliseconds>1000)throw new ArgumentOutOfRangeException("milliseconds");lock(rpcGate){if(requests.Count>0)return requests.Dequeue();}WaitForEvent(requestReady,milliseconds);lock(rpcGate){if(requests.Count>0)return requests.Dequeue();return null;}}
   public void Respond(uint id,bool success,string payload){
-   byte[] data=Utf8.GetBytes(payload??"null");if(data.Length>MaximumFrameBytes-5)throw new IOException("Broker response exceeds its limit.");lock(rpcGate){if(id==0||pendingResponse!=id)throw new InvalidOperationException("Response does not match the outstanding request.");if(stopping||HasExited)throw new IOException("Application session ended before its response.");byte[] header=new byte[9];Buffer.BlockCopy(BitConverter.GetBytes((uint)(data.Length+5)),0,header,0,4);Buffer.BlockCopy(BitConverter.GetBytes(id),0,header,4,4);header[8]=success?(byte)1:(byte)0;try{Exception writeError=null;ManualResetEvent written=new ManualResetEvent(false);ThreadFor(delegate{try{responseOutput.Write(header,0,header.Length);responseOutput.Write(data,0,data.Length);responseOutput.Flush();}catch(Exception error){writeError=error;}finally{written.Set();}});if(!written.WaitOne(10000)){Fail("Application did not read its broker response.");written.WaitOne(3000);throw new IOException(Failure);}written.Dispose();if(writeError!=null)throw writeError;pendingResponse=0;}catch{Fail("Application broker response channel failed.");throw;}}
+   byte[] data=Utf8.GetBytes(payload??"null");
+   if(data.Length>MaximumFrameBytes-5)throw new IOException("Broker response exceeds its limit.");
+   lock(rpcGate){
+    if(id==0||pendingResponse!=id)throw new InvalidOperationException("Response does not match the outstanding request.");
+    if(stopping||HasExited)throw new IOException("Application session ended before its response.");
+    byte[] header=new byte[9];Buffer.BlockCopy(BitConverter.GetBytes((uint)(data.Length+5)),0,header,0,4);Buffer.BlockCopy(BitConverter.GetBytes(id),0,header,4,4);header[8]=success?(byte)1:(byte)0;
+    try{
+     Exception writeError=null;
+     Thread writer=ThreadFor(delegate{try{responseOutput.Write(header,0,header.Length);responseOutput.Write(data,0,data.Length);responseOutput.Flush();}catch(Exception error){writeError=error;}});
+     // Join bounds the write and its termination drain without an event which
+     // a still-running writer could signal after the waiting thread disposes it.
+     if(!writer.Join(10000)){FailResponse("Application did not read its broker response.");writer.Join(3000);throw new IOException("Application broker response did not finish.");}
+     if(writeError!=null)throw writeError;
+     pendingResponse=0;
+    }catch{
+     // Stop closes the child's pipe intentionally. Preserve genuine failures,
+     // but do not turn that expected broken pipe into a new channel failure.
+     FailResponse("Application broker response channel failed.");
+     if(Failure!=null)throw new IOException(Failure);
+     if(CancellationRequested)throw new OperationCanceledException("Application cancelled.");
+     throw;
+    }
+   }
   }
   private int CountScratch(int maximum){Queue<string> pending=new Queue<string>();pending.Enqueue(RootPath);int count=0;while(pending.Count>0){string path=pending.Dequeue();if(++count>maximum)throw new IOException("Application scratch entry limit exceeded; files retained.");FileAttributes attributes=File.GetAttributes(path);if((attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("Application scratch contains a link; files retained.");if((attributes&FileAttributes.Directory)!=0)foreach(string child in Directory.EnumerateFileSystemEntries(path)){if(pending.Count+count>=maximum)throw new IOException("Application scratch entry limit exceeded; files retained.");pending.Enqueue(child);}}return count;}
   private void Cleanup(){

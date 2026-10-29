@@ -110,6 +110,19 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
                 }
             } catch {$group.Error=$_.Exception.Message}
         }
+        if (-not $group.Error) {
+            # Extension changes can turn a file into another member's parent.
+            # Check the complete name set so input order and container layout
+            # cannot hide a conflict; only walk each member's own ancestors.
+            foreach ($name in $names.Keys) {
+                $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
+                while ($parent) {
+                    if ($names.ContainsKey($parent)) {$group.Error='A converted output file overlaps another output member directory.';break}
+                    $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+                }
+                if ($group.Error) {break}
+            }
+        }
         $folder=$Storage -eq 'Folders';$loose=($Storage -eq 'Loose' -or ($auto -and $group.Items[0].Type -eq 'Loose'));$relativeData=$group.Stem
         if ($Storage -eq 'Zip') {$relativeData+='.zip'}
         $writes=New-Object 'System.Collections.Generic.List[object]'

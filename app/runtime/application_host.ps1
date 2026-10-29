@@ -131,13 +131,22 @@ function Invoke-ApplicationHostLoop($State) {
         try {$result=Invoke-ApplicationHostRequest $State $request}
         catch {
             if ($session.Failure) {throw $session.Failure}
-            # A trusted prompt stops its worker before cancelling. There is no
-            # live requester to answer, and a pipe error would hide that choice.
-            if ($session.CancellationRequested -and $_.Exception -is [OperationCanceledException]) {throw}
+            # There is no live requester after Stop. Preserve the original
+            # cancellation or unexpected request error instead of a pipe error.
+            if ($session.CancellationRequested) {throw}
             $success=$false;$result=@{error=$_.Exception.Message}
         }
+        if ($session.Failure) {throw $session.Failure}
+        if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
         $json=ConvertTo-Json -InputObject $result -Depth 24 -Compress
-        $session.Respond($request.Id,$success,$json)
+        try {$session.Respond($request.Id,$success,$json)}
+        catch {
+            if ($session.Failure) {throw $session.Failure}
+            if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
+            throw
+        }
+        if ($session.Failure) {throw $session.Failure}
+        if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
         if ($State.StopRequested) {
             # No app thread survives the final handoff. Files remain staged until
             # publication has finished; Dispose removes only this session's files.

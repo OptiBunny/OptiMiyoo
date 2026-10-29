@@ -78,7 +78,9 @@ function Get-ApplicationPromptModel {
     $fixed+=@(Get-OverwriteChoiceRows)
     $prompt=Get-OverwriteInputPrompt
     if($Invalid){$fixed+='Choose one of the shown options.'}
-    $fixed=@(Get-MenuRows $fixed 44);$pageSize=12-$fixed.Count-2
+    # Leave room for the blank top row and trusted input in a 19-row window.
+    # Only path details paginate; choices and the folder warning remain visible.
+    $fixed=@(Get-MenuRows $fixed 44);$pageSize=11-$fixed.Count-2
     if($pageSize -lt 1){throw 'Trusted overwrite prompt cannot fit its choices.'}
     $pages=[Math]::Max(1,[int][Math]::Ceiling($details.Count/[double]$pageSize))
     $page=[Math]::Max(0,[Math]::Min($Page,$pages-1));$lines=@('Existing output paths:')

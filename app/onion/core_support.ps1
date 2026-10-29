@@ -283,18 +283,83 @@ function Get-PlaylistSupport($Profile,[string]$SdRoot) {
     return Get-OnionCoreSupport $Profile $SdRoot $Profile.Playlist -Playlist
 }
 
+function Get-OnionExtensionValueSpan([string]$Raw) {
+    # Walk JSON tokens rather than searching text: escaped names and unrelated
+    # nested extlist properties must never redirect the config edit. Token
+    # alternatives are disjoint; nesting and the caller's byte limit bound work.
+    $token=New-Object regex('\G[ \t\r\n]*(?:(?<String>"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*")|(?<Number>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)|(?<Literal>true|false|null)|(?<Punctuation>[{}\[\],:])|(?<End>\z))')
+    $stack=New-Object 'Collections.Generic.List[object]'
+    $position=0;if($Raw.Length -gt 0 -and $Raw[0] -eq [char]0xFEFF){$position=1}
+    $rootSeen=$false;$target=$null
+    while($true) {
+        $match=$token.Match($Raw,$position)
+        if(-not $match.Success){throw 'SD config contains malformed JSON.'}
+        if($match.Groups['End'].Success){break}
+        $position=$match.Index+$match.Length
+        $punctuation=$match.Groups['Punctuation'].Value
+        $string=$match.Groups['String']
+        if($stack.Count -eq 0) {
+            if($rootSeen -or $punctuation -cne '{'){throw 'SD config must contain one JSON object.'}
+            $rootSeen=$true
+            $stack.Add(@{Kind='Object';State='KeyOrEnd';Key=$null;Keys=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))})
+            continue
+        }
+        $frame=$stack[$stack.Count-1]
+        if($frame.Kind -ceq 'Object') {
+            if($frame.State -in 'KeyOrEnd','Key') {
+                if($frame.State -ceq 'KeyOrEnd' -and $punctuation -ceq '}'){$stack.RemoveAt($stack.Count-1);continue}
+                if(-not $string.Success){throw 'SD config contains an invalid JSON property.'}
+                $key=[regex]::Unescape($string.Value.Substring(1,$string.Length-2))
+                if(-not $frame['Keys'].Add($key)){throw 'SD config contains duplicate or ambiguous JSON property names.'}
+                $frame.Key=$key;$frame.State='Colon';continue
+            }
+            if($frame.State -ceq 'Colon') {
+                if($punctuation -cne ':'){throw 'SD config contains an invalid JSON property separator.'}
+                $frame.State='Value';continue
+            }
+            if($frame.State -ceq 'CommaOrEnd') {
+                if($punctuation -ceq '}'){$stack.RemoveAt($stack.Count-1);continue}
+                if($punctuation -cne ','){throw 'SD config contains an invalid JSON object separator.'}
+                $frame.State='Key';continue
+            }
+            if($stack.Count -eq 1 -and $frame.Key -ceq 'extlist') {
+                if(-not $string.Success){throw 'SD config extension list must be a JSON string.'}
+                $target=[pscustomobject]@{End=($string.Index+$string.Length-1);Value=[regex]::Unescape($string.Value.Substring(1,$string.Length-2))}
+            }
+        } else {
+            if($frame.State -ceq 'ValueOrEnd' -and $punctuation -ceq ']'){$stack.RemoveAt($stack.Count-1);continue}
+            if($frame.State -ceq 'CommaOrEnd') {
+                if($punctuation -ceq ']'){$stack.RemoveAt($stack.Count-1);continue}
+                if($punctuation -cne ','){throw 'SD config contains an invalid JSON array separator.'}
+                $frame.State='Value';continue
+            }
+        }
+        $frame.State='CommaOrEnd'
+        if($string.Success -or $match.Groups['Number'].Success -or $match.Groups['Literal'].Success){continue}
+        if($punctuation -cnotin '{','['){throw 'SD config contains an invalid JSON value.'}
+        if($stack.Count -ge 64){throw 'SD config exceeds the supported JSON nesting depth.'}
+        if($punctuation -ceq '{'){$stack.Add(@{Kind='Object';State='KeyOrEnd';Key=$null;Keys=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))})}
+        else {$stack.Add(@{Kind='Array';State='ValueOrEnd'})}
+    }
+    if(-not $rootSeen -or $stack.Count -ne 0 -or $null -eq $target){throw 'SD config does not contain one unambiguous top-level extension list.'}
+    return $target
+}
+
 function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions) {
     # Build only the file-type-list edit. Each caller checks core eligibility
     # independently before supplying extensions; this helper never touches files.
+    if($Original.Length -gt 1048576){throw 'config.json exceeds the supported 1 MiB text limit.'}
     $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
+    $value=Get-OnionExtensionValueSpan $raw
     $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if($config.launch -cne 'launch.sh' -or $config.extlist -isnot [string] -or -not $config.extlist){throw 'SD config does not have a verified launcher and extension list.'}
+    if($config.launch -cne 'launch.sh' -or $config.extlist -isnot [string] -or -not $config.extlist -or $config.extlist -cne $value.Value){throw 'SD config does not have a verified launcher and extension list.'}
+    foreach($extension in $Extensions){if($extension -cnotmatch '^[A-Za-z0-9]+$'){throw 'Invalid SD file-list extension.'}}
     $missing=@($Extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
     if($missing.Count -eq 0){return ,$Original}
-    $rx=New-Object regex('("extlist"\s*:\s*")((?:[^"\\]|\\.)*)(")')
-    if($rx.Matches($raw).Count -ne 1){throw 'Ambiguous extension list in SD config.'}
-    $updated=$rx.Replace($raw,('${1}${2}|'+($missing -join '|')+'${3}'))
-    $null=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $addition='|'+($missing -join '|')
+    $updated=$raw.Insert($value.End,$addition)
+    $checked=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if($checked.extlist -cne ($config.extlist+$addition)){throw 'SD extension-list patch did not change the intended top-level value.'}
     return ,$utf8.GetBytes($updated)
 }
 

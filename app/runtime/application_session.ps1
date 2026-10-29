@@ -70,6 +70,29 @@ namespace OptiMiyoo {
   [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window,uint flags);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor,ref Monitor info);
   [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
+  // Only the trusted interactive host owns the alternate screen. Workers
+  // cannot switch buffers through their filtered terminal output.
+  public static IDisposable OpenScreen() {
+   try {
+    if(Console.IsInputRedirected||Console.IsOutputRedirected)return null;
+    IntPtr output=GetStdHandle(-11);uint mode;
+    if(!GetConsoleMode(output,out mode))return null;
+    bool cursor=true;try{cursor=Console.CursorVisible;}catch{}
+    if(!SetConsoleMode(output,mode|4))return null;
+    ScreenLease lease=new ScreenLease(output,mode,cursor);
+    try {Console.Write("\x1b[?1049h");return lease;}
+    catch {lease.Dispose();return null;}
+   } catch {return null;}
+  }
+  sealed class ScreenLease : IDisposable {
+   readonly IntPtr output;readonly uint mode;readonly bool cursor;bool disposed;
+   public ScreenLease(IntPtr output,uint mode,bool cursor){this.output=output;this.mode=mode;this.cursor=cursor;}
+   public void Dispose(){
+    if(disposed)return;disposed=true;
+    try {Console.Write("\x1b[0m\x1b[r\x1b[?1049l"+(cursor?"\x1b[?25h":"\x1b[?25l"));}
+    catch {} finally {try{SetConsoleMode(output,mode);}catch{}}
+   }
+  }
   public static void EnsureRoom() {
    try {
     if(Console.IsInputRedirected||Console.IsOutputRedirected)return;

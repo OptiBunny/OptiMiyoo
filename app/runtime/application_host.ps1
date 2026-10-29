@@ -244,118 +244,151 @@ function Invoke-ApplicationHost {
     if (-not $explicitStorage -and $Entry -in 'C64','ZX') {
         $startPage=$Entry;$Entry='Playlist';$menu=$true
     }
-    $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
-    $NoAnimation=[bool]$originalArguments.NoAnimation;$NoColor=[bool]$originalArguments.NoColor
-    $sdProgress={param($Stage,$Detail,$Completed,$Total,$Unit)
-        # Losing a terminal frame must not interrupt a verified SD write.
-        try {Show-OnionProgress -Stage $Stage -Detail $Detail -Completed $Completed -Total $Total -Unit $Unit}
-        catch {Write-Verbose 'Could not refresh the SD progress display.'}
-    }
-    $again=$true;$exitCode=1;$selectedOnionRoot=$null
-    if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
-    while ($again) {
-        $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
-        $progressDisplay=$false;$previousEffect=$script:DisplayEffect
-        try {
-            if ($Entry -eq 'SD') {
-                $script:DisplayEffect=$displayEffect
-                Initialize-Display;$progressDisplay=$true
-                $null=& $sdProgress 'Preparing SD setup' 'Starting isolated checks.' 0 -1 systems
-            } else {Write-Host '';Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
-            $session=[OptiMiyoo.ApplicationSession]::Create()
-            $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
-            if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress}
-            $receipts=[pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=(New-Object Collections.ArrayList)}
-            if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
-                $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
-                $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
-            }
-            $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
-            $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
-            $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
-            foreach ($key in 'NoAnimation','NoColor','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
-            if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
-            if ($menu) {$worker.StartPage=$startPage}
-            $batch=$null
-            if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
-                $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
-                $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;SingleStorage=$output.SingleStorage})
-                $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
-                $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
-                if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.SingleStorage=$selection.SingleStorage}
-                else {[void]$worker.Remove('Preview')}
-                $worker.Storage=$selection.Storage
-            }
-            if ($Entry -eq 'SD') {
-                if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
-                $worker=@{OnionRoot=$sd.StagedRoot;NoAnimation=$NoAnimation;NoColor=$NoColor;DisplayEffect=$displayEffect;PlainProgress=(-not $session.Interactive)}
-            }
-            Write-ApplicationBootstrap $session $Entry $worker $batch
-            $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
-            if ($Arguments.Preview) {$operations=[string[]]@('Display.Preference')}
-            # Only one renderer owns the console while the isolated worker runs.
-            if ($progressDisplay) {$progressDisplay=$false;Restore-Display}
-            $session.Start('boot.ps1',[string[]]$staged.Assemblies,$operations)
-            $exitCode=Invoke-ApplicationHostLoop $state
-            if ($native) {Close-ApplicationJobBroker $native}
-            if ($broker) {Close-ApplicationArchiveSession $broker}
-            if (-not $state.Pending -and $broker -and $broker.ActiveBatch) {
-                # A worker exit code is not evidence of a completed batch.
-                # With no handoff, verify no outputs and keep every original.
-                $state.Pending=@{BatchId=$broker.ActiveBatch.BatchId;CompletedJobIds=[string[]]@()}
-            }
-            if ($state.Pending) {
-                $pending=$state.Pending
-                $state.Result=Complete-ApplicationBrokerBatch -Session $broker @pending -ReceiptStore $receipts
-                $state.Completed=$true
-            }
-            if ($Entry -eq 'SD' -and $exitCode -eq 0) {
-                # Drain no more worker output over the parent's verified update panel.
-                if ($session.Interactive) {[void]$session.PauseRelay()}
-                $script:DisplayEffect=$displayEffect
-                Initialize-Display;$progressDisplay=$true
-                $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress
-            }
-            if ($state.NextOnionRoot) {$selectedOnionRoot=$state.NextOnionRoot;$Entry='SD';$again=$true}
-        } catch {
-            $failure=$_
-            if ($progressDisplay) {$progressDisplay=$false;try {Restore-Display} catch {}}
-            Write-Host ('OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $failure.Exception.Message)) -ForegroundColor Red;$exitCode=1
+    $consoleScreen=$null;$session=$null
+    $deferredFailures=New-Object 'System.Collections.Generic.List[string]'
+    $deferredWarnings=New-Object 'System.Collections.Generic.List[string]'
+    try {
+        if (($menu -or $Arguments.Preview) -and $Host.Name -eq 'ConsoleHost' -and
+            -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
+            $consoleScreen=[OptiMiyoo.ApplicationConsoleWindow]::OpenScreen()
         }
-        finally {
-            try {if ($progressDisplay) {Restore-Display}} catch {}
-            finally {
-                $script:DisplayEffect=$previousEffect
+        $displayEffect='CRT';if ($Arguments.DisplayEffect) {$displayEffect=[string]$Arguments.DisplayEffect}
+        $NoAnimation=[bool]$originalArguments.NoAnimation;$NoColor=[bool]$originalArguments.NoColor
+        $sdProgress={param($Stage,$Detail,$Completed,$Total,$Unit)
+            # Losing a terminal frame must not interrupt a verified SD write.
+            try {Show-OnionProgress -Stage $Stage -Detail $Detail -Completed $Completed -Total $Total -Unit $Unit}
+            catch {Write-Verbose 'Could not refresh the SD progress display.'}
+        }
+        $again=$true;$exitCode=1;$selectedOnionRoot=$null
+        if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
+        while ($again) {
+            $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
+            $progressDisplay=$false;$previousEffect=$script:DisplayEffect
+            try {
+                if ($Entry -eq 'SD') {
+                    $script:DisplayEffect=$displayEffect
+                    Initialize-Display;$progressDisplay=$true
+                    $null=& $sdProgress 'Preparing SD setup' 'Starting isolated checks.' 0 -1 systems
+                } else {Write-Host '';Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
+                $session=[OptiMiyoo.ApplicationSession]::Create()
+                $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
+                if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress}
+                $receipts=[pscustomobject]@{NativeReceipts=(New-Object Collections.ArrayList);ArchiveReceipts=(New-Object Collections.ArrayList)}
+                if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
+                    $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
+                    $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
+                }
+                $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
+                $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
+                $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
+                foreach ($key in 'NoAnimation','NoColor','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
+                if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
+                if ($menu) {$worker.StartPage=$startPage}
+                $batch=$null
+                if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
+                    $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
+                    $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;SingleStorage=$output.SingleStorage})
+                    $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
+                    $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
+                    if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.SingleStorage=$selection.SingleStorage}
+                    else {[void]$worker.Remove('Preview')}
+                    $worker.Storage=$selection.Storage
+                }
+                if ($Entry -eq 'SD') {
+                    if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
+                    $worker=@{OnionRoot=$sd.StagedRoot;NoAnimation=$NoAnimation;NoColor=$NoColor;DisplayEffect=$displayEffect;PlainProgress=(-not $session.Interactive)}
+                }
+                Write-ApplicationBootstrap $session $Entry $worker $batch
+                $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
+                if ($Arguments.Preview) {$operations=[string[]]@('Display.Preference')}
+                # Only one renderer owns the console while the isolated worker runs.
+                if ($progressDisplay) {$progressDisplay=$false;Restore-Display}
+                $session.Start('boot.ps1',[string[]]$staged.Assemblies,$operations)
+                $exitCode=Invoke-ApplicationHostLoop $state
                 if ($native) {Close-ApplicationJobBroker $native}
-                if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
-                if ($sd) {Close-ApplicationSdSession -Session $sd}
-                if ($session) {$session.Dispose();if ($session.CleanupWarning) {Write-Warning (ConvertTo-SafeExternalText $session.CleanupWarning)}}
+                if ($broker) {Close-ApplicationArchiveSession $broker}
+                if (-not $state.Pending -and $broker -and $broker.ActiveBatch) {
+                    # A worker exit code is not evidence of a completed batch.
+                    # With no handoff, verify no outputs and keep every original.
+                    $state.Pending=@{BatchId=$broker.ActiveBatch.BatchId;CompletedJobIds=[string[]]@()}
+                }
+                if ($state.Pending) {
+                    $pending=$state.Pending
+                    $state.Result=Complete-ApplicationBrokerBatch -Session $broker @pending -ReceiptStore $receipts
+                    $state.Completed=$true
+                }
+                if ($Entry -eq 'SD' -and $exitCode -eq 0) {
+                    # Drain no more worker output over the parent's verified update panel.
+                    if ($session.Interactive) {[void]$session.PauseRelay()}
+                    $script:DisplayEffect=$displayEffect
+                    Initialize-Display;$progressDisplay=$true
+                    $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress
+                }
+                if ($state.NextOnionRoot) {$selectedOnionRoot=$state.NextOnionRoot;$Entry='SD';$again=$true}
+            } catch {
+                $failure=$_
+                if ($progressDisplay) {$progressDisplay=$false;try {Restore-Display} catch {}}
+                $failureMessage='OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $failure.Exception.Message)
+                if ($consoleScreen) {$deferredFailures.Add($failureMessage)}
+                else {Write-Host $failureMessage -ForegroundColor Red}
+                $exitCode=1
+            }
+            finally {
+                try {if ($progressDisplay) {Restore-Display}} catch {}
+                finally {
+                    $script:DisplayEffect=$previousEffect
+                    try {
+                        if ($native) {Close-ApplicationJobBroker $native}
+                        if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
+                        if ($sd) {Close-ApplicationSdSession -Session $sd}
+                    } finally {
+                        if ($session) {
+                            $session.Dispose()
+                            if ($session.CleanupWarning) {
+                                $cleanupWarning=ConvertTo-SafeExternalText $session.CleanupWarning
+                                if ($consoleScreen) {$deferredWarnings.Add($cleanupWarning)}
+                                else {Write-Warning $cleanupWarning}
+                            }
+                        }
+                    }
+                }
+            }
+            if ($state) {$displayEffect=$state.DisplayEffect}
+            if ($state -and $state.Result) {
+                $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
+                Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
+                foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.Source+': '+$result.Result+' / '+$result.Detail))}
+                Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
+                Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
+                foreach ($reason in @($state.Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
+                    Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalText $reason))
+                }
+                Write-ApplicationVerifiedReport $originalRoot $state.Result
+                if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
+                if ($menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
+                    Write-Host 'Press Enter for the main menu, or Q to exit.'
+                    do {$key=[Console]::ReadKey($true)} while ($key.Key -ne [ConsoleKey]::Enter -and $key.Key -ne [ConsoleKey]::Q)
+                    $again=($key.Key -eq [ConsoleKey]::Enter)
+                    if ($again) {$startPage='Main'}
+                }
+            }
+            if ($sdResult) {
+                if ($sdResult.Failed) {$exitCode=1}
+                $returnToMenu=Show-ApplicationSdResult -Result $sdResult -NoPause:($originalArguments.NoPause -or -not $menu) `
+                    -NoAnimation:$originalArguments.NoAnimation -NoColor:$originalArguments.NoColor -DisplayEffect $displayEffect
+                if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$returnToMenu}
             }
         }
-        if ($state) {$displayEffect=$state.DisplayEffect}
-        if ($state -and $state.Result) {
-            $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
-            Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
-            foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.Source+': '+$result.Result+' / '+$result.Detail))}
-            Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
-            Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
-            foreach ($reason in @($state.Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
-                Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalText $reason))
+    } finally {
+        # Stop the relay before restoring the caller's primary screen, even if
+        # a broker cleanup or a later result prompt failed during unwinding.
+        try {if ($session) {$session.Dispose()}}
+        finally {
+            try {if ($consoleScreen) {$consoleScreen.Dispose()}}
+            finally {
+                foreach ($message in $deferredFailures) {Write-Host $message -ForegroundColor Red}
+                foreach ($message in $deferredWarnings) {Write-Warning $message}
             }
-            Write-ApplicationVerifiedReport $originalRoot $state.Result
-            if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
-            if ($menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
-                Write-Host 'Press Enter for the main menu, or Q to exit.'
-                do {$key=[Console]::ReadKey($true)} while ($key.Key -ne [ConsoleKey]::Enter -and $key.Key -ne [ConsoleKey]::Q)
-                $again=($key.Key -eq [ConsoleKey]::Enter)
-                if ($again) {$startPage='Main'}
-            }
-        }
-        if ($sdResult) {
-            if ($sdResult.Failed) {$exitCode=1}
-            $returnToMenu=Show-ApplicationSdResult -Result $sdResult -NoPause:($originalArguments.NoPause -or -not $menu) `
-                -NoAnimation:$originalArguments.NoAnimation -NoColor:$originalArguments.NoColor -DisplayEffect $displayEffect
-            if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$returnToMenu}
         }
     }
     return [int]$exitCode

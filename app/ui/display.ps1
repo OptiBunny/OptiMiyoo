@@ -3,6 +3,8 @@
 . (Join-Path $PSScriptRoot '../shared/output_safety.ps1')
 . (Join-Path $PSScriptRoot 'mio_idle_library.ps1')
 . (Join-Path $PSScriptRoot 'mio_idle_scheduler.ps1')
+. (Join-Path $PSScriptRoot 'menu_models.ps1')
+. (Join-Path $PSScriptRoot '../shared/overwrite_prompt.ps1')
 # Percentages use completed preparation items, completed jobs or measured bytes.
 function Initialize-Display {
     if ($script:UiFrameTimer) {try {$script:UiFrameTimer.Dispose()} catch {}}
@@ -943,6 +945,7 @@ function Show-OnionProgress([string]$Stage,[string]$Detail='',
 
 function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
                           [int]$Caret=-1,[int]$RequiredHeight=19,[int]$RequiredWidth=76) {
+    if ($script:UiDemo) {$script:UiDemoNeedsSpace=$true}
     if ($script:UiColumns -lt 20 -or $script:UiHeight -lt 6) {return}
     $width=[Math]::Min(92,$script:UiColumns-4)
     $lines=[System.Collections.Generic.List[string]]::new()
@@ -1333,51 +1336,215 @@ function Get-MioPreviewTourBar([int]$Width) {
     return ('Total '+(Get-ProgressBar $tour.Percent $barWidth 0)+$suffix)
 }
 function Get-MioPreviewScenes([string]$Section='Tour') {
-    # Entirely synthetic data: never call workers, file scanners or log writers.
+    # Only the installed profiles are read. All games, paths, results and work
+    # below are invented; never call a scanner, converter or SD setup worker.
+    $profileData=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../systems.json') -Raw | ConvertFrom-Json
+    $profiles=@($profileData)
+    $byFolder=@{};foreach ($profile in $profiles) {$byFolder[$profile.Folder]=$profile}
     $scenes=@(
-        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';Menu=@('DEMO / no file changes','1. Amiga playlists','2. C64 playlists / original formats','3. MS-DOS playlists','C. Commodore 64 / NIB/NBZ -> G64','Z. ZX Spectrum / IPF -> DSK','S. Onion SD setup / preserve cores','D. Demo / walkthrough');Detail='Choose conversion or playlists for your input files.'},
-        @{Group='Tour';Mood='scan';Stage='Scanning the collection';System='INPUT';Game='Demo collection';Detail='Finding game files, companions and existing outputs.'},
-        @{Group='Setup';Mood='idle';Stage='Default core support';System='MENU';Menu=@('DEMO / default Onion cores','Playlists: AMIGA, COMMODORE, PS, SEGACD,','MSX, VIC20 and DOS.','CPC / ZXS [playlists unsupported]','ZX IPF-to-DSK conversion remains available.','S also enables C64 tapes and Lynx .lyx.','Selected cores are always preserved.');Detail='Playlist support follows the selected emulator core.'},
-        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD / S menu';Detail='Check selected cores and supported file types.'},
-        @{Group='Setup';Mood='check';Stage='Enabling a supported file type';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up config; add .m3u. No cores are installed or switched.'},
-        @{Group='C64';Mood='idle';Stage='Commodore 64 settings';System='MENU';Menu=@('DEMO / conversion only','Convert NIB/NBZ to G64.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose G64 files','Next: Keep / Remove originals.','B. Back to main menu');Detail='C converts NIB/NBZ to G64; it creates no playlists.'},
-        @{Group='C64';Mood='scan';Stage='Reading NIB and NBZ images';System='COMMODORE 64';Game='Demo disk set.zip';Detail='2 disk sides found. G64 files need no conversion.'},
-        @{Group='C64';Mood='work';Stage='Converting NIB to G64';System='COMMODORE 64';Game='Demo disk set / Side A.nib';Detail='Simulated nibconv track activity';Progress=$true;Tracks=$true},
-        @{Group='C64';Mood='check';Stage='Preserving an existing G64';System='COMMODORE 64';Game='Demo disk set / Side B.g64';Detail='Existing G64 bytes are copied and verified.';Progress=$true},
-        @{Group='C64';Mood='check';Stage='Verifying and saving G64 output';System='COMMODORE 64';Game='Demo disk set';Detail='Final checks, then save the selected output in DST.';Progress=$true;CompleteSet=$true},
-        @{Group='C64';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo disk set.zip','Folders: DST/Demo disk set/','Loose: DST/Side A.g64, Side B.g64','Converted G64 images stay visible.','No playlists are created.');Detail='Finished G64 output is ready in DST.'},
-        @{Group='ZX';Mood='idle';Stage='ZX Spectrum settings';System='MENU';Menu=@('DEMO / conversion only','Convert IPF to DSK.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose DSK files','Next: Keep / Remove originals.','B. Back to main menu');Detail='Z converts IPF to DSK; it creates no playlists.'},
-        @{Group='ZX';Mood='scan';Stage='Reading IPF and DSK images';System='ZX SPECTRUM';Game='Demo Spectrum.zip';Detail='2 disk sides found. DSK files need no conversion.'},
-        @{Group='ZX';Mood='work';Stage='Converting IPF to DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 1.ipf';Detail='Engine activity is shown without a guessed percentage.'},
-        @{Group='ZX';Mood='check';Stage='Preserving an existing DSK';System='ZX SPECTRUM';Game='Demo Spectrum / Disk 2.dsk';Detail='Existing DSK bytes are copied and verified.';Progress=$true},
-        @{Group='ZX';Mood='check';Stage='Verifying and saving DSK output';System='ZX SPECTRUM';Game='Demo Spectrum';Detail='Final checks, then save the selected output in DST.';Progress=$true;CompleteSet=$true},
-        @{Group='ZX';Mood='happy';Stage='Conversion complete';System='MENU';Menu=@('DEMO / conversion complete','ZIPs: DST/Demo Spectrum.zip','Folders: DST/Demo Spectrum/','Loose: DST/Disk 1.dsk, Disk 2.dsk','Converted DSK images stay visible.','No playlists are created.');Detail='Finished DSK output is ready in DST.'},
-        @{Group='Playlists';Mood='idle';Stage='Single-game storage';System='MENU';Menu=@('DEMO / single games','Games with one disc or tape side stay visible in DST.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose files','Next: storage for playlist media in .hidden.');Detail='PS, Sega CD and CPC default to Loose files; other systems use ZIPs.'},
-        @{Group='Playlists';Mood='idle';Stage='Playlist media storage';System='MENU';Menu=@('DEMO / playlist media','Choose how to store media in .hidden.','Playlists stay outside .hidden.','1. Auto / keep input layout','2. ZIPs (default) / one per game','3. Folders / one per game','4. Loose files','Next: choose Keep or Remove originals.');Detail='Then choose storage for multi-disc games independently.'},
-        @{Group='Playlists';Mood='scan';Stage='Amiga IPF and ADF disk sets';System='AMIGA';Game='Demo Amiga / Disk 1.ipf';Detail='Keep IPF/ADF images; choose ZIPs, a folder per game or loose files.'},
-        @{Group='Playlists';Mood='scan';Stage='C64 disk and tape-side playlists';System='COMMODORE 64';Game='Demo C64 / Side A.nib';Detail='Original formats are kept. Choose C separately for G64.'},
-        @{Group='Playlists';Mood='scan';Stage='PlayStation multi-disc sets';System='PLAYSTATION';Game='Demo PlayStation / Disc 1.chd';Detail='Keep CHD files. CUE sets retain referenced tracks.'},
-        @{Group='Playlists';Mood='idle';Stage='Other supported playlist systems';System='MENU';Menu=@('DEMO / supported default cores','Sega CD / Mega-CD: disc sets','MSX / MSX2: floppy disk sets','VIC-20: floppy disk sets','MS-DOS: DOSBox Pure M3U8 disk sets','Choose one system for the shared SRC folder.');Detail='Use the system profile that matches your input set.'},
-        @{Group='Playlists';Mood='scan';Stage='Ordering multiple disks';System='PLAYLISTS';Game='Demo Adventure';Detail='Natural disk order: Disk 1, Disk 2, Disk 10.'},
-        @{Group='Playlists';Mood='work';Stage='Preparing hidden media';System='PLAYLISTS';Game='Demo Adventure';Detail='Folder output: DST/.hidden/Demo Adventure/';Progress=$true},
-        @{Group='Playlists';Mood='check';Stage='Writing and verifying the playlist';System='PLAYLISTS';Game='Demo Adventure.m3u';Detail='Relative paths point to .hidden. Companion files stay.';Progress=$true;CompleteSet=$true},
-        @{Group='Results';Mood='wait';Stage='Waiting for an overwrite choice';System='EXISTING OUTPUT';Game='Demo Adventure.m3u';Detail='Y overwrite / N or Enter skip / A overwrite all / S skip all';Status='Waiting for your choice';Total=0},
-        @{Group='Results';Mood='wait';Stage='Skipped: overwrite declined';System='RESULT';Game='Demo Adventure.m3u';Detail='Existing output and original source are both kept.';Skipped=1;Status='Skipped / originals kept'},
-        @{Group='Results';Mood='oops';Stage='Failed: a CUE track is missing';System='RESULT';Game='Demo Disc 2.cue';Detail='This set fails; its originals are kept. Other sets continue.';Failed=1;Status='Failed / originals kept'},
-        @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='New batch: check tracks, then verify and save output.';Progress=$true;CompleteSet=$true},
-        @{Group='Results';Mood='happy';Stage='Batch complete';System='SUMMARY';Game='Demo collection';Detail='Review outputs, originals removed/kept and failures.';Progress=$true;Complete=$true;Ok=3;Skipped=1},
-        @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Add files to SRC, then start a new batch.';Status='No matching inputs';Total=0}
+        @{Group='Tour';Mood='happy';Stage='Welcome to the demo';System='MENU';Menu=@(
+            'A guided tour of every menu and the main features.',
+            'All games, progress and results here are examples.',
+            'No game files or SD cards are read or changed.','',
+            'Space: pause / resume','N / Right / Enter: next scene',
+            'P / Left: previous scene','R: restart this section',
+            'E: turn the CRT effect on or off','B / Q / Esc: return to demo selection');Detail='Use the controls below at any time.';Duration=13000},
+        @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';MenuPage='Main';Lesson='S prepares an SD card. C/Z convert. Numbers create playlists.';Duration=12000},
+        @{Group='Tour';Mood='idle';Stage='Choose a demo';System='MENU';MenuPage='Demo';Lesson='Each section can also be watched on its own.';Duration=10000},
+        @{Group='Tour';Mood='idle';Stage='Start with SRC and DST';System='MENU';Menu=@(
+            'Put one system''s games in SRC.',
+            'Use ZIPs, game folders or individual files.',
+            'Finished files go into DST.','',
+            'C / Z: convert disk images; no playlists.',
+            '1-9: make playlists; keep media formats.',
+            'S: enable supported file types on an Onion SD card.');Detail='Choose the task that matches your files.';Duration=10000},
+        @{Group='Setup';Mood='idle';Stage='Onion SD setup';System='MENU';Menu=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');Lesson='In S, enter the SD drive or folder. Esc goes back.';Duration=14000},
+        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD';Detail='Read emulator settings and check supported file types.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems checked';Duration=5000},
+        @{Group='Setup';Mood='check';Stage='Enabling supported file types';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up each changed config, then add supported extensions.';SdProgress=$true;Progress=$true;SdTotal=3;SdUnit='configs updated';Duration=4500},
+        @{Group='Setup';Mood='happy';Stage='SD setup results';System='MENU';Menu=@(
+            'Example: SD setup finished','Updated: 3    Skipped: 7    Failed: 0','',
+            'PlayStation: enabled .m3u playlists',
+            'C64: enabled supported playlists and tape files',
+            'Lynx: enabled .lyx games','',
+            'Original configs saved in OptiMiyoo_Backup_<ID>/',
+            'Refresh Onion''s game list after setup.',
+            'S does not change the other menus.',
+            'The results screen waits for you.',
+            'Enter / Esc: main menu    Q: exit');Detail='Setup keeps games and installed emulator cores unchanged.';Duration=12000}
     )
-    foreach ($pose in 'idle','blink','scanleft','scanright','work','check','happy','happyturn','oops','wait') {
-        $scenes+=@{Group='Bunny';Mood='idle';Pose=$pose;Stage=('Bunny animation / '+$pose);System='ANIMATION GALLERY';Game='Mio';Detail='The same pixel bunny is used in menus and converters.';Status='Bunny preview';Total=0}
+    foreach ($converter in @(
+        @{Group='C64';Name='Commodore 64';System='COMMODORE 64';Input='NIB/NBZ';Source='NIB';Target='G64';Game='Demo disk set';Engine='Converting NIB to G64'},
+        @{Group='ZX';Name='ZX Spectrum';System='ZX SPECTRUM';Input='IPF';Source='IPF';Target='DSK';Game='Demo Spectrum';Engine='Converting IPF to DSK'}
+    )) {
+        $group=$converter.Group;$target=$converter.Target;$game=$converter.Game
+        $scenes+=@(
+            @{Group=$group;Mood='idle';Stage=($converter.Name+' settings');System='MENU';MenuPage=$group;Lesson='Choose the output layout, then Keep or Remove originals.';Duration=10000},
+            @{Group=$group;Mood='idle';Stage='How converter Auto works';System='MENU';Menu=@(
+                '1. Auto / keep the input layout',
+                'A game ZIP becomes a game ZIP.',
+                'A game folder stays a game folder.',
+                'Individual files stay individual files.','',
+                ('The images inside are converted to '+$target+'.'),
+                '2. ZIPs puts each game into a ZIP.',
+                '3. Folders makes a folder for each game.',
+                '4. Loose files adds no game folder.');Detail='Auto preserves the layout, not the source image format.';Duration=11000},
+            @{Group=$group;Mood='idle';Stage='Choose what happens to originals';System='MENU';Menu=@(
+                '1. Keep originals (default)',
+                '2. Remove originals after verified success','',
+                'Keep leaves the originals in SRC.',
+                'Remove only removes successfully processed originals.',
+                'Skipped or failed inputs are kept.',
+                'B. Back to settings    Q. Exit');Detail='These choices also apply to numbered playlist batches.';Duration=10000},
+            @{Group=$group;Mood='scan';Stage=('Reading '+$converter.Input+' images');System=$converter.System;Game=($game+'.zip');Detail=('Two images found; existing '+$target+' images need no conversion.');Total=1},
+            @{Group=$group;Mood='work';Stage=$converter.Engine;System=$converter.System;Game=($game+' / Disk 1.'+$converter.Source.ToLowerInvariant());Detail='The converter reports activity, not a measured percentage.';Total=1;Duration=4500},
+            @{Group=$group;Mood='check';Stage=('Preserving an existing '+$target);System=$converter.System;Game=($game+' / Disk 2.'+$target.ToLowerInvariant());Detail=('Existing '+$target+' bytes are copied and verified.');Total=1;Progress=$true},
+            @{Group=$group;Mood='check';Stage=('Verifying and saving '+$target+' output');System=$converter.System;Game=$game;Detail='Check the finished files, then save the chosen layout in DST.';Total=1;Progress=$true;CompleteSet=$true},
+            @{Group=$group;Mood='happy';Stage='Conversion complete';System='MENU';Menu=@(
+                ('Example with ZIP output: DST/'+$game+'.zip'),
+                ('Inside: Disk 1.'+$target.ToLowerInvariant()+', Disk 2.'+$target.ToLowerInvariant()),
+                'Converted games stay visible in DST.',
+                'No playlist or .hidden folder is created.','',
+                'To create a playlist later, use the converted files',
+                'as input for the matching numbered system.');Detail=('Finished '+$target+' output is ready in DST.');Duration=10000}
+        )
     }
-    # Preview gestures on their own scene clock; normal menus retain 12-second gaps.
+    $zxResult=@($scenes | Where-Object {$_.Group -eq 'ZX' -and $_.Stage -eq 'Conversion complete'})[0]
+    $zxResult.Menu+=@('Fuse cannot load playlists.')
+    $scenes+=@{Group='Playlists';Mood='idle';Stage='Two separate storage choices';System='MENU';Menu=@(
+        'First: single games',
+        'Choose how games with one disc or tape side stay in DST.','',
+        'Second: playlist media',
+        'Choose how multi-disc media is stored in DST/.hidden.',
+        'The playlist itself stays outside .hidden.','',
+        'The two choices are independent.',
+        'Auto keeps the input ZIP, folder or individual-file layout.',
+        'ZIPs, Folders and Loose files set a different layout.');Detail='Next: both menus for each of the nine systems.';Duration=12000}
+    $lessons=@{
+        AMIGA='Amiga keeps IPF/ADF formats. PUAE2021 supports links into ZIPs.'
+        COMMODORE='C64 keeps disks and TAP/T64 tape sides in their original formats.'
+        DOS='DOS uses .m3u8 playlists. ZIP games and ZIP playlist links differ.'
+        MSX='blueMSX loads ZIP games, but not playlist links inside ZIPs.'
+        PS='PlayStation defaults to loose single games and folders for playlists.'
+        SEGACD='Sega CD defaults to loose single games and folders for playlists.'
+        VIC20='VIC-20 disk playlists can point to images inside ZIPs.'
+        CPC='CrocoDS supports neither ZIP games nor playlists.'
+        ZXS='Fuse loads ZIP games. Its playlist limits are shown separately.'
+    }
+    foreach ($profile in $profiles) {
+        $scenes+=@(
+            @{Group='Playlists';Mood='idle';Stage=($profile.Name+' / single games');System='MENU';MenuPage='SingleStorage';Folder=$profile.Folder;Lesson=$lessons[$profile.Folder];Duration=10000},
+            @{Group='Playlists';Mood='idle';Stage=($profile.Name+' / playlist media');System='MENU';MenuPage='Storage';Folder=$profile.Folder;Duration=11000}
+        )
+    }
+    $scenes+=@(
+        @{Group='Playlists';Mood='idle';Stage='Name and group the discs';System='MENU';Menu=@(
+            'Separate images:','Demo Adventure (Disc 1).chd','Demo Adventure (Disc 2).chd','',
+            'Inside a game folder: Disc 1.chd, Disc 2.chd',
+            'C64 tapes: Game (Side A).tap, Game (Side B).tap','',
+            'Keep a CUE with its tracks and any matching SBI files.',
+            'Keep different versions of a disc in separate batches.');Detail='Numbered systems do not convert image formats.';Duration=12000},
+        @{Group='Playlists';Mood='scan';Stage='Ordering multiple disks';System='PLAYLISTS';Game='Demo Adventure';Detail='Natural order: Disk 1, Disk 2, Disk 10.';Total=1},
+        @{Group='Playlists';Mood='work';Stage='Preparing hidden media';System='PLAYLISTS';Game='Demo Adventure';Detail='Folder choice: DST/.hidden/Demo Adventure/';Progress=$true;Total=1},
+        @{Group='Playlists';Mood='check';Stage='Writing and verifying the playlist';System='PLAYLISTS';Game='Demo Adventure.m3u';Detail='Check relative paths and their media before saving.';Progress=$true;CompleteSet=$true;Total=1},
+        @{Group='Playlists';Mood='happy';Stage='Finished playlist layout';System='MENU';Menu=@(
+            'DST/','  Demo Adventure.m3u','  .hidden/','    Demo Adventure/','      Disc 1.chd','      Disc 2.chd','',
+            'The playlist contains relative paths:',
+            '.hidden/Demo Adventure/Disc 1.chd',
+            '.hidden/Demo Adventure/Disc 2.chd');Detail='One visible playlist; its disc images stay in .hidden.';Duration=11000},
+        @{Group='Playlists';Mood='happy';Stage='Finished single-game layouts';System='MENU';Menu=@(
+            'A single game does not need a playlist.',
+            'Its output stays visible in DST.','',
+            'Auto: preserve the original ZIP, folder or loose layout.',
+            'ZIPs: DST/Demo Solo.zip',
+            'Folders: DST/Demo Solo/Demo Solo (Disc 1).chd',
+            'Loose files: DST/Demo Solo (Disc 1).chd');Detail='Single-game storage is independent of .hidden storage.';Duration=11000},
+        @{Group='Playlists';Mood='idle';Stage='Copy to the SD card';System='MENU';Menu=@(
+            'Copy the contents of DST to the system''s ROM folder.',
+            'Include .hidden when it exists.',
+            'Refresh Onion''s game list.','',
+            'Launch the playlist for a multi-disc game.',
+            'RetroArch: Quick Menu > Disk Control',
+            'Eject, select the next image, then insert it.',
+            'DOSBox Pure has its own disc-selection controls.',
+            'C64 tapes may also need keyboard/load commands.');Detail='Use S if supported file types are missing from the game list.';Duration=12000},
+        @{Group='Results';Mood='wait';Stage='Overwrite choices';System='MENU';Menu=@(
+            'Example: DST/Demo Adventure.m3u already exists.',
+            'The app lists the outputs that would be replaced.','')+@(Get-OverwriteChoiceRows)+@('',
+            'Skipping keeps both existing output and its originals.');Detail='This demo never overwrites files. Use N/Right to continue.';Duration=11000},
+        @{Group='Results';Mood='wait';Stage='Waiting for an overwrite choice';System='EXISTING OUTPUT';Game='Demo Adventure.m3u';Detail='The batch waits; no percentage is invented.';Status='Waiting for your choice';Total=3;Ok=1},
+        @{Group='Results';Mood='wait';Stage='Skipped: overwrite declined';System='RESULT';Game='Demo Adventure.m3u';Detail='Existing output and original source are both kept.';Total=3;Ok=1;Skipped=1;Status='Skipped / originals kept'},
+        @{Group='Results';Mood='oops';Stage='Failed: a CUE track is missing';System='RESULT';Game='Demo Disc 2.cue';Detail='This set fails; its originals are kept. Other sets continue.';Total=3;Ok=1;Skipped=1;Failed=1;Status='Failed / originals kept'},
+        @{Group='Results';Mood='oops';Stage='Batch complete';System='SUMMARY';Game='Demo collection';Detail='Three sets: one ready, one skipped, one failed.';Progress=$true;Complete=$true;Total=3;Ok=1;Skipped=1;Failed=1},
+        @{Group='Results';Mood='idle';Stage='Review the batch results';System='MENU';Menu=@(
+            'Ready: 1    Skipped: 1    Failed: 1',
+            'Skipped and failed originals stay in SRC.',
+            'Fix the missing CUE track before trying that set again.','',
+            'The results screen waits for you.',
+            'Enter: main menu',
+            'Q: exit');Detail='These are sample results, not an actual batch.';Duration=10000},
+        @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='New batch: check the restored track, then verify and save.';Total=1;Progress=$true;CompleteSet=$true},
+        @{Group='Results';Mood='happy';Stage='Corrected set complete';System='RESULT';Game='Demo Disc 2.cue';Detail='The new batch has one verified output.';Progress=$true;Complete=$true;Total=1;Ok=1},
+        @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Add matching files to SRC, then start a new batch.';Status='No matching inputs';Total=0}
+    )
+    $poseNames=@{idle='At rest';blink='Blink';scanleft='Look left';scanright='Look right';work='Working';check='Checking';happy='Happy';happyturn='Happy turn';oops='Oops';wait='Waiting'}
+    foreach ($pose in 'idle','blink','scanleft','scanright','work','check','happy','happyturn','oops','wait') {
+        $scenes+=@{Group='Bunny';Mood='idle';Pose=$pose;Stage=('Mio / '+$poseNames[$pose]);System='ANIMATION GALLERY';Game='Mio';Detail='E turns CRT styling on or off. Space holds this pose.';Status='Bunny preview';Total=0;Duration=2000}
+    }
+    # The gallery uses its own scene clock; normal menus retain 12-second gaps.
     [void](Get-MioFrame 'idle' 0)
     foreach ($gesture in $script:MioIdleGestures) {
-        $scenes+=@{Group='Bunny';Mood='idle';IdleGesture=$gesture;Stage=('Idle gesture / '+$gesture.Name);System='ANIMATION GALLERY';Game='Mio';Detail='A brief gesture, then back to rest. Menus wait 12 seconds.';Status='Idle animation preview';Total=0;Duration=2200}
+        $scenes+=@{Group='Bunny';Mood='idle';IdleGesture=$gesture;Stage=('Idle gesture / '+$gesture.Name);System='ANIMATION GALLERY';Game='Mio';Detail='Brief gestures with a 12-second rest between them in menus.';Status='Idle animation preview';Total=0;Duration=2200}
+    }
+    $scenes+=@{Group='Tour';Mood='happy';Stage='Ready to try it';System='MENU';Menu=@(
+        'That is the full walkthrough.','',
+        'S prepares your SD card.',
+        'C / Z convert disk images.',
+        '1-9 create playlists for the chosen system.',
+        'D opens this demo. E turns CRT on or off.',
+        'Q exits from the main menu.','',
+        'B / Q / Esc here returns to demo selection.',
+        'R restarts the full walkthrough.');Detail='No game files or SD cards were changed.';Duration=12000}
+    foreach ($scene in $scenes) {
+        if ($scene.MenuPage) {
+            $profile=$null;if ($scene.Folder) {$profile=$byFolder[$scene.Folder]}
+            $model=Get-OptiMenuModel -Page $scene.MenuPage -Profiles $profiles -Profile $profile -DisplayEffect $script:DisplayEffect
+            $scene.Menu=@($model.Rows)
+            if ($scene.MenuPage -eq 'Main') {$scene.Profiles=$profiles}
+        } elseif ($scene.SdProgress) {$scene.Menu=@($scene.Stage,$scene.Detail)}
+        if ($scene.Menu -and -not $scene.Duration) {$scene.Duration=10000}
     }
     if ($Section -ne 'Tour') {$scenes=@($scenes | Where-Object {$_.Group -eq $Section})}
     return $scenes
+}
+function Get-MioPreviewMenuRows([hashtable]$Scene) {
+    $rows=@($Scene.Menu)
+    if ($Scene.MenuPage -eq 'Main') {
+        # E is a real display preference even while all other actions are examples.
+        $rows=@((Get-OptiMenuModel -Page Main -Profiles $Scene.Profiles -DisplayEffect $script:DisplayEffect).Rows)
+    } elseif ($Scene.SdProgress) {
+        $total=[int]$Scene.SdTotal
+        $done=[Math]::Min($total,[int][Math]::Floor($total*$script:UiPercent/100.0))
+        $percent=100.0*$done/[Math]::Max(1,$total)
+        $filled=[int][Math]::Floor(28*$percent/100.0)
+        $bar='['+('#'*$filled)+('.'*(28-$filled))+('] {0:N0}%' -f $percent)
+        $rows=@($Scene.Stage,'',$Scene.Detail,'',('{0} / {1} {2}' -f $done,$total,$Scene.SdUnit),$bar,'','Games and emulator cores stay unchanged.','Sample SD data / no card is accessed.')
+    }
+    if ($Scene.Lesson) {$rows+=@('',$Scene.Lesson)}
+    return $rows
+}
+function Get-MioPreviewControls([bool]$Paused,[bool]$NeedsSpace=$false) {
+    $action='pause';if ($Paused) {$action='resume'}
+    $prefix='DEMO';if ($Paused) {$prefix='PAUSED'}
+    if ($NeedsSpace) {$prefix='RESIZE PAUSED'}
+    $state='On';if ($script:DisplayEffect -eq 'Smooth') {$state='Off'}
+    $width=[Math]::Max(1,$script:UiWidth-10)
+    $options=@(
+        ($prefix+' | Space '+$action+' | N/P step | R restart | E CRT '+$state+' | B back'),
+        ($prefix+' | Space '+$action+' | N/P | R | E CRT | B back'),
+        ('Space '+$action+' | N/P | B back')
+    )
+    foreach ($option in $options) {if ($option.Length -le $width) {return $option}}
+    return 'Space pause | B back'
 }
 function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[double]$Duration) {
     # Progress has its own scene clock: low-CPU mode freezes decorative effects,
@@ -1399,20 +1566,18 @@ function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[
     if ($Scene.Complete) {$script:UiPercent=100}
     elseif ($Scene.CompleteSet -and $fraction -ge 1) {$script:Ok++}
     $script:Processed=$script:Ok+$script:Skipped+$script:Failed
-    if ($Scene.Tracks) {
-        $script:UiDetail=('Simulated track {0}/84 / no converter is running' -f [Math]::Min(84,[int][Math]::Floor(84*$fraction)))
-    }
 }
 function Show-MioPreview([string]$Section='Tour') {
     $scenes=@(Get-MioPreviewScenes $Section)
     $saved=@{}
-    foreach ($name in 'Total','Processed','Ok','Skipped','Failed','Clock','UiSystem','UiGame','UiStage','UiDetail','UiPercent','UiMood','UiSay','UiTick','UiLastStage','UiPoseOverride','UiDemo','UiDemoPaused','UiDemoScene','UiDemoCount','UiDemoProgressTick','UiDemoProgressStatus') {
+    foreach ($name in 'Total','Processed','Ok','Skipped','Failed','Clock','UiSystem','UiGame','UiStage','UiDetail','UiPercent','UiMood','UiSay','UiTick','UiLastStage','UiPoseOverride','UiDemo','UiDemoPaused','UiDemoScene','UiDemoCount','UiDemoProgressTick','UiDemoProgressStatus','UiPreparing','UiPreparationCompleted','UiPreparationTotal','UiPreparationUnit','UiDemoNeedsSpace') {
         $value=Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
         $saved[$name]=$null; if ($value) {$saved[$name]=$value.Value}
     }
     try {
         Clear-DisplayPanel
         $script:UiDemo=$true; $script:UiDemoCount=$scenes.Count
+        $script:UiPreparing=$false; $script:UiDemoNeedsSpace=$false
         $animateDemo=$script:UiVT
         $script:Clock=[Diagnostics.Stopwatch]::StartNew()
         $index=0; $paused=$false
@@ -1423,49 +1588,54 @@ function Show-MioPreview([string]$Section='Tour') {
             $script:UiMood=$scene.Mood; $script:UiPoseOverride=$scene.Pose; $script:UiPercent=-1
             if (-not $animateDemo) {
                 Write-Host ('  [DEMO {0}/{1}] {2} / {3}' -f ($index+1),$scenes.Count,$scene.System,$scene.Stage)
-                Write-Host ('  '+$scene.Detail)
+                if ($scene.Menu) {
+                    Set-MioPreviewProgress $scene 0 3500
+                    foreach ($row in @(Get-MioPreviewMenuRows $scene)) {Write-Host ('  '+$row)}
+                }
+                if ($scene.Detail) {Write-Host ('  '+$scene.Detail)}
                 $index++; continue
             }
             $timer=[Diagnostics.Stopwatch]::StartNew(); if ($paused) {$timer.Stop()}
             $duration=3500; if ($scene.Group -eq 'Bunny') {$duration=1800}
             if ($scene.Duration) {$duration=[int]$scene.Duration}
-            $next=$index+1; $dirty=$true; $draw=[Diagnostics.Stopwatch]::StartNew()
+            $next=$index+1; $dirty=$true; $resizePaused=$false; $draw=[Diagnostics.Stopwatch]::StartNew()
+            $frameInterval=250; $periodic=$true
+            if (($scene.Menu -and -not $scene.SdProgress) -or $scene.IdleGesture) {$periodic=$false}
+            elseif ($scene.Status -or $scene.Complete) {$frameInterval=1000}
             while ($true) {
                 if (Update-DisplaySize -Throttled) {$dirty=$true}
-                $script:UiDemoPaused=$paused
-                $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
-                $script:UiSay=('DEMO {0}/{1} | Space pause | N/P | R replay | E CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)
-                if ($paused) {$script:UiSay=('DEMO {0}/{1} PAUSED | Space resume | N/P | E CRT {2} | B back' -f $script:UiDemoScene,$script:UiDemoCount,$crtState)}
-                $frameInterval=250; $periodic=$true
-                if ($scene.Menu) {$periodic=$false}
-                elseif ($scene.Status -or $scene.Complete) {$frameInterval=1000}
-                if ($scene.IdleGesture) {
-                    $periodic=$false
-                    if (-not $NoAnimation) {
-                        $pose=Get-MioIdleGesturePose $scene.IdleGesture ($timer.ElapsedMilliseconds-400)
-                        if ($pose -cne $script:UiPoseOverride) {$dirty=$true}
-                    }
+                if ($scene.IdleGesture -and -not $NoAnimation -and -not $paused -and -not $resizePaused) {
+                    $pose=Get-MioIdleGesturePose $scene.IdleGesture ($timer.ElapsedMilliseconds-400)
+                    if ($pose -cne $script:UiPoseOverride) {$dirty=$true}
                 }
-                if ($dirty -or ($periodic -and -not $paused -and $draw.ElapsedMilliseconds -ge $frameInterval)) {
+                if ($dirty -or ($periodic -and -not $paused -and -not $resizePaused -and $draw.ElapsedMilliseconds -ge $frameInterval)) {
                     $draw.Restart()
+                    $script:UiDemoPaused=($paused -or $resizePaused)
+                    $script:UiSay=Get-MioPreviewControls $paused $resizePaused
                     Set-MioPreviewProgress $scene $timer.ElapsedMilliseconds $duration
+                    $script:UiDemoNeedsSpace=$false
                     if ($scene.Menu) {
-                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $scene.Menu $script:UiSay 'Preview only / no selection is applied' 0 $scene.Mood
+                        $rows=@(Get-MioPreviewMenuRows $scene)
+                        Draw-MenuPanel ('DEMO / '+$scene.Stage) $rows $script:UiSay '' -1 $scene.Mood
                     } else {Draw-DisplayPanel -Force}
-                    $dirty=$false
+                    $wasResizePaused=$resizePaused
+                    $resizePaused=[bool]$script:UiDemoNeedsSpace
+                    if ($paused -or $resizePaused) {$timer.Stop();$script:Clock.Stop()}
+                    else {$timer.Start();$script:Clock.Start()}
+                    $dirty=($wasResizePaused -ne $resizePaused)
                 }
-                if (-not $paused -and $timer.ElapsedMilliseconds -ge $duration) {break}
+                if (-not $paused -and -not $resizePaused -and $timer.ElapsedMilliseconds -ge $duration) {break}
                 if ([Console]::KeyAvailable) {
                     $key=[Console]::ReadKey($true)
                     if ($key.Key -in [ConsoleKey]::B,[ConsoleKey]::Q,[ConsoleKey]::Escape) {return}
                     if ($key.Key -eq [ConsoleKey]::Spacebar) {
                         $paused=-not $paused
-                        if ($paused) {$timer.Stop()} else {$timer.Start()}
+                        if ($paused -or $resizePaused) {$timer.Stop();$script:Clock.Stop()} else {$timer.Start();$script:Clock.Start()}
                         $script:UiDemoPaused=$paused; $dirty=$true
                     }
                     elseif ($key.Key -in [ConsoleKey]::N,[ConsoleKey]::RightArrow,[ConsoleKey]::Enter) {break}
                     elseif ($key.Key -in [ConsoleKey]::P,[ConsoleKey]::LeftArrow) {$next=[Math]::Max(0,$index-1); break}
-                    elseif ($key.Key -eq [ConsoleKey]::R) {$next=0; break}
+                    elseif ($key.Key -eq [ConsoleKey]::R) {$next=0; $script:Clock.Restart();if ($paused) {$script:Clock.Stop()};break}
                     elseif ($key.Key -eq [ConsoleKey]::E) {Switch-DisplayEffect; $dirty=$true}
                 } else {
                     Wait-DisplayFrame 30

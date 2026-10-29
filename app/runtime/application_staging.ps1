@@ -48,7 +48,7 @@ function New-ApplicationStagedCode {
     $files=@(
         'app/playlists/make_playlists.ps1','app/C64/convert_c64.ps1','app/ZX/convert_zx.ps1','app/onion/prepare_onion.ps1',
         'app/ui/display.ps1','app/shared/compile_support.ps1','app/onion/core_support.ps1','app/shared/overwrite_prompt.ps1',
-        'app/ui/mio_idle_library.ps1','app/ui/mio_idle_scheduler.ps1',
+        'app/ui/mio_idle_library.ps1','app/ui/mio_idle_scheduler.ps1','app/ui/menu_models.ps1',
         'app/shared/output_safety.ps1','app/shared/source_policy.ps1','app/shared/archive_limits.ps1','app/shared/zip_integrity.ps1','app/shared/media_validation.ps1',
         'app/shared/native_process.ps1','app/shared/native_sandbox.ps1','app/shared/archive_sandbox.ps1','app/shared/conversion_layout.ps1',
         'app/runtime/application_session.ps1','app/runtime/application_entry.ps1','app/runtime/application_jobs.ps1','app/runtime/application_archive.ps1',

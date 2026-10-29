@@ -1393,27 +1393,12 @@ function Invoke-OptiMenu([object[]]$Profiles) {
     $page=$StartPage; $profile=$null; $lastCode=0
     $common=@{Root=$Root; Existing=$Existing; NoAnimation=$NoAnimation; NoColor=$NoColor; DisplayEffect=$DisplayEffect}
     while ($true) {
-        $worker=$null; $workerArgs=$null; $pageName=$page
+        $worker=$null; $workerArgs=$null
         if ($page -eq 'Main') {
-            Show-MenuTitle 'Main menu'
-            $crtState=if ($script:DisplayEffect -eq 'CRT') {'On'} else {'Off'}
-            Write-MenuLine '  S. Onion SD setup: enable supported file types / preserve selected cores' 'S. Onion SD setup / cores preserved'
-            Write-MenuLine '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
-            Write-MenuLine '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
-            Write-MenuLine '  Support: standard Onion cores'
-            for ($i=0;$i -lt $Profiles.Count;$i++) {
-                $support=Get-PlaylistSupport $Profiles[$i] ''
-                $label=Get-PlaylistFeatureLabel $support
-                if ($label) {$label=' '+$label}
-                $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
-                $shortLabel=$label
-                $compact=('{0,2}. {1,-9} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$shortNames[$Profiles[$i].Folder],$shortLabel)
-                Write-MenuLine ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
-            }
-            Write-MenuLine '  D. Demo / interactive walkthrough' 'D. Demo / interactive walkthrough'
-            Write-MenuLine ('  E. CRT effect: '+$crtState+' / turn on or off')
-            Write-MenuLine '  Q. Exit'
-            $answer=Read-MenuChoice 'Choose a system number or letter [Enter = 1, Amiga]'
+            $model=Get-OptiMenuModel -Page Main -Profiles $Profiles -DisplayEffect $script:DisplayEffect
+            Show-MenuTitle $model.Title
+            for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
+            $answer=Read-MenuChoice $model.Prompt
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq 'C') {$page='C64'; continue}
             if ($answer -eq 'Z') {$page='ZX'; continue}
@@ -1428,25 +1413,18 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $number=0
             if ([int]::TryParse($answer,[ref]$number) -and $number -ge 1 -and $number -le $Profiles.Count) {
                 $profile=$Profiles[$number-1]
-                $singleOutput='2'; if ($profile.Folder -in 'CPC','PS','SEGACD') {$singleOutput='4'}
-                $hiddenOutput='2'; if ($profile.Folder -in 'DOS','MSX','PS','SEGACD','CPC','ZXS') {$hiddenOutput='3'}
+                $defaults=Get-OptiStorageDefaults $profile
+                $singleOutput=$defaults.Single; $hiddenOutput=$defaults.Hidden
                 $page='SingleStorage'; continue
             }
             Write-MenuLine '  Choose one of the numbers or letters shown.'
             continue
         }
         if ($page -eq 'Demo') {
-            Show-MenuTitle 'Demo / walkthrough'
-            Write-MenuLine '  Demonstration only. No source, output or SD files are touched.'
-            Write-MenuLine '  1. Full walkthrough / every stage'
-            Write-MenuLine '  2. Commodore 64 / NIB, NBZ and G64 output'
-            Write-MenuLine '  3. ZX Spectrum / IPF, DSK and output choices'
-            Write-MenuLine '  4. Playlists / hidden media and disk order'
-            Write-MenuLine '  5. Results / overwrite, skip and error handling'
-            Write-MenuLine '  6. Bunny animation gallery'
-            Write-MenuLine '  7. Core support and Onion SD setup'
-            Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $answer=Read-MenuChoice 'Choose demo [Enter = 1]'
+            $model=Get-OptiMenuModel -Page Demo
+            Show-MenuTitle $model.Title
+            for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
+            $answer=Read-MenuChoice $model.Prompt
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer='1'}
@@ -1457,27 +1435,11 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             continue
         }
         if ($page -in 'C64','ZX') {
-            $pageName='Commodore 64';$outputName='G64'
-            if ($page -eq 'ZX') {$pageName='ZX Spectrum';$outputName='DSK'}
-            Show-MenuTitle $pageName
-            if ($page -eq 'C64') {Write-MenuLine '  Convert NIB/NBZ to G64.'}
-            else {Write-MenuLine '  Convert IPF to DSK.'}
-            Write-MenuLine '  Conversion only. Choose Keep or Remove on the next screen.'
-            $converterSystem='COMMODORE'; if ($page -eq 'ZX') {$converterSystem='ZXS'}
-            $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
-            $defaultOutput='2'
-            $zipNotice=Get-ZipOutputNotice $converterProfile -GameOutput
-            $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            $zipDefault=if ($defaultOutput -eq '2') {' (default)'} else {''}
-            $folderDefault=if ($defaultOutput -eq '3') {' (default)'} else {''}
-            $looseDefault=if ($defaultOutput -eq '4') {' (default)'} else {''}
-            Write-MenuLine '  1. Auto / keep input layout'
-            Write-MenuLine ('  2. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ('2. ZIPs'+$zipDefault+$zipLabel)
-            Write-MenuLine ('  3. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine ('  4. Loose '+$outputName+' files'+$looseDefault)
-            if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
-            Write-MenuLine '  B. Back to main menu     Q. Exit'
-            $answer=Read-MenuChoice ('Choose output [Enter = '+$defaultOutput+']')
+            $model=Get-OptiMenuModel -Page $page -Profiles $Profiles
+            Show-MenuTitle $model.Title
+            for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
+            $defaultOutput=$model.Default
+            $answer=Read-MenuChoice $model.Prompt
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
@@ -1491,55 +1453,11 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             }
         } elseif ($page -in 'SingleStorage','Storage') {
             $singlePage=$page -eq 'SingleStorage'
-            $pageName=$profile.Name+' / playlist media'
-            if ($singlePage) {$pageName=$profile.Name+' / single games'}
-            Show-MenuTitle $pageName
-            $support=Get-PlaylistSupport $profile ''
-            $coreName=$support.Core; if ($support.Core -eq $profile.DefaultCore) {$coreName=$profile.Core}
-            Write-MenuLine ('  '+$profile.Folder+' / '+$coreName)
-            if ($singlePage) {
-                Write-MenuLine '  Games with one disc or tape side stay visible in DST.'
-                Write-MenuLine '  Choose how to store them.'
-            } else {
-                $playlistLabel=Get-PlaylistFeatureLabel $support
-                if ($playlistLabel) {Write-MenuLine ('  '+$playlistLabel)}
-                if ($profile.Folder -eq 'COMMODORE') {
-                    $tapeSupport=Get-TapeSwapSupport $profile '' $support
-                    $tapeFormats='TAP, T64'
-                    if ($tapeSupport.CanBuild) {$tapeFormats=(@($tapeSupport.Extensions | ForEach-Object {$_.TrimStart('.').ToUpperInvariant()}) -join ', ')}
-                    $tapeLabel=''; if (-not $tapeSupport.CanBuild) {$tapeLabel=' ['+$tapeSupport.Status.ToLowerInvariant()+']'}
-                    Write-MenuLine ('  Tape swapping: '+$tapeFormats+$tapeLabel)
-                    if (-not $tapeSupport.CanBuild) {Write-MenuLine ('  '+$tapeSupport.Reason)}
-                }
-                Write-MenuLine ('  Single games: '+@{'1'='Auto / keep input layout';'2'='ZIPs';'3'='Folders';'4'='Loose files'}[$singleOutput])
-                Write-MenuLine '  Choose how playlist media is stored in .hidden.'
-                Write-MenuLine '  Playlists stay outside .hidden.'
-            }
-            $defaultOutput=if ($singlePage) {$singleOutput} else {$hiddenOutput}
-            $zipNotice=Get-ZipOutputNotice $profile -GameOutput:$singlePage
-            $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-            $autoDefault=if ($defaultOutput -eq '1') {' (default)'} else {''}
-            Write-MenuLine ('  1. Auto'+$autoDefault+' / keep input layout')
-            $zipChoice='2'; $folderChoice='3'; $looseChoice='4'
-            $zipDefault=if ($defaultOutput -eq $zipChoice) {' (default)'} else {''}
-            $folderDefault=if ($defaultOutput -eq $folderChoice) {' (default)'} else {''}
-            $looseDefault=if ($defaultOutput -eq $looseChoice) {' (default)'} else {''}
-            Write-MenuLine ('  '+$zipChoice+'. ZIPs'+$zipDefault+' / one per game'+$zipLabel) ($zipChoice+'. ZIPs'+$zipDefault+$zipLabel)
-            Write-MenuLine ('  '+$folderChoice+'. Folders'+$folderDefault+' / one per game')
-            Write-MenuLine ('  '+$looseChoice+'. Loose files'+$looseDefault)
-            if ($zipNotice.Hint) {Write-MenuLine ('  '+$zipNotice.Hint)}
-            if ($singlePage) {
-                Write-MenuLine '  Next: storage for playlist media in .hidden.'
-                Write-MenuLine '  B. Back to main menu     Q. Exit'
-                $prompt='Choose single-game storage'
-            } else {
-                if ($support.Status -eq 'UNSUPPORTED') {Write-MenuLine ('  '+$coreName+' cannot load playlists.')}
-                elseif ($zipNotice.Label -and $support.CanBuild) {Write-MenuLine '  Choose Folders or Loose files for playlists.'}
-                Write-MenuLine '  Next: choose Keep or Remove originals.'
-                Write-MenuLine '  B. Back to single games     Q. Exit'
-                $prompt='Choose storage in .hidden'
-            }
-            $answer=Read-MenuChoice ($prompt+' [Enter = '+$defaultOutput+']')
+            $model=Get-OptiMenuModel -Page $page -Profile $profile -SingleOutput $singleOutput -HiddenOutput $hiddenOutput
+            Show-MenuTitle $model.Title
+            for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
+            $defaultOutput=$model.Default
+            $answer=Read-MenuChoice $model.Prompt
             if ($answer -eq 'B') {$page=if ($singlePage) {'Main'} else {'SingleStorage'}; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}

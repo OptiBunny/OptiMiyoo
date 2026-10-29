@@ -30,6 +30,8 @@ function Initialize-Display {
     Reset-MioSparseCrt
     Initialize-MioIdleScheduler
     $script:MioRenderCache=@{}
+    $script:MioGrayColors=$null; $script:MioCrtPalettes=@{}
+    $script:OptiLogoGrayPaletteKey=$null; $script:OptiLogoGrayPalette=$null
     $script:MioCrtRowCache=@{}
     $script:MioCrtRowOrder=[System.Collections.Generic.Queue[string]]::new()
     $script:MioSparseCrtFrames=@{}
@@ -100,7 +102,7 @@ namespace OptiMiyoo {
     # Menus use brief idle gestures and cached sweeps, never continuous redraws.
     Sync-DisplayPreference
     if ($script:UiVT) {Initialize-FrameTimer}
-    if ($script:UiAnsi -and (Get-Variable PSStyle -ErrorAction SilentlyContinue)) {
+    if ($script:UiVT -and (Get-Variable PSStyle -ErrorAction SilentlyContinue)) {
         $script:UiOldRendering=$PSStyle.OutputRendering
         $PSStyle.OutputRendering='Ansi'
     }
@@ -181,6 +183,16 @@ function Update-DisplaySize([switch]$Throttled) {
     return $true
 }
 
+function Get-DisplayArtMode {
+    if (-not $script:UiVT) {return 'Plain'}
+    if ($script:UiAnsi) {return 'Color'}
+    return 'Gray'
+}
+function ConvertTo-DisplayGray([string]$Rgb) {
+    $channels=$Rgb.Split(';')
+    $level=[int][Math]::Round(0.2126*[int]$channels[0]+0.7152*[int]$channels[1]+0.0722*[int]$channels[2])
+    return ('{0};{0};{0}' -f $level)
+}
 function Color-Text([string]$Text,[string]$Rgb='218;224;244') {
     if ($script:UiAnsi) {return ($script:Esc+'[38;2;'+$Rgb+'m'+$Text+$script:Esc+'[0m')}
     return $Text
@@ -387,7 +399,7 @@ function Restore-Display {
         try {[Console]::CursorVisible=$script:UiOldCursor} catch {}
         try {$Host.UI.RawUI.BackgroundColor=$script:UiOldBackground; $Host.UI.RawUI.ForegroundColor=$script:UiOldForeground} catch {}
     }
-    if ($script:UiAnsi) {[Console]::Write($script:Esc+'[0m')}
+    if ($script:UiVT) {[Console]::Write($script:Esc+'[0m')}
     if ($null -ne $script:UiOldRendering) {$PSStyle.OutputRendering=$script:UiOldRendering}
     $script:UiInteractive=$false; $script:UiAnsi=$false; $script:UiVT=$false
     $script:UiPanel=$false; $script:UiOldRendering=$null
@@ -438,8 +450,7 @@ function Reset-MioSparseCrt([switch]$KeepIntro) {
     }
 }
 function Update-MioSparseCrt([double]$ElapsedMs,[bool]$HasText=$false,[bool]$VisibleBunny=$true) {
-    $eligible=(-not $NoAnimation -and -not $NoColor -and $script:UiAnsi -and
-        $script:UiVT -and $script:UiPanel -and $VisibleBunny -and
+    $eligible=(-not $NoAnimation -and $script:UiVT -and $script:UiPanel -and $VisibleBunny -and
         -not $script:UiDemo -and $script:DisplayEffect -eq 'CRT')
     if (-not $eligible -or $ElapsedMs -lt 0 -or [double]::IsNaN($ElapsedMs) -or [double]::IsInfinity($ElapsedMs)) {
         $changed=($script:UiSparseCrtPhase -ge 0)
@@ -577,29 +588,41 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
     $pixels=$script:MioPixelFrames[$pose]
     # Cached row shading adds CRT texture without moving pixels or changing
     # menu, status, or input text.
-    $useCrt=($script:DisplayEffect -eq 'CRT' -and $script:UiAnsi)
+    $artMode=Get-DisplayArtMode
+    $useCrt=($script:DisplayEffect -eq 'CRT' -and $script:UiVT)
     # A logo-only sweep leaves these pixels static; reuse the ordinary pose
     # cache instead of retaining an identical bunny frame for every logo phase.
     $sparseCrt=($useCrt -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry -and $script:UiSparseCrtRegion -eq 'Bunny')
-    $cacheKey=$pose+'|'+$script:UiAnsi+'|'+$useCrt
+    $cacheKey=$pose+'|'+$artMode+'|'+$useCrt
     $phaseKey=$null
     if ($sparseCrt) {
-        $phaseKey=$pose+'|'+$script:UiSparseCrtPhase+'|'+$script:MioSparseCrtGeometry.Key+'|'+$script:UiSparseCrtRegion+'|'+$script:MioSparseCrtLogoFrameCount+'|'+$script:MioSparseCrtBunnyFrameCount
+        $phaseKey=$pose+'|'+$artMode+'|'+$script:UiSparseCrtPhase+'|'+$script:MioSparseCrtGeometry.Key+'|'+$script:UiSparseCrtRegion+'|'+$script:MioSparseCrtLogoFrameCount+'|'+$script:MioSparseCrtBunnyFrameCount
         if ($script:MioSparseCrtFrames.ContainsKey($phaseKey)) {return $script:MioSparseCrtFrames[$phaseKey]}
     } elseif ($script:MioRenderCache.ContainsKey($cacheKey)) {return $script:MioRenderCache[$cacheKey]}
+    $pixelColors=$script:MioPixelColors
+    if ($artMode -eq 'Gray') {
+        # Preserve every pixel and face detail; only the palette changes.
+        if (-not $script:MioGrayColors) {
+            $script:MioGrayColors=@{}
+            foreach ($key in $script:MioPixelColors.Keys) {$script:MioGrayColors[$key]=ConvertTo-DisplayGray $script:MioPixelColors[$key]}
+        }
+        $pixelColors=$script:MioGrayColors
+    }
     $rowLevels=$null
     if ($useCrt) {
-        if (-not $script:MioCrtPalettes) {
-            $script:MioCrtPalettes=@{}
+        if (-not $script:MioCrtPalettes.ContainsKey($artMode)) {
+            $levels=@{}
             for ($level=65;$level -le 100;$level++) {
                 $palette=@{}
-                foreach ($key in $script:MioPixelColors.Keys) {
-                    $rgb=$script:MioPixelColors[$key].Split(';')
+                foreach ($key in $pixelColors.Keys) {
+                    $rgb=$pixelColors[$key].Split(';')
                     $palette[$key]=((@($rgb | ForEach-Object {[int][Math]::Round([int]$_*$level/100.0)})) -join ';')
                 }
-                $script:MioCrtPalettes[$level]=$palette
+                $levels[$level]=$palette
             }
+            $script:MioCrtPalettes[$artMode]=$levels
         }
+        $crtPalettes=$script:MioCrtPalettes[$artMode]
         if ($sparseCrt) {
             $rowLevels=(Get-MioSweepLevels $script:UiSparseCrtPhase).Bunny
         } else {
@@ -610,20 +633,20 @@ function Get-MioFrame([string]$Mood,[int]$Tick,[string]$PoseOverride) {
     }
     $result=[System.Collections.Generic.List[string]]::new()
     for ($y=0;$y -lt 24;$y+=2) {
-        $topColors=$script:MioPixelColors; $bottomColors=$script:MioPixelColors
+        $topColors=$pixelColors; $bottomColors=$pixelColors
         if ($useCrt) {
-            $rowKey=$pose+'|'+$y+'|'+$rowLevels[$y]+'|'+$rowLevels[$y+1]
+            $rowKey=$pose+'|'+$artMode+'|'+$y+'|'+$rowLevels[$y]+'|'+$rowLevels[$y+1]
             if ($script:MioCrtRowCache.ContainsKey($rowKey)) {
                 $result.Add($script:MioCrtRowCache[$rowKey]); continue
             }
-            $topColors=$script:MioCrtPalettes[$rowLevels[$y]]
-            $bottomColors=$script:MioCrtPalettes[$rowLevels[$y+1]]
+            $topColors=$crtPalettes[$rowLevels[$y]]
+            $bottomColors=$crtPalettes[$rowLevels[$y+1]]
         }
         $line=[Text.StringBuilder]::new()
         for ($x=0;$x -lt 22;$x++) {
             $top=[string]$pixels[$y][$x]; $bottom=[string]$pixels[$y+1][$x]
             if ($top -eq '.' -and $bottom -eq '.') {[void]$line.Append(' '); continue}
-            if (-not $script:UiAnsi) {[void]$line.Append('#'); continue}
+            if (-not $script:UiVT) {[void]$line.Append('#'); continue}
             if ($top -eq '.') {
                 [void]$line.Append($script:Esc+'[38;2;'+$bottomColors[$bottom]+'m'+[char]0x2584+$script:Esc+'[0m')
             } elseif ($bottom -eq '.') {
@@ -823,7 +846,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $cached.PanelRows -eq $script:UiRows -and $cached.FrameRows -eq $script:UiLastFrameRows -and
         $cached.Title -ceq $Title -and $cached.RowsKey -ceq $rowsKey -and $cached.Prompt -ceq $Prompt -and
         $cached.InputText -ceq $InputText -and $cached.Caret -eq $Caret -and $cached.Mood -ceq $Mood -and
-        $cached.Ansi -eq $script:UiAnsi -and $cached.Version -ceq $script:AppVersion -and
+        $cached.Ansi -eq $script:UiAnsi -and $cached.VT -eq $script:UiVT -and $cached.Version -ceq $script:AppVersion -and
         $cached.Effect -ceq $script:DisplayEffect -and $cached.MenuActive -eq $script:UiMenuActive -and
         $cached.EventCount -eq $script:UiEventRows.Count) {
         $patch=[Text.StringBuilder]::new()
@@ -903,7 +926,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $script:UiIdleMenuCache=[pscustomobject]@{
             Width=$w;Height=$script:UiHeight;Columns=$script:UiColumns;BannerRows=$script:UiBannerRows
             PanelRows=$script:UiRows;FrameRows=$script:UiLastFrameRows;Title=$Title;RowsKey=$rowsKey;Prompt=$Prompt
-            InputText=$InputText;Caret=$Caret;Mood=$Mood;Ansi=$script:UiAnsi;Version=$script:AppVersion
+            InputText=$InputText;Caret=$Caret;Mood=$Mood;Ansi=$script:UiAnsi;VT=$script:UiVT;Version=$script:AppVersion
             Effect=$script:DisplayEffect;MenuActive=$script:UiMenuActive;EventCount=$script:UiEventRows.Count
             Mio=$mio;SparseCrt=($script:UiSparseCrtPhase -ge 0);Logo=$script:UiLastLogoRows
             LogoRow=$script:UiLastLogoRow
@@ -1269,8 +1292,17 @@ function Get-OptiLogoRows {
     }}
     $title='OPTIMIYOO'
     $colors=@(Get-BannerPalette)
-    $crt=($script:UiAnsi -and $script:DisplayEffect -eq 'CRT')
-    $cacheKey=$script:UiAnsi.ToString()+'|'+$crt+'|'+($colors -join '|')
+    $artMode=Get-DisplayArtMode
+    if ($artMode -eq 'Gray') {
+        $paletteKey=$colors -join '|'
+        if ($script:OptiLogoGrayPaletteKey -cne $paletteKey) {
+            $script:OptiLogoGrayPalette=@($colors | ForEach-Object {ConvertTo-DisplayGray $_})
+            $script:OptiLogoGrayPaletteKey=$paletteKey
+        }
+        $colors=$script:OptiLogoGrayPalette
+    }
+    $crt=($script:UiVT -and $script:DisplayEffect -eq 'CRT')
+    $cacheKey=$artMode+'|'+$crt+'|'+($colors -join '|')
     # The later bunny sweep cannot shade the logo. Its steady rows already
     # have a cache entry and need no per-phase copies.
     $motion=($crt -and $script:UiSparseCrtPhase -ge 0 -and $script:MioSparseCrtGeometry.LogoRow -gt 0 -and $script:UiSparseCrtRegion -eq 'Logo')
@@ -1286,7 +1318,7 @@ function Get-OptiLogoRows {
     for ($row=0;$row -lt 5;$row++) {
         $topLevel=100; $bottomLevel=84
         if ($levels) {$topLevel=$levels[$row*2]; $bottomLevel=$levels[$row*2+1]}
-        $rowKey=$row.ToString()+'|'+$script:UiAnsi+'|'+$crt+'|'+($colors -join '|')+'|'+$topLevel+'|'+$bottomLevel
+        $rowKey=$row.ToString()+'|'+$artMode+'|'+$crt+'|'+($colors -join '|')+'|'+$topLevel+'|'+$bottomLevel
         if ($script:OptiLogoRowCache.ContainsKey($rowKey)) {$rows.Add($script:OptiLogoRowCache[$rowKey]);continue}
         $line=[Text.StringBuilder]::new()
         [void]$line.Append(' '*$rake[$row])
@@ -1305,7 +1337,7 @@ function Get-OptiLogoRows {
             if ($column -eq 4) {[void]$line.Append(' ')}
             $glyph=$script:OptiLogoFont[[string]$title[$column]][$row]
             if ($crt) {[void]$line.Append((Format-CrtLogoGlyph $glyph $rgb $topLevel $bottomLevel))}
-            elseif ($script:UiAnsi) {[void]$line.Append($prefix+$rgb+'m'+$glyph+$reset)}
+            elseif ($script:UiVT) {[void]$line.Append($prefix+$rgb+'m'+$glyph+$reset)}
             else {[void]$line.Append($glyph)}
         }
         $renderedRow=$line.ToString(); $rows.Add($renderedRow)

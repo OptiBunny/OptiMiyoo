@@ -128,19 +128,39 @@ function New-ApplicationSdSession {
     }finally{if($workLease){$workLease.Dispose()}}
 }
 
+function Test-ApplicationSdCancellation($ApplicationSession) {
+    if(-not $ApplicationSession){return $false}
+    if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
+    if($ApplicationSession.CancellationRequested){return $true}
+    if(-not $ApplicationSession.Interactive){return $false}
+    if(-not $ApplicationSession.HasExited -or -not $ApplicationSession.IsRelayPaused){throw 'SD publication requires the finished application relay to be paused.'}
+    # The worker input thread has ended. Only the trusted parent consumes keys
+    # here, at boundaries where no config backup, write or restoration is active.
+    while([Console]::KeyAvailable){
+        $key=[Console]::ReadKey($true)
+        if([int]$key.KeyChar -eq 3 -or ($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control))){
+            $ApplicationSession.Stop()
+            if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
+            return $true
+        }
+    }
+    return $false
+}
+
 function Complete-ApplicationSdSession {
-    param([Parameter(Mandatory=$true)]$Session,[scriptblock]$Progress)
+    param([Parameter(Mandatory=$true)]$Session,[scriptblock]$Progress,$ApplicationSession=$null)
     $state=Get-ApplicationSdState $Session
     if($state.Completed){throw 'SD setup result has already been consumed.'}
     $state.Completed=$true
     $results=New-Object 'Collections.Generic.List[object]';$stagedLeases=New-Object 'Collections.Generic.List[object]'
-    $changed=0;$failed=0;$skipped=0
+    $changed=0;$failed=0;$skipped=0;$cancelled=$false
     try {
         # Freeze and validate the entire selected snapshot before any original
         # write. Extra child files are never imported or executed.
         $checked=0
         foreach($file in $state.Files.Values) {
             if($Progress){$null=& $Progress 'Verifying SD setup changes' $file.Relative $checked $state.Files.Count 'files'}
+            if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
             $target=Join-Path $state.StagedRoot $file.Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
             $lease=[OptiMiyoo.OnionPathLease]::Open($target,$state.StagedRoot,$false,$false,$false);$stagedLeases.Add($lease)
             if($file.Config) {
@@ -151,11 +171,12 @@ function Complete-ApplicationSdSession {
             } elseif($lease.Stream.Length -ne $file.Length -or (Get-ApplicationSdHash $lease.Stream) -cne $file.Hash){throw 'SD sandbox changed a launcher or core; originals kept.'}
             $checked++
         }
-        if($Progress){$null=& $Progress 'Verifying SD setup changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
+        if(-not $cancelled -and $Progress){$null=& $Progress 'Verifying SD setup changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
         $configs=@($state.Files.Values | Where-Object {$_.Config} | Sort-Object Relative)
-        for($index=0;$index -lt $configs.Count;$index++) {
+        for($index=0;-not $cancelled -and $index -lt $configs.Count;$index++) {
             $file=$configs[$index]
             if($Progress){$null=& $Progress 'Updating SD file lists' $file.Folder $index $configs.Count 'systems'}
+            if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
             if(-not $file.Changed){$skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept'});continue}
             $writeLease=$null;$backupLease=$null;$writeStarted=$false;$restored=$false
             try {
@@ -190,8 +211,9 @@ function Complete-ApplicationSdSession {
                 $results.Add([pscustomobject]@{System=$file.Folder;State=$result})
             }finally{if($backupLease){$backupLease.Dispose()};if($writeLease){$writeLease.Dispose()}}
         }
-        if($Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}
-        return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;BackupRoot=$state.BackupRoot;VerifiedBackups=$state.VerifiedBackups.ToArray();UnverifiedBackups=$state.UnverifiedBackups.ToArray();Results=$results.ToArray()}
+        if(-not $cancelled){$cancelled=Test-ApplicationSdCancellation $ApplicationSession}
+        if(-not $cancelled -and $Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}
+        return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;Cancelled=$cancelled;BackupRoot=$state.BackupRoot;VerifiedBackups=$state.VerifiedBackups.ToArray();UnverifiedBackups=$state.UnverifiedBackups.ToArray();Results=$results.ToArray()}
     }finally{foreach($lease in $stagedLeases){$lease.Dispose()}}
 }
 
@@ -204,7 +226,8 @@ function Close-ApplicationSdSession {
 
 function Get-ApplicationSdResultLines {
     param([Parameter(Mandatory=$true)]$Result)
-    'SD setup finished.'
+    if($Result.Cancelled){'SD setup cancelled. Completed updates and backups were kept.'}
+    else {'SD setup finished.'}
     'Updated: {0} | Skipped: {1} | Failed: {2}' -f $Result.Changed,$Result.Skipped,$Result.Failed
     if ($Result.Changed) {"Refresh Onion's game list."}
     elseif (-not $Result.Failed) {'No configs were changed.'}

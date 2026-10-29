@@ -94,6 +94,7 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
     $backups = New-Object 'System.Collections.Generic.List[object]'
     $installed = New-Object 'System.Collections.Generic.List[object]'
     $locks = New-Object 'System.Collections.Generic.List[System.IDisposable]'
+    $locksTransferred=$false
     $targets = New-Object 'System.Collections.Generic.List[object]'
     $replaceTargets = New-Object 'System.Collections.Generic.List[object]'
     foreach ($item in $Items) { $targets.Add($item) }
@@ -176,8 +177,15 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
                 Write-Notice 'WARNING' ('Could not remove previous output backup: ' + $item.Backup)
             }
         }
-        return [pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
-    } finally {foreach($backup in $backups){if($backup.Guard){$backup.Guard.Dispose()}};foreach ($directoryLock in $directoryLocks) {$directoryLock.Dispose()}}
+        $commitResult=[pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
+        $locksTransferred=$true
+        return $commitResult
+    } finally {
+        # Engine Stop bypasses catch; release file locks that never reached the caller.
+        if(-not $locksTransferred){foreach($lock in $locks){$lock.Dispose()}}
+        foreach($backup in $backups){if($backup.Guard){$backup.Guard.Dispose()}}
+        foreach ($directoryLock in $directoryLocks) {$directoryLock.Dispose()}
+    }
 }
 
 

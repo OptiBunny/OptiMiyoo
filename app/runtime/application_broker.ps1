@@ -332,10 +332,82 @@ function Get-ApplicationBrokerArchive($Module,[string]$Path) {
 function Add-ApplicationBrokerExpectedFile([hashtable]$Manifest,[string]$Name,$File,[string]$Converter='') {
     Assert-ApplicationBrokerRelative $Name
     if($Manifest.ContainsKey($Name)){
+        if($Manifest[$Name].Name -cne $Name){throw 'Required output files differ only by letter case.'}
         if($Manifest[$Name].Hash -cne $File.Hash -or $Manifest[$Name].Length -ne $File.Length){throw 'Two source files map to different content at the same output name.'}
         return
     }
-    $Manifest[$Name]=[pscustomobject]@{Hash=[string]$File.Hash;Length=[long]$File.Length;Converter=$Converter;InputHash=[string]$File.Hash}
+    $Manifest[$Name]=[pscustomobject]@{Name=$Name;Hash=[string]$File.Hash;Length=[long]$File.Length;Converter=$Converter;InputHash=[string]$File.Hash}
+}
+
+function Assert-ApplicationBrokerFileNames([hashtable]$Files,[string]$DataKind) {
+    if($DataKind -eq 'Zip'){return}
+    # The child is not authoritative for CUE spelling checks. Windows merges
+    # differently cased parents, leaving at least one reference broken on Linux.
+    $directories=New-Object 'Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($name in $Files.Keys){
+        $parts=$name.Split('/')
+        for($i=1;$i -lt $parts.Length;$i++){
+            $parent=$parts[0..($i-1)] -join '/'
+            if($Files.ContainsKey($parent)){throw 'An output file is also required as a folder.'}
+            if($directories.ContainsKey($parent)){
+                if($directories[$parent] -cne $parent){throw 'Required output folders differ only by letter case.'}
+            }else{$directories.Add($parent,$parent)}
+        }
+    }
+}
+
+function Set-ApplicationBrokerParentCaseConflicts($State,[object[]]$Jobs) {
+    $destination=Join-Path $State.OriginalRoot 'DST'
+    $existing=New-Object 'Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($relative in $State.DestinationSnapshot.Directories){$existing.Add($relative,$relative)}
+    $planned=New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($job in $Jobs){
+        if($job.BlockedReason){continue}
+        foreach($write in $job.Writes){
+            $relative=Get-ApplicationBrokerRelative $write.Destination $destination
+            $parts=$relative.Split('/');$count=$parts.Length-1
+            if($write.Folder){$count=$parts.Length}
+            $prefix=''
+            for($i=0;$i -lt $count;$i++){
+                if($prefix){$prefix+='/'};$prefix+=$parts[$i]
+                # A whole replacement folder gets its own requested leaf spelling.
+                # Only its untouched ancestors must match the existing tree.
+                $replacementLeaf=$write.Folder -and $i -eq $parts.Length-1
+                if(-not $replacementLeaf -and $existing.ContainsKey($prefix) -and $existing[$prefix] -cne $prefix){
+                    $job.BlockedReason='An existing output parent folder uses different letter case; use matching folder spelling or a separate DST.'
+                }
+                if(-not $planned.ContainsKey($prefix)){$planned.Add($prefix,[pscustomobject]@{Name=$prefix;Jobs=@{};Conflict=$false})}
+                $directory=$planned[$prefix];$directory.Jobs[$job.JobId]=$job
+                $reason='Planned output parent folders differ only by letter case; use consistent folder spelling.'
+                if($directory.Conflict){$job.BlockedReason=$reason}
+                elseif($directory.Name -cne $prefix){
+                    $directory.Conflict=$true
+                    foreach($owner in $directory.Jobs.Values){$owner.BlockedReason=$reason}
+                }
+            }
+        }
+    }
+}
+
+function Assert-ApplicationBrokerOutputParentCase([string]$Parent,[string]$Root,$Verified) {
+    $current=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    if($current.Equals([IO.Path]::GetFullPath($Parent).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)){return}
+    $relative=Get-ApplicationBrokerRelative $Parent $Root
+    foreach($part in $relative.Split('/')){
+        $next=Join-Path $current $part
+        if(-not $Verified.Contains($next)){
+            $actual=$null;$matches=0
+            # Filter at the filesystem boundary, then reject short-name aliases.
+            # The caller holds this parent and its ancestors throughout sealing.
+            foreach($entry in [IO.Directory]::EnumerateDirectories($current,$part,[IO.SearchOption]::TopDirectoryOnly)){
+                $name=[IO.Path]::GetFileName($entry)
+                if($name.Equals($part,[StringComparison]::OrdinalIgnoreCase)){$actual=$name;$matches++}
+            }
+            if($matches -ne 1 -or $actual -cne $part){throw 'An output parent folder has different letter case; original kept. Use matching folder spelling or a separate DST.'}
+            [void]$Verified.Add($next)
+        }
+        $current=$next
+    }
 }
 
 function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job) {
@@ -534,9 +606,12 @@ function Start-ApplicationBrokerBatch {
         }
     }
     $sourcePlan=& $sourceModule {param($src,$policy,$descriptors)New-SourcePolicyPlan $src $policy -DescriptorSnapshot $descriptors} $src $SourcePolicy $descriptorSnapshot
+    foreach($job in $jobs){
+        if(-not $job.BlockedReason){try{Assert-ApplicationBrokerFileNames $job.Files $job.DataKind;Assert-ApplicationBrokerJobPaths $state $Operation $job $archives}catch{$job.BlockedReason=$_.Exception.Message}}
+    }
+    Set-ApplicationBrokerParentCaseConflicts $state $jobs.ToArray()
     $jobMap=@{};$conflicts=@{}
     foreach($job in $jobs){
-        if(-not $job.BlockedReason){try{Assert-ApplicationBrokerJobPaths $state $Operation $job $archives}catch{$job.BlockedReason=$_.Exception.Message}}
         $jobMap[$job.JobId]=$job
         foreach($path in $job.Paths){$key=Get-ApplicationBrokerRelative $path $src;if($state.SourceSnapshot.Files.ContainsKey($key)){$job.SourceHashes[[IO.Path]::GetFullPath($path)]=$state.SourceSnapshot.Files[$key].Hash}}
         & $sourceModule {param($plan,$job)Add-SourcePolicyJob $plan $job.JobId $job.Paths $job.SourceBlockReason} $sourcePlan $job
@@ -670,6 +745,7 @@ function Assert-ApplicationBrokerOwnership($Batch,$Job,[string]$DestinationRoot,
 function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null) {
     $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
     $items=New-Object 'System.Collections.Generic.List[object]';$owned=New-Object 'System.Collections.Generic.List[string]';$locks=New-Object 'System.Collections.Generic.List[IDisposable]'
+    $verifiedParents=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     try {
         Assert-ApplicationBrokerOwnership $Batch $Job $dst $ReferenceIndex
         foreach($write in $Job.Writes){
@@ -680,6 +756,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
             $locks.Add((Open-SourcePolicyDirectoryLease $anchor))
             [void][IO.Directory]::CreateDirectory($parent)
             if($parent -ne $anchor){$locks.Add((Open-SourcePolicyDirectoryLease $parent))}
+            Assert-ApplicationBrokerOutputParentCase $parent $dst $verifiedParents
             $container=Join-Path $parent ('.app_'+[Guid]::NewGuid().ToString('N').Substring(0,16)+'.tmp')
             # Supply the protected DACL in CreateDirectory itself: there is no
             # interval where this folder inherits a broad application ACL.

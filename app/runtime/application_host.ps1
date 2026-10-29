@@ -211,13 +211,13 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
         $logWriter.WriteLine(('Source policy: '+$Result.SourcePolicy.ToUpperInvariant()))
         $logWriter.WriteLine(('Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $Result.Removed,$Result.Kept,$Result.RemovalFailures))
         foreach ($reason in @($Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
-            $logWriter.WriteLine(('Originals kept: '+((ConvertTo-SafeExternalText $reason) -replace '[\r\n]+',' ')))
+            $logWriter.WriteLine(('Originals kept: '+(ConvertTo-SafeExternalLine $reason)))
         }
-        foreach ($row in $Result.Results) {$logWriter.WriteLine(((ConvertTo-SafeExternalText ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)) -replace '[\r\n]+',' '))}
+        foreach ($row in $Result.Results) {$logWriter.WriteLine((ConvertTo-SafeExternalLine ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)))}
         $csvWriter.Flush();$csvStream.Flush($true);$logWriter.Flush();$logStream.Flush($true)
-        Write-Host ('Report: '+(ConvertTo-SafeExternalText $csv))
-        Write-Host ('Log: '+(ConvertTo-SafeExternalText $log))
-    } catch {Write-Warning ('Could not save the verified result report: '+(ConvertTo-SafeExternalText $_.Exception.Message))}
+        Write-Host ('Report: '+(ConvertTo-SafeExternalLine $csv))
+        Write-Host ('Log: '+(ConvertTo-SafeExternalLine $log))
+    } catch {Write-Warning ('Could not save the verified result report: '+(ConvertTo-SafeExternalLine $_.Exception.Message))}
     finally {
         if ($csvWriter) {$csvWriter.Dispose()} elseif ($csvStream) {$csvStream.Dispose()}
         if ($logWriter) {$logWriter.Dispose()} elseif ($logStream) {$logStream.Dispose()}
@@ -355,7 +355,7 @@ function Invoke-ApplicationHost {
                     if ($session.Interactive) {[void]$session.PauseRelay()}
                     $script:DisplayEffect=$displayEffect
                     Initialize-Display;$progressDisplay=$true
-                    $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress
+                    $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress -ApplicationSession $session
                 }
                 if ($state.NextOnionRoot) {$selectedOnionRoot=$state.NextOnionRoot;$Entry='SD';$again=$true}
             } catch {
@@ -364,7 +364,7 @@ function Invoke-ApplicationHost {
                 if ($session -and $session.CancellationRequested -and -not $session.Failure -and $failure.Exception -is [OperationCanceledException]) {
                     $cancelled=$true;$exitCode=137
                 } else {
-                    $failureMessage='OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalText $failure.Exception.Message)
+                    $failureMessage='OptiMiyoo could not complete safely: '+(ConvertTo-SafeExternalLine $failure.Exception.Message)
                     if ($consoleScreen) {$deferredFailures.Add($failureMessage)}
                     else {Write-Host $failureMessage -ForegroundColor Red}
                     $exitCode=1
@@ -382,7 +382,7 @@ function Invoke-ApplicationHost {
                         if ($session) {
                             $session.Dispose()
                             if ($session.CleanupWarning) {
-                                $cleanupWarning=ConvertTo-SafeExternalText $session.CleanupWarning
+                                $cleanupWarning=ConvertTo-SafeExternalLine $session.CleanupWarning
                                 if ($consoleScreen) {$deferredWarnings.Add($cleanupWarning)}
                                 else {Write-Warning $cleanupWarning}
                             }
@@ -395,11 +395,11 @@ function Invoke-ApplicationHost {
             if ($state -and $state.Result) {
                 $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
                 Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
-                foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalText ($result.Source+': '+$result.Result+' / '+$result.Detail))}
+                foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalLine ($result.Source+': '+$result.Result+' / '+$result.Detail))}
                 Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
                 Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
                 foreach ($reason in @($state.Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
-                    Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalText $reason))
+                    Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalLine $reason))
                 }
                 Write-ApplicationVerifiedReport $originalRoot $state.Result
                 if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
@@ -411,10 +411,11 @@ function Invoke-ApplicationHost {
                 }
             }
             if ($sdResult) {
+                if ($sdResult.Cancelled) {$exitCode=137}
                 if ($sdResult.Failed) {$exitCode=1}
-                $returnToMenu=Show-ApplicationSdResult -Result $sdResult -NoPause:($originalArguments.NoPause -or -not $menu) `
+                $returnToMenu=Show-ApplicationSdResult -Result $sdResult -NoPause:($sdResult.Cancelled -or $originalArguments.NoPause -or -not $menu) `
                     -NoAnimation:$originalArguments.NoAnimation -NoColor:$originalArguments.NoColor -DisplayEffect $displayEffect
-                if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$returnToMenu}
+                if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=($returnToMenu -and -not $sdResult.Cancelled)}
             }
         }
     } finally {

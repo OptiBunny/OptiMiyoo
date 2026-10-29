@@ -396,14 +396,17 @@ function Invoke-ApplicationHost {
                 $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
                 Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
                 foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalLine ($result.Source+': '+$result.Result+' / '+$result.Detail))}
+                Write-Host ''
                 Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
                 Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
                 foreach ($reason in @($state.Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
                     Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalLine $reason))
                 }
+                Write-Host ''
                 Write-ApplicationVerifiedReport $originalRoot $state.Result
                 if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
                 if ($menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
+                    Write-Host ''
                     Write-Host 'Press Enter for the main menu, or Q to exit.'
                     do {$key=[Console]::ReadKey($true)} while ($key.Key -ne [ConsoleKey]::Enter -and $key.Key -ne [ConsoleKey]::Q)
                     $again=($key.Key -eq [ConsoleKey]::Enter)

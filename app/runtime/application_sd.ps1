@@ -238,16 +238,19 @@ function Get-ApplicationSdResultLines {
     if ($Result.Changed) {"Refresh Onion's game list."}
     elseif (-not $Result.Failed) {'No configs were changed.'}
     if ($Result.Failed) {'Some configs could not be updated.'}
+    if ($Result.Results) {''}
     foreach ($item in $Result.Results) {
         $status=[string]$item.State
         if ($status -eq 'Kept') {$status='Unchanged'}
         ConvertTo-ApplicationPromptPath ($item.System+': '+$status)
     }
     if ($Result.VerifiedBackups) {
+        ''
         'Verified original config backups:'
         foreach($backup in $Result.VerifiedBackups){ConvertTo-ApplicationPromptPath ($backup.System+': '+$backup.Path)}
     }
     if ($Result.UnverifiedBackups) {
+        ''
         'Incomplete or unverified backups; do not restore:'
         foreach($backup in $Result.UnverifiedBackups){ConvertTo-ApplicationPromptPath ($backup.System+': '+$backup.Path)}
     }
@@ -256,11 +259,31 @@ function Get-ApplicationSdResultLines {
 function Get-ApplicationSdResultModel {
     param([Parameter(Mandatory=$true)]$Result,[int]$Page=0)
     # Wrap before paging so even long redirected-drive paths fit the normal panel.
-    $rows=@(Get-MenuRows @(Get-ApplicationSdResultLines -Result $Result) 44)
+    # Keep section separators inside pages and backup headings with their first row.
     $pageSize=11
-    $pages=[Math]::Max(1,[int][Math]::Ceiling($rows.Count/[double]$pageSize))
+    $pageRows=New-Object 'Collections.Generic.List[string]'
+    $pageList=New-Object 'Collections.Generic.List[object]'
+    $separator=$false
+    foreach ($line in @(Get-ApplicationSdResultLines -Result $Result)) {
+        if (-not $line) {$separator=($pageRows.Count -gt 0);continue}
+        $wrapped=@(Get-MenuRows @($line) 44)
+        $needed=1
+        if ($line -in @('Verified original config backups:','Incomplete or unverified backups; do not restore:')) {$needed=$wrapped.Count+1}
+        $gap=0;if ($separator -and $pageRows.Count) {$gap=1}
+        if ($pageRows.Count -and $pageRows.Count+$gap+$needed -gt $pageSize) {
+            $pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray()});$pageRows.Clear()
+        }
+        if ($separator -and $pageRows.Count) {$pageRows.Add('')}
+        $separator=$false
+        foreach ($row in $wrapped) {
+            if ($pageRows.Count -eq $pageSize) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray()});$pageRows.Clear()}
+            $pageRows.Add($row)
+        }
+    }
+    if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray()})}
+    $pages=$pageList.Count
     $page=[Math]::Max(0,[Math]::Min($Page,$pages-1))
-    $lines=@($rows | Select-Object -Skip ($page*$pageSize) -First $pageSize)
+    $lines=@($pageList[$page].Rows)
     if ($pages -gt 1) {$lines+=('Page {0}/{1} | > Next | < Previous' -f ($page+1),$pages)}
     [pscustomobject]@{
         Title='Onion SD setup / results';Lines=$lines

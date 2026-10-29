@@ -788,6 +788,23 @@ function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$So
     return $rows.ToArray()
 }
 
+function Get-MenuSpacing([string[]]$Rows,[bool[]]$DefaultRows,[int]$MaximumRows) {
+    # Paragraph gaps are optional only when they cost artwork or usable space.
+    # Remove the minimum number, starting at the bottom; never alter source rows.
+    $remove=[Math]::Max(0,$Rows.Count-$MaximumRows)
+    $dropped=New-Object 'Collections.Generic.HashSet[int]'
+    for($i=$Rows.Count-1;$i -ge 0 -and $remove -gt 0;$i--) {
+        if([string]::IsNullOrWhiteSpace($Rows[$i])){[void]$dropped.Add($i);$remove--}
+    }
+    $kept=New-Object 'Collections.Generic.List[string]'
+    $defaults=New-Object 'Collections.Generic.List[bool]'
+    for($i=0;$i -lt $Rows.Count;$i++) {
+        if($dropped.Contains($i)){continue}
+        $kept.Add($Rows[$i]);$defaults.Add(($i -lt $DefaultRows.Count -and $DefaultRows[$i]))
+    }
+    return [pscustomobject]@{Rows=$kept.ToArray();DefaultRows=$defaults.ToArray()}
+}
+
 function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
     # Keep source rows intact so a later wider window can unwrap them again.
     # Reserve top padding, the compact banner, borders, prompt and a spare row.
@@ -800,11 +817,13 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
         for ($i=0;$i -lt $Rows.Count;$i++) {if ($Rows[$i] -cne $cached.Rows[$i]) {$same=$false;break}}
         if ($same) {return $cached.Layout}
     }
-    $overhead=8;if ($NoInput) {$overhead=7}
+    $overhead=8;$fullOverhead=14;if ($NoInput) {$overhead=7;$fullOverhead=13}
     $result=$null
     if ($width -ge 72) {
         $wrappedDefaults=$null
         $wrapped=@(Get-MenuRows $Rows ($width-28) ([ref]$wrappedDefaults) $DefaultRows)
+        $spacing=Get-MenuSpacing $wrapped $wrappedDefaults ([Math]::Max(12,$script:UiHeight-$fullOverhead))
+        $wrapped=$spacing.Rows;$wrappedDefaults=$spacing.DefaultRows
         $body=[Math]::Max(12,$wrapped.Count)
         if ($script:UiHeight -ge $body+$overhead) {
             $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-28);BodyRows=$body;RequiredHeight=($body+$overhead);ShowMio=$true;Fits=$true}
@@ -814,6 +833,9 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
     if (-not $result) {
         $wrappedDefaults=$null
         $wrapped=@(Get-MenuRows $Rows ($width-4) ([ref]$wrappedDefaults) $DefaultRows)
+        $budget=$script:UiHeight-$overhead;if($width -ge 72){$budget=$script:UiHeight-$fullOverhead}
+        $spacing=Get-MenuSpacing $wrapped $wrappedDefaults $budget
+        $wrapped=$spacing.Rows;$wrappedDefaults=$spacing.DefaultRows
         $required=$wrapped.Count+$overhead
         $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-4);BodyRows=$wrapped.Count;RequiredHeight=$required;ShowMio=$false;Fits=($script:UiColumns -ge 44 -and $script:UiHeight -ge $required)}
     }
@@ -1263,8 +1285,8 @@ function Draw-DisplayPanel([switch]$Force) {
         $data=@($script:UiSystem)+@(Get-ProgressTextRows $setLine $left 2)+@('')+
               @(Get-ProgressTextRows $script:UiStage $left 2)+
               @(Get-ProgressTextRows $script:UiDetail $left 3)+
-              @($bar,$basis,$queue,$queueBar,$remaining,$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock),$eta)
-        $stageIndex=4;$barIndex=9;$queueBarIndex=12
+              @($bar,$basis,'',$queue,$queueBar,$remaining,'',$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock),$eta)
+        $stageIndex=4;$barIndex=9;$queueBarIndex=13
     }
     if ($compact) {
         if ($script:UiDemo -and $script:UiDemoProgressStatus) {$data[5]='Status: '+$script:UiDemoProgressStatus}
@@ -1488,7 +1510,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'C / Z: convert disk images; no playlists.',
             '1-9: make playlists; keep media formats.',
             'S: enable supported file types on an Onion SD card.');Detail='Choose the task that matches your files.';Duration=10000},
-        @{Group='Setup';Mood='idle';Stage='Onion SD setup';System='MENU';Menu=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');Lesson='In S, enter the SD drive or folder. Esc goes back.';Duration=14000},
+        @{Group='Setup';Mood='idle';Stage='Onion SD setup';System='MENU';Menu=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');Duration=14000},
         @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD';Detail='Read emulator settings and check supported file types.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems checked';Duration=5000},
         @{Group='Setup';Mood='check';Stage='Enabling supported file types';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up each changed config, then add supported extensions.';SdProgress=$true;Progress=$true;SdTotal=3;SdUnit='configs updated';Duration=4500},
         @{Group='Setup';Mood='happy';Stage='SD setup results';System='MENU';Menu=@(
@@ -1498,7 +1520,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'Lynx: enabled .lyx games','',
             'Original configs saved in OptiMiyoo_Backup_<ID>/',
             'Refresh Onion''s game list after setup.',
-            'S does not change the other menus.',
+            'S does not change the other menus.','',
             'The results screen waits for you.',
             'Enter / Esc: main menu    Q: exit');Detail='Setup keeps games and installed emulator cores unchanged.';Duration=12000}
     )
@@ -1514,7 +1536,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
                 'A game ZIP becomes a game ZIP.',
                 'A game folder stays a game folder.',
                 'Individual files stay individual files.','',
-                ('The images inside are converted to '+$target+'.'),
+                ('The images inside are converted to '+$target+'.'),'',
                 '2. ZIPs puts each game into a ZIP.',
                 '3. Folders makes a folder for each game.',
                 '4. Loose files adds no game folder.');Detail='Auto preserves the layout, not the source image format.';Duration=11000},
@@ -1609,7 +1631,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'Ready: 1    Skipped: 1    Failed: 1',
             'Skipped and failed originals stay in SRC.',
             'Fix the missing CUE track before trying that set again.','',
-            'The results screen waits for you.',
+            'The results screen waits for you.','',
             'Enter: main menu',
             'Q: exit');Detail='These are sample results, not an actual batch.';Duration=10000},
         @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='New batch: check the restored track, then verify and save.';Total=1;Progress=$true;CompleteSet=$true},
@@ -1663,6 +1685,10 @@ function Get-MioPreviewMenuRows([hashtable]$Scene) {
     return $rows
 }
 function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
+    $first=0;$last=$Rows.Count-1
+    while($first -le $last -and [string]::IsNullOrWhiteSpace($Rows[$first])){$first++}
+    while($last -ge $first -and [string]::IsNullOrWhiteSpace($Rows[$last])){$last--}
+    if($last -ge $first){$Rows=@($Rows[$first..$last])}else{$Rows=@()}
     $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
     if ($width -lt 72 -or $script:UiHeight -lt 26) {
         # Small windows retain the normal compact layout and resize prompt.
@@ -1673,26 +1699,48 @@ function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
     $capacity=$script:UiHeight-14
     $allDefaults=$null
     $allWrapped=@(Get-MenuRows $Rows ($width-28) ([ref]$allDefaults))
-    if ($allWrapped.Count -le $capacity) {return [pscustomobject]@{Rows=$allWrapped;DefaultRows=$allDefaults;Index=0;Count=1;Anchor=0L}}
+    $spacing=Get-MenuSpacing $allWrapped $allDefaults $capacity
+    if ($spacing.Rows.Count -le $capacity) {return [pscustomobject]@{Rows=$spacing.Rows;DefaultRows=$spacing.DefaultRows;Index=0;Count=1;Anchor=0L}}
+    # Keep each paragraph together when it fits. In particular, an option and
+    # its following explanation must not land on different demo pages.
+    $paragraphs=New-Object 'Collections.Generic.List[object]'
+    $paragraph=New-Object 'Collections.Generic.List[string]';$gap=0
+    foreach($line in $Rows) {
+        if([string]::IsNullOrWhiteSpace($line)) {
+            if($paragraph.Count){$paragraphs.Add([pscustomobject]@{Lines=$paragraph.ToArray();Gap=$gap});$paragraph.Clear();$gap=0}
+            $gap++
+        } else {$paragraph.Add($line)}
+    }
+    if($paragraph.Count){$paragraphs.Add([pscustomobject]@{Lines=$paragraph.ToArray();Gap=$gap})}
+    $chunks=New-Object 'Collections.Generic.List[object]'
+    foreach($block in $paragraphs) {
+        $blockDefaults=$null;$wrapped=@(Get-MenuRows $block.Lines ($width-28) ([ref]$blockDefaults))
+        if($wrapped.Count -le $capacity){$chunks.Add([pscustomobject]@{Rows=$wrapped;DefaultRows=$blockDefaults;Gap=$block.Gap});continue}
+        # Oversized paragraphs retain the prior per-source-line wrapping policy.
+        $gap=$block.Gap
+        foreach($line in $block.Lines) {
+            $lineDefaults=$null;$wrapped=@(Get-MenuRows @($line) ($width-28) ([ref]$lineDefaults))
+            $chunks.Add([pscustomobject]@{Rows=$wrapped;DefaultRows=$lineDefaults;Gap=$gap});$gap=0
+        }
+    }
     $pages=[System.Collections.Generic.List[object]]::new()
     $current=[System.Collections.Generic.List[string]]::new()
     $currentDefaults=[System.Collections.Generic.List[bool]]::new()
     $offset=0L; $pageAnchor=0L
-    foreach ($line in $Rows) {
-        $lineDefaults=$null
-        $wrapped=@(Get-MenuRows @($line) ($width-28) ([ref]$lineDefaults))
-        # Keep a wrapped choice or warning together whenever it fits on a page.
-        if ($current.Count -and $wrapped.Count -le $capacity -and $current.Count+$wrapped.Count -gt $capacity) {
+    foreach ($chunk in $chunks) {
+        $wrapped=$chunk.Rows;$gap=$chunk.Gap
+        if ($current.Count -and $current.Count+$gap+[Math]::Min($wrapped.Count,$capacity) -gt $capacity) {
             $pages.Add([pscustomobject]@{Rows=$current.ToArray();DefaultRows=$currentDefaults.ToArray();Anchor=$pageAnchor})
             $current.Clear(); $currentDefaults.Clear(); $pageAnchor=$offset
         }
+        if($current.Count){for($i=0;$i -lt $gap;$i++){$current.Add('');$currentDefaults.Add($false)}}
         $wrappedIndex=0
         foreach ($row in $wrapped) {
             if ($current.Count -eq $capacity) {
                 $pages.Add([pscustomobject]@{Rows=$current.ToArray();DefaultRows=$currentDefaults.ToArray();Anchor=$pageAnchor})
                 $current.Clear(); $currentDefaults.Clear(); $pageAnchor=$offset
             }
-            $current.Add($row); $currentDefaults.Add($lineDefaults[$wrappedIndex]); $wrappedIndex++
+            $current.Add($row); $currentDefaults.Add($chunk.DefaultRows[$wrappedIndex]); $wrappedIndex++
             $offset+=($row -replace '\s','').Length
         }
     }

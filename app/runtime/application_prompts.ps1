@@ -53,12 +53,12 @@ function Get-ApplicationPromptModel {
             $names=@{Auto='Auto / keep input layout';Zip='ZIPs';Folders='Folders';Loose='Loose files'}
             $lines+=@(('Single games: '+$names[$SingleStorage]),('Playlist media: '+$names[$Storage]))
         }
-        $lines+=@('Finished game files go to DST.',
+        $lines+=@('Finished game files go to DST.','',
             '1. KEEP originals in SRC (default)',
-            '   Leave source files in place.',
+            '   Leave source files in place.','',
             '2. REMOVE originals after verified success',
             '   Check saved output before source removal.',
-            'Skipped or failed items keep their originals.',
+            'Skipped or failed items keep their originals.','',
             'Choosing 1 or 2 starts the batch.',
             'B. Back to output settings     Q. Exit')
         if($Invalid){$lines+='Choose 1, 2, B or Q.'}
@@ -75,7 +75,7 @@ function Get-ApplicationPromptModel {
     }
     $fixed=@('Skipped originals stay in SRC.')
     if($Folder){$fixed+='Replacing a folder replaces ALL its contents.'}
-    $fixed+=@(Get-OverwriteChoiceRows)
+    $fixed+=@('')+@(Get-OverwriteChoiceRows)
     $prompt=Get-OverwriteInputPrompt
     if($Invalid){$fixed+='Choose one of the shown options.'}
     # Leave room for the blank top row and trusted input in a 19-row window.

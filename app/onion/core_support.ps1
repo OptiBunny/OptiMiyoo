@@ -401,6 +401,7 @@ function Get-OnionSetupMenuRows {
         'SD config backups: OptiMiyoo_Backup_<ID>/',
         'Does not install or switch emulator cores.',
         'Refresh Onion''s game list after setup.',
+        '',
         '1. Amiga: enables .m3u playlists / PUAE2021, PUAE',
         '2. C64: enables .m3u playlists + .tap/.t64 tapes',
         '   VICE x64 / x64sc',

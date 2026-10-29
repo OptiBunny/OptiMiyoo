@@ -32,6 +32,7 @@ function Get-OptiMenuModel {
         & $addRow '  S. Onion SD setup: enable file types / preserve selected cores'
         & $addRow '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
         & $addRow '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
+        & $addRow ''
         & $addRow '  Numbered systems: build playlists / standard Onion cores'
         $shortNames=@{AMIGA='Amiga'; COMMODORE='Commodore 64'; PS='PlayStation'; SEGACD='Sega CD / Mega-CD'; CPC='Amstrad CPC'; MSX='MSX / MSX2'; VIC20='VIC-20'; DOS='MS-DOS'; ZXS='ZX Spectrum'}
         for ($i=0;$i -lt $Profiles.Count;$i++) {
@@ -41,6 +42,7 @@ function Get-OptiMenuModel {
             $compact=('{0,2}. {1,-9} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$shortNames[$Profiles[$i].Folder],$label)
             & $addRow ('  {0,2}. {1,-11} {2}{3}' -f ($i+1),$Profiles[$i].Folder,$Profiles[$i].Name,$label) $compact
         }
+        & $addRow ''
         & $addRow '  D. Demo / interactive walkthrough, no files changed'
         & $addRow ('  E. CRT effect: '+$crtState+' / turn on or off')
         & $addRow '  Q. Exit'
@@ -49,6 +51,7 @@ function Get-OptiMenuModel {
         $title='Demo / walkthrough';$default='1'
         & $addRow '  Demonstration only. No source, output or SD files are touched.'
         & $addRow '  Explore example menus, progress and results by topic.'
+        & $addRow ''
         & $addRow '  1. Full walkthrough / every stage'
         & $addRow '  2. Commodore 64 / NIB/NBZ -> G64, storage and originals'
         & $addRow '  3. ZX Spectrum / IPF -> DSK, storage and originals'
@@ -56,6 +59,7 @@ function Get-OptiMenuModel {
         & $addRow '  5. Results / overwrite, skip and error handling'
         & $addRow '  6. Bunny animation gallery'
         & $addRow '  7. Core support and Onion SD setup'
+        & $addRow ''
         & $addRow '  B. Back to main menu     Q. Exit'
         $prompt='Choose demo [Enter = 1]'
     } elseif ($Page -in 'C64','ZX') {
@@ -64,9 +68,11 @@ function Get-OptiMenuModel {
         $inputName=if ($Page -eq 'C64') {'NIB/NBZ'} else {'IPF'}
         & $addRow ('  Input: '+$inputName+' or '+$outputName+' images in SRC.')
         & $addRow '  Read images from ZIPs, folders or individual files.'
+        & $addRow ''
         & $addRow ('  Output: '+$inputName+' -> '+$outputName+' images in DST.')
         & $addRow ('  Existing '+$outputName+' images are copied without conversion.')
         & $addRow '  Build playlists separately with a numbered main-menu choice.'
+        & $addRow ''
         $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
         $default='2';$zipNotice=Get-ZipOutputNotice $converterProfile -GameOutput
         $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
@@ -75,7 +81,8 @@ function Get-OptiMenuModel {
         & $addRow ('  2. ZIPs (default) / one archive per game'+$zipLabel)
         & $addRow '  3. Folders / unpack into one folder per game'
         & $addRow ('  4. Loose '+$outputName+' files / no added game folder')
-        if ($zipNotice.Hint) {& $addRow ('  '+$zipNotice.Hint)}
+        if ($zipNotice.Hint) {& $addRow ''; & $addRow ('  '+$zipNotice.Hint)}
+        & $addRow ''
         & $addRow '  Next: choose Keep or Remove originals in SRC.'
         & $addRow '  B. Back to main menu     Q. Exit'
         $prompt='Choose output [Enter = 2]'
@@ -91,6 +98,7 @@ function Get-OptiMenuModel {
         $coreName=$support.Core; if ($support.Core -eq $Profile.DefaultCore) {$coreName=$Profile.Core}
         & $addRow ('  '+$Profile.Folder+' / '+$coreName)
         if ($singlePage) {
+            & $addRow ''
             & $addRow '  One disc or tape side: visible in DST, outside .hidden.'
             & $addRow '  These games launch directly, without a playlist.'
             & $addRow '  Multi-disc and multi-side storage is a separate choice next.'
@@ -105,11 +113,13 @@ function Get-OptiMenuModel {
                 & $addRow ('  Tape swapping: '+$tapeFormats+$tapeLabel)
                 if (-not $tapeSupport.CanBuild) {& $addRow ('  '+$tapeSupport.Reason)}
             }
+            & $addRow ''
             & $addRow ('  Single games stay visible: '+@{'1'='Auto / keep input layout';'2'='ZIPs';'3'='Folders';'4'='Loose files'}[$SingleOutput])
             & $addRow '  Multi-disc / multi-side media goes in DST/.hidden.'
             & $addRow '  Playlists stay visible above .hidden to launch each game.'
         }
         & $addRow '  Image formats stay unchanged by playlist processing.'
+        & $addRow ''
         $default=if ($singlePage) {$SingleOutput} else {$HiddenOutput}
         $zipNotice=Get-ZipOutputNotice $Profile -GameOutput:$singlePage
         $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
@@ -122,14 +132,16 @@ function Get-OptiMenuModel {
         & $addRow ('  2. ZIPs'+$zipDefault+' / one archive per game'+$zipLabel)
         & $addRow ('  3. Folders'+$folderDefault+' / unpack into one folder per game')
         & $addRow ('  4. Loose files'+$looseDefault+' / no added game folder')
-        if ($zipNotice.Hint) {& $addRow ('  '+$zipNotice.Hint)}
+        if ($zipNotice.Hint) {& $addRow ''; & $addRow ('  '+$zipNotice.Hint)}
         if ($singlePage) {
+            & $addRow ''
             & $addRow '  Next: storage for playlist media in .hidden.'
             & $addRow '  B. Back to main menu     Q. Exit'
             $prompt='Choose single-game storage'
         } else {
             if ($support.Status -eq 'UNSUPPORTED') {& $addRow ('  '+$coreName+' cannot load playlists.')}
             elseif ($zipNotice.Label -and $support.CanBuild) {& $addRow '  Choose Folders or Loose files for playlists.'}
+            & $addRow ''
             & $addRow '  Next: choose Keep or Remove originals.'
             & $addRow '  B. Back to single games     Q. Exit'
             $prompt='Choose storage in .hidden'

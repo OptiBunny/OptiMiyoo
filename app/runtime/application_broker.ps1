@@ -777,6 +777,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
     $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
     $items=New-Object 'System.Collections.Generic.List[object]';$owned=New-Object 'System.Collections.Generic.List[string]';$locks=New-Object 'System.Collections.Generic.List[IDisposable]'
     $verifiedParents=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $resourcesTransferred=$false
     try {
         Assert-ApplicationBrokerOwnership $Batch $Job $dst $ReferenceIndex
         foreach($write in $Job.Writes){
@@ -847,11 +848,17 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$false;Hash=$copied.Hash})
             }
         }
-        return [pscustomobject]@{Items=$items.ToArray();Owned=$owned.ToArray();Locks=$locks}
-    } catch {
-        foreach($path in $owned){if(Test-Path -LiteralPath $path){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalText $path))}}}
-        foreach($lock in $locks){$lock.Dispose()}
-        throw
+        $sealed=[pscustomobject]@{Items=$items.ToArray();Owned=$owned.ToArray();Locks=$locks}
+        $resourcesTransferred=$true
+        return $sealed
+    } finally {
+        # Engine Stop bypasses catch. Before return, this function still owns
+        # every private copy and directory lease; the caller has no sealed set.
+        if(-not $resourcesTransferred){
+            try {
+                foreach($path in $owned){if(Test-Path -LiteralPath $path){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalText $path))}}}
+            } finally {foreach($lock in $locks){$lock.Dispose()}}
+        }
     }
 }
 

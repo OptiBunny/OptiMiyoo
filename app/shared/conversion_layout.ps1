@@ -107,7 +107,7 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
         $found=[regex]::Matches($title,$pattern)
         if ($found.Count -eq 1) {$tag=$found[0].Groups[1].Value.ToLowerInvariant();$title=[regex]::Replace([regex]::Replace($title,$pattern,''),'\s{2,}',' ').Trim()}
         elseif ($found.Count -gt 1) {$errorText='Multiple disk labels in one filename; separate the input sets.'}
-        elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])$') {
+        elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
             $usedFolderTitle=$true
             $tag=$Matches[1].ToLowerInvariant();$title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
         }
@@ -411,6 +411,8 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
             continue
         }
         if ($entry.Extension -notin '.m3u','.m3u8') {continue}
+        # A descriptor supplied by this exact output set is replaced with it.
+        if(Test-ConversionReferenceTarget $entry.FullName $targets){continue}
         $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache -RequireHeld:$ProtectedPublication
         $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach ($line in @($text -split '\r\n|\r|\n')) {

@@ -936,8 +936,17 @@ function Complete-ApplicationBrokerBatch {
                 $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock
                 $folderManifest=(Get-Command Get-ApplicationBrokerBackupManifest).ScriptBlock
                 $validateBackup={param($destination,$backup,$folder)& $backupFactory $state $destination $backup $folder $folderManifest}.GetNewClosure()
+                $validatePublication=$null
+                if($batch.Operation -eq 'Playlist'){
+                    # These private paths come from host sealing and captured
+                    # transaction backups, never a worker-supplied exclusion.
+                    $publicationPrivate=@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}})
+                    $validatePublication={param($capturedTargets,$capturedBackups)
+                        & $batch.Module {param($plan,$targets,$references,$privateTargets)Assert-NoForeignPlaylistReferences $plan $targets $references -ProtectedPublication -PrivateTargets $privateTargets} $job.Plan $capturedTargets $referenceIndex (@($publicationPrivate)+@($capturedBackups))
+                    }.GetNewClosure()
+                }
                 Reset-ApplicationBrokerReferences $batch $referenceIndex (@($job.Writes)+@($job.Retired)+@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}}))
-                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup
+                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator,$publicationValidator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator -ValidatePublication $publicationValidator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup $validatePublication
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
                 $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})

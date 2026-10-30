@@ -99,7 +99,7 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
     }
 }
 
-function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null) {
+function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null, [scriptblock]$ValidatePublication=$null) {
     # A playlist and its disk data are one replacement. Roll back both if either
     # install fails; never leave a new playlist pointing at missing/old data.
     $backups = New-Object 'System.Collections.Generic.List[object]'
@@ -145,6 +145,13 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
                     if($ValidateBackup){$captured.Guard=& $ValidateBackup $captured.Path $captured.Backup $captured.Folder;if($null -eq $captured.Guard){throw 'Previous output verification did not return a guard.'}}
                     Write-Log ('BACKUP: {0} -> {1}' -f $item.Destination, $backup)
                 }
+            }
+            if($ValidatePublication -and $backups.Count){
+                # Only paths actually captured by this transaction are checked.
+                # They are temporarily absent, but still need ownership protection.
+                $capturedTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Path;Folder=$_.Folder}})
+                $capturedBackups=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Backup;Folder=$_.Folder}})
+                & $ValidatePublication $capturedTargets $capturedBackups | Out-Null
             }
             foreach ($item in $Items) {
                 Move-OutputPath $item.Staged $item.Destination ([bool]$item.Folder)
@@ -1293,7 +1300,7 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
     }
 }
 
-function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist,$ReplacedTargets=$null) {
+function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist,$ReplacedTargets=$null,$PrivateTargets=$null) {
     if($Index.Closed){throw 'Playlist reference index is closed.'}
     $playlists=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $cueFiles=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -1305,6 +1312,7 @@ function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist,$ReplacedTarg
         $directory=$pending.Pop();Assert-PlainOutputParents (Join-Path $directory '_') $Index.Root
         foreach($file in (New-Object IO.DirectoryInfo($directory)).GetFileSystemInfos()){
             if(++$count -gt 100000){throw 'Output ownership inspection exceeds its entry limit.'}
+            if($PrivateTargets -and (Test-PlaylistReferenceTarget $file.FullName $PrivateTargets)){continue}
             $folder=[bool]($file.Attributes -band [IO.FileAttributes]::Directory)
             if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){
                 if($folder -or $file.Extension -in '.m3u','.m3u8','.cue'){throw 'An output link prevents checking playlist or CUE ownership. Output left alone.'}
@@ -1341,18 +1349,23 @@ function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist,$ReplacedTarg
     }
 }
 
-function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceIndex=$null) {
-    $existing=@($Targets | Where-Object {Test-Path -LiteralPath $_.Destination})
+function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceIndex=$null,[switch]$ProtectedPublication,[object[]]$PrivateTargets=@()) {
+    $existing=@($Targets)
+    if(-not $ProtectedPublication){$existing=@($Targets | Where-Object {Test-Path -LiteralPath $_.Destination})}
     if ($existing.Count -eq 0) {return}
+    if($ProtectedPublication -and ($null -eq $ReferenceIndex -or $ReferenceIndex.Disabled -or $ReferenceIndex.Closed)){throw 'Output ownership could not remain protected through publication. Split the destination collection into smaller batches or use a separate DST; previous output kept.'}
     $replacedTargets=New-PlaylistReferenceTargets $Targets
+    $privatePaths=$null
+    if($ProtectedPublication){$privatePaths=New-PlaylistReferenceTargets $PrivateTargets}
     if($null -ne $ReferenceIndex -and -not $ReferenceIndex.Disabled){
         if(-not $ReferenceIndex.Root.Equals([IO.Path]::GetFullPath($Plan.Root).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)){throw 'Playlist reference index belongs to a different destination.'}
-        try {Update-PlaylistReferenceIndex $ReferenceIndex $Plan.M3uPath $replacedTargets}
+        try {Update-PlaylistReferenceIndex $ReferenceIndex $Plan.M3uPath $replacedTargets $privatePaths}
         catch {
             if(-not $ReferenceIndex.LimitReached){throw}
             # Retained handles, keys, and path text are bounded. Large trees
             # keep the original scanner for the remainder of this batch.
             Close-PlaylistReferenceIndex $ReferenceIndex;$ReferenceIndex.Disabled=$true
+            if($ProtectedPublication){throw 'Output ownership exceeds its protected descriptor budget. Split the destination collection into smaller batches or use a separate DST; previous output kept.'}
         }
         if(-not $ReferenceIndex.Disabled){
             foreach($target in $existing){
@@ -1989,7 +2002,12 @@ try {
             Assert-PlaylistOutputOwnership $plan $expectedNames $playlistReferenceIndex
             Show-Stage 'Saving prepared game output' $job.Source
             Reset-PlaylistReferenceIndexTargets $playlistReferenceIndex (@($plan.Writes)+@($plan.Retired)+@([pscustomobject]@{Destination=$stageContainer;Folder=$true}))
-            $commit=Install-PlaylistSet $items $overwrite $retired
+            $publicationCheck=(Get-Command Assert-NoForeignPlaylistReferences).ScriptBlock
+            $publicationPrivate=@([pscustomobject]@{Destination=$stageContainer;Folder=$true})
+            $validatePublication={param($capturedTargets,$capturedBackups)
+                & $publicationCheck $plan $capturedTargets $playlistReferenceIndex -ProtectedPublication -PrivateTargets (@($publicationPrivate)+@($capturedBackups))
+            }.GetNewClosure()
+            $commit=Install-PlaylistSet $items $overwrite $retired -ValidatePublication $validatePublication
             Complete-SourcePolicyJob $sourcePlan $job.SourceId $sourceHashes $items
             Complete-ApplicationCurrentJob
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}

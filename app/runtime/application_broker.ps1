@@ -228,6 +228,13 @@ function Assert-ApplicationBrokerSnapshot($Expected,$Actual,[string]$Description
     for($i=0;$i -lt @($Expected.Directories).Count;$i++){if($Expected.Directories[$i] -cne $Actual.Directories[$i]){throw ($Description+' directory names changed since the batch started.')}}
 }
 
+function Assert-ApplicationBrokerInventory($Expected,$Actual,[string]$Description) {
+    if($null -eq $Expected -or $null -eq $Actual -or $Expected.Exists -isnot [bool] -or $Actual.Exists -isnot [bool] -or $Expected.Files -isnot [hashtable] -or $Actual.Files -isnot [hashtable] -or $null -eq $Expected.Directories -or $null -eq $Actual.Directories){throw 'Invalid broker snapshot inventory.'}
+    if($Expected.Exists -ne $Actual.Exists -or $Expected.Files.Count -ne $Actual.Files.Count -or @($Expected.Directories).Count -ne @($Actual.Directories).Count){throw ($Description+' changed since the batch started.')}
+    foreach($name in $Expected.Files.Keys){if(-not $Actual.Files.ContainsKey($name) -or $null -eq $Expected.Files[$name] -or $null -eq $Actual.Files[$name] -or $null -eq $Expected.Files[$name].Length -or $null -eq $Actual.Files[$name].Length -or $Expected.Files[$name].Length -lt 0 -or $Actual.Files[$name].Length -lt 0 -or $Expected.Files[$name].Length -ne $Actual.Files[$name].Length){throw ($Description+' changed since the batch started.')}}
+    for($i=0;$i -lt @($Expected.Directories).Count;$i++){if($Expected.Directories[$i] -cne $Actual.Directories[$i]){throw ($Description+' directory names changed since the batch started.')}}
+}
+
 function Get-ApplicationBrokerState($Session) {
     if($null -eq $Session -or -not $script:ApplicationBrokerStates.ContainsKey([string]$Session.Id)){throw 'Unknown application broker session.'}
     $state=$script:ApplicationBrokerStates[[string]$Session.Id]
@@ -543,8 +550,10 @@ function Start-ApplicationBrokerBatch {
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
     $src=Join-Path $state.OriginalRoot 'SRC';$dst=Join-Path $state.OriginalRoot 'DST'
-    Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
-    Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
+    # Check names and lengths here; each original is hash-verified again through
+    # its retained read lease below, before any trusted planning reads begin.
+    Assert-ApplicationBrokerInventory $state.SourceSnapshot (Get-ApplicationBrokerTree $src -MetadataOnly) 'Original source tree'
+    Assert-ApplicationBrokerInventory $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst -MetadataOnly) 'Original output tree'
     Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'SRC') -MaximumEntries ([Math]::Max(1,$state.SourceSnapshot.Files.Count+$state.SourceSnapshot.Directories.Count)) -ExpectedFiles $state.SourceSnapshot.Files) 'Staged source tree'
     Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'DST') -MaximumEntries ([Math]::Max(1,$state.DestinationSnapshot.Files.Count+$state.DestinationSnapshot.Directories.Count)) -ExpectedFiles $state.DestinationSnapshot.Files) 'Staged output tree'
     $sourcePins=New-Object 'System.Collections.Generic.Dictionary[string,IDisposable]' ([StringComparer]::OrdinalIgnoreCase)

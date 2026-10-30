@@ -31,6 +31,7 @@ function Open-OptiPortableTempScope([Parameter(Mandatory=$true)][string]$Applica
         Tmp=[Environment]::GetEnvironmentVariable('TMP','Process')
         Path=$null;Lease=$null;Changed=$false;Closed=$false
     }
+    $transferred=$false
     try {
         $application=Assert-OptiPortableDirectory $ApplicationRoot
         $folder=$application
@@ -57,10 +58,10 @@ function Open-OptiPortableTempScope([Parameter(Mandatory=$true)][string]$Applica
         # native helper pins every ancestor for the entire application session.
         . (Join-Path $PSScriptRoot 'source_policy.ps1')
         $scope.Lease=Open-SourcePolicyDirectoryLease $folder
+        $transferred=$true
         return $scope
-    } catch {
-        Close-OptiPortableTempScope $scope
-        throw
+    } finally {
+        if (-not $transferred) {Close-OptiPortableTempScope $scope}
     }
 }
 

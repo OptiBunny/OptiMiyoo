@@ -1260,7 +1260,8 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
                 else{$full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $reference))}
             } catch {throw ('Cannot verify an existing playlist reference: '+$Path)}
             Add-PlaylistReferenceKey $Index $entry Exact $full
-            if([IO.Path]::GetExtension($full) -eq '.cue' -and $full.StartsWith($Index.Root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){
+            if([IO.Path]::GetExtension($full) -eq '.cue'){
+                if(-not $full.StartsWith($Index.Root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw ('An existing playlist references a CUE outside DST: '+$Path+'. Output left alone; use a separate DST.')}
                 Add-PlaylistReferenceKey $Index $entry Cues $full
                 $null=Get-PlaylistIndexedCue $Index $full 1
                 Add-PlaylistReferenceKey $Index $entry Guarded $full
@@ -1403,8 +1404,9 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                     else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $reference))}
                 } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
                 $references=@($full)
-                if([IO.Path]::GetExtension($full) -eq '.cue' -and $full.StartsWith($Plan.Root.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $full -PathType Leaf)){
-                    $references+=@(Get-PlaylistCueDependencies $full $Plan.Root)
+                if([IO.Path]::GetExtension($full) -eq '.cue'){
+                    if(-not $full.StartsWith($Plan.Root.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw ('An existing playlist references a CUE outside DST: '+$file.FullName+'. Output left alone; use a separate DST.')}
+                    if(Test-Path -LiteralPath $full -PathType Leaf){$references+=@(Get-PlaylistCueDependencies $full $Plan.Root)}
                 }
                 foreach($dependency in $references){
                     $used=$exactTargets.Contains($dependency)

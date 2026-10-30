@@ -498,13 +498,14 @@ function Open-SourcePolicyReadLease([string]$Path,[string]$Root) {
 
 function Open-VerifiedSourcePolicyFile([string]$Path,[string]$ExpectedHash,[string]$Root,[scriptblock]$Progress=$null,[switch]$ReadOnly) {
     Assert-SourcePolicyPath $Path $Root
-    $lease=$null
+    $lease=$null;$transferred=$false
     try {
         if ($ReadOnly) {$lease=Open-SourcePolicyReadLease $Path $Root}
         else {$lease=Open-SourcePolicyRemovalLease $Path $Root}
         $lease.Verify($ExpectedHash,(Get-SourcePolicyProgressAction $Progress 'Checking originals' $Path))
+        $transferred=$true
         return $lease
-    } catch {if ($lease) {$lease.Dispose()}; throw}
+    } finally {if (-not $transferred -and $lease) {$lease.Dispose()}}
 }
 
 function Remove-SourcePolicyFile([string]$Path,$Lease) {
@@ -515,6 +516,7 @@ function Remove-SourcePolicyFile([string]$Path,$Lease) {
 
 function Open-SourcePolicyOutputs([object[]]$Outputs,[scriptblock]$Progress=$null) {
     $locks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+    $transferred=$false
     try {
         foreach ($output in $Outputs) {
             $files=New-Object 'System.Collections.Generic.List[object]'
@@ -559,10 +561,10 @@ function Open-SourcePolicyOutputs([object[]]$Outputs,[scriptblock]$Progress=$nul
                 if ($hash -ne $file.Hash) {throw ('Output changed after verification; original kept: '+$file.Path)}
             }
         }
+        $transferred=$true
         return ,$locks
-    } catch {
-        foreach ($lock in $locks) {$lock.Dispose()}
-        throw
+    } finally {
+        if (-not $transferred) {foreach ($lock in $locks) {$lock.Dispose()}}
     }
 }
 

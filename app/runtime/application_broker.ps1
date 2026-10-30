@@ -631,7 +631,7 @@ function Start-ApplicationBrokerBatch {
     if($SourcePolicy -eq 'Remove') {
         $descriptorSnapshot=@{}
         foreach($relative in $state.SourceSnapshot.Files.Keys) {
-            if([IO.Path]::GetExtension($relative) -ieq '.cue'){$descriptorSnapshot[(Join-Path $src $relative)]=$state.SourceSnapshot.Files[$relative]}
+            if([IO.Path]::GetExtension($relative) -in @('.cue','.m3u','.m3u8')){$descriptorSnapshot[(Join-Path $src $relative)]=$state.SourceSnapshot.Files[$relative]}
         }
     }
     $sourcePlan=& $sourceModule {param($src,$policy,$descriptors)New-SourcePolicyPlan $src $policy -DescriptorSnapshot $descriptors} $src $SourcePolicy $descriptorSnapshot

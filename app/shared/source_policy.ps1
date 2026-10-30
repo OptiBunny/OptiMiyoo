@@ -584,8 +584,8 @@ function Get-SourcePolicyDescriptorPaths([string]$Root) {
                     $entry=Get-Item -LiteralPath $path -Force -ErrorAction Stop
                     if($entry.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Source descriptor inventory contains a link; originals kept.'}
                     if($entry.PSIsContainer){$pending.Enqueue($entry.FullName)}
-                    elseif($entry.Extension -ieq '.cue') {
-                        if($paths.Count -ge 1024){throw 'Source descriptor inventory exceeds the 1,024-CUE limit. Split the collection and retry; originals kept.'}
+                    elseif($entry.Extension -in @('.cue','.m3u','.m3u8')) {
+                        if($paths.Count -ge 1024){throw 'Source descriptor inventory exceeds the 1,024-descriptor limit. Split the collection and retry; originals kept.'}
                         $paths.Add($entry.FullName)
                     }
                 }
@@ -596,13 +596,13 @@ function Get-SourcePolicyDescriptorPaths([string]$Root) {
 }
 
 function Assert-SourcePolicyDescriptorBudget([string]$Root,[hashtable]$Snapshot) {
-    if($Snapshot.Count -gt 1024){throw 'Source descriptor inventory exceeds the 1,024-CUE limit. Split the collection and retry; originals kept.'}
+    if($Snapshot.Count -gt 1024){throw 'Source descriptor inventory exceeds the 1,024-descriptor limit. Split the collection and retry; originals kept.'}
     $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
     $bytes=0L;$ancestors=0L
     foreach($path in $Snapshot.Keys) {
         $full=[IO.Path]::GetFullPath($path);$record=$Snapshot[$path]
-        if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetExtension($full) -ine '.cue'){throw 'Invalid source descriptor snapshot path; originals kept.'}
-        if($record.Length -lt 0 -or $record.Length -gt 1048576 -or [string]$record.Hash -cnotmatch '^[0-9A-Fa-f]{64}$'){throw 'Source descriptor snapshot is invalid or exceeds the 1 MiB CUE limit; originals kept.'}
+        if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetExtension($full) -notin @('.cue','.m3u','.m3u8')){throw 'Invalid source descriptor snapshot path; originals kept.'}
+        if($record.Length -lt 0 -or $record.Length -gt 1048576 -or [string]$record.Hash -cnotmatch '^[0-9A-Fa-f]{64}$'){throw 'Source descriptor snapshot is invalid or exceeds the 1 MiB descriptor limit; originals kept.'}
         $bytes+=[long]$record.Length
         if($bytes -gt 67108864){throw 'Source descriptors exceed the 64 MiB combined limit. Split the collection and retry; originals kept.'}
         $parent=[IO.Path]::GetDirectoryName($full)
@@ -620,7 +620,7 @@ function Get-SourcePolicyDescriptorSnapshot([string]$Root) {
     foreach($path in (Get-SourcePolicyDescriptorPaths $Root)) {
         $lease=Open-SourcePolicyReadLease $path $Root
         try {
-            if($lease.Stream.Length -gt 1048576){throw 'CUE exceeds the supported 1 MiB text limit; originals kept.'}
+            if($lease.Stream.Length -gt 1048576){throw 'Source descriptor exceeds the supported 1 MiB text limit; originals kept.'}
             $totalBytes+=$lease.Stream.Length
             if($totalBytes -gt 67108864){throw 'Source descriptors exceed the 64 MiB combined limit. Split the collection and retry; originals kept.'}
             $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($lease.Stream,$null)
@@ -727,14 +727,61 @@ function Set-SourcePolicyCleanupEligibility($Plan) {
     }
 }
 
+function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Stream]$Stream) {
+    # Read only the already verified, held source descriptor. Never follow a
+    # playlist to another filesystem root or change its bytes or job ownership.
+    $memory=New-Object IO.MemoryStream
+    try {
+        if($Stream.Length -gt 1048576){throw 'Source playlist exceeds the 1 MiB descriptor limit; originals kept.'}
+        $Stream.Position=0;$Stream.CopyTo($memory);$bytes=$memory.ToArray()
+        if($bytes.Length -ne $Stream.Length){throw 'Source playlist changed while reading; originals kept.'}
+        $offset=0;$encoding=New-Object Text.UTF8Encoding($false,$true)
+        if($bytes.Length -ge 4 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254 -and $bytes[2] -eq 0 -and $bytes[3] -eq 0){$encoding=New-Object Text.UTF32Encoding($false,$true,$true);$offset=4}
+        elseif($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 254 -and $bytes[3] -eq 255){$encoding=New-Object Text.UTF32Encoding($true,$true,$true);$offset=4}
+        elseif($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191){$offset=3}
+        elseif($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254){$encoding=New-Object Text.UnicodeEncoding($false,$true,$true);$offset=2}
+        elseif($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255){$encoding=New-Object Text.UnicodeEncoding($true,$true,$true);$offset=2}
+        $text=$encoding.GetString($bytes,$offset,$bytes.Length-$offset)
+        if($text.IndexOf([char]0) -ge 0){throw 'Source playlist contains invalid text; originals kept.'}
+        $lines=[regex]::Split($text,'\r\n|\n|\r')
+        if($lines.Count -gt 16384){throw 'Source playlist exceeds the 16,384-line limit. Split the playlist and retry; originals kept.'}
+        $parent=[IO.Path]::GetDirectoryName($Path)
+        $prefix=[IO.Path]::GetFullPath($Plan.Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+        foreach($line in $lines) {
+            if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
+            $value=$line.Trim();if(-not $value -or $value.StartsWith('#')){continue}
+            # A # can introduce an archive member or be a literal filename.
+            # Protect both interpretations if they name planned source files.
+            $names=@($value);$separator=$value.IndexOf('#');if($separator -gt 0){$names+= $value.Substring(0,$separator)}
+            foreach($name in $names) {
+                if($name.StartsWith('file://',[StringComparison]::OrdinalIgnoreCase)){throw 'Source playlist has an unsupported local file URI; originals kept.'}
+                if($name -match '^[A-Za-z][A-Za-z0-9+.-]+://'){continue}
+                $relative=$name.Replace('/',[IO.Path]::DirectorySeparatorChar).Replace('\',[IO.Path]::DirectorySeparatorChar)
+                if($relative.StartsWith('\\?\',[StringComparison]::Ordinal) -or $relative.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'Source playlist has an unsupported device path; originals kept.'}
+                if($relative -match '^[A-Za-z]:(?:$|[^\\/])'){throw 'Source playlist has an ambiguous drive-relative path; originals kept.'}
+                $colon=$relative.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $relative.IndexOf(':',2) -ge 0)){throw 'Source playlist has an unsupported stream or path syntax; originals kept.'}
+                if($relative.StartsWith('\',[StringComparison]::Ordinal) -and -not $relative.StartsWith('\\',[StringComparison]::Ordinal)){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($parent),$relative.TrimStart('\')))}
+                elseif([IO.Path]::IsPathRooted($relative)){$full=[IO.Path]::GetFullPath($relative)}
+                else{$full=[IO.Path]::GetFullPath([IO.Path]::Combine($parent,$relative))}
+                if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+                    if([IO.Path]::GetExtension($full) -in @('.cue','.m3u','.m3u8')){throw 'A retained source playlist references a descriptor outside SRC. Use a separate source collection or include its dependencies; originals kept.'}
+                    continue
+                }
+                if($Plan.Files.ContainsKey($full)){[void]$Context.ProtectedPaths.Add($full)}
+            }
+        }
+    } finally {$memory.Dispose();$Stream.Position=0}
+}
+
 function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null) {
     if($Plan.Policy -ne 'Remove'){throw 'A cleanup context requires Remove policy.'}
     if($Plan.BlockReason){throw $Plan.BlockReason}
-    $context=[pscustomobject]@{Plan=$Plan;InventoryGuard=$InventoryGuard;OwnsInventoryGuard=($null -eq $InventoryGuard);ReferenceLeases=@{};Disposed=$false}
+    $context=[pscustomobject]@{Plan=$Plan;InventoryGuard=$InventoryGuard;OwnsInventoryGuard=($null -eq $InventoryGuard);ReferenceLeases=@{};ProtectedPaths=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Disposed=$false}
     $context | Add-Member ScriptMethod Dispose {
         if($this.Disposed){return};$this.Disposed=$true;$failure=$null
         foreach($lease in $this.ReferenceLeases.Values){try{$lease.Dispose()}catch{if(-not $failure){$failure=$_}}}
         $this.ReferenceLeases.Clear()
+        $this.ProtectedPaths.Clear()
         if($this.OwnsInventoryGuard -and $this.InventoryGuard){try{$this.InventoryGuard.Dispose()}catch{if(-not $failure){$failure=$_}}}
         if($failure){throw $failure}
     }
@@ -745,19 +792,23 @@ function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$Inv
         Assert-SourcePolicyDescriptorBudget $Plan.Root $Plan.DescriptorSnapshot
         $actual=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
         foreach($path in (Get-SourcePolicyDescriptorPaths $Plan.Root)){[void]$actual.Add($path)}
-        if($actual.Count -ne $Plan.DescriptorSnapshot.Count){throw 'Source CUE inventory changed since planning; retry with the updated source collection. Originals kept.'}
+        if($actual.Count -ne $Plan.DescriptorSnapshot.Count){throw 'Source descriptor inventory changed since planning; retry with the updated source collection. Originals kept.'}
         foreach($path in @($Plan.DescriptorSnapshot.Keys | Sort-Object)) {
-            if(-not $actual.Contains($path)){throw 'Source CUE inventory changed since planning; retry with the updated source collection. Originals kept.'}
+            if(-not $actual.Contains($path)){throw 'Source descriptor inventory changed since planning; retry with the updated source collection. Originals kept.'}
             $record=$Plan.DescriptorSnapshot[$path]
             $removable=$Plan.Files.ContainsKey($path) -and $Plan.Files[$path].State -eq 'Ready'
             $lease=Open-VerifiedSourcePolicyFile $path $record.Hash $Plan.Root $Progress -ReadOnly:(-not $removable)
             $context.ReferenceLeases[$path]=$lease
-            if($lease.Stream.Length -ne $record.Length){throw 'Source CUE length differs from its frozen descriptor baseline; originals kept.'}
+            if($lease.Stream.Length -ne $record.Length){throw 'Source descriptor length differs from its frozen baseline; originals kept.'}
         }
         # A retained or untracked descriptor is not automatically represented in
         # job ownership. Reject any overlooked dependency while its bytes are held.
         foreach($path in $context.ReferenceLeases.Keys) {
             if($Plan.Files.ContainsKey($path) -and $Plan.Files[$path].State -eq 'Ready'){continue}
+            if([IO.Path]::GetExtension($path) -in @('.m3u','.m3u8')){
+                Add-SourcePolicyPlaylistProtection $Plan $context $path $context.ReferenceLeases[$path].Stream
+                continue
+            }
             if(-not (Get-Command Get-CueFiles -ErrorAction SilentlyContinue)){throw 'CUE reference validation is unavailable; originals kept.'}
             foreach($name in @(Get-CueFiles $path)) {
                 $reference=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($path)) $name))
@@ -829,6 +880,10 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                 }
                 $candidates=@($component | Where-Object {$_.State -eq 'Ready'})
                 if ($candidates.Count -eq 0) {continue}
+                if(@($component | Where-Object {$CleanupContext.ProtectedPaths.Contains($_.Path)}).Count -gt 0){
+                    foreach($file in $candidates){$file.State='Kept';$file.Reason='A retained source playlist references this source set; originals kept.'}
+                    continue
+                }
                 # A snapshot mismatch already discovered between dependent jobs
                 # protects the complete connected set, just like a final hash mismatch.
                 if (@($component | Where-Object {$_.State -eq 'Failed'}).Count -gt 0) {

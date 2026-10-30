@@ -184,7 +184,7 @@ function Complete-ApplicationSdSession {
             if($Progress){$null=& $Progress 'Updating SD file lists' $file.Folder $index $configs.Count 'systems'}
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
             if(-not $file.Changed){$skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept'});continue}
-            $writeLease=$null;$backupLease=$null;$writeStarted=$false;$restored=$false
+            $writeLease=$null;$backupLease=$null;$backupDirectoryLease=$null;$writeStarted=$false;$restored=$false
             try {
                 $file.Lease.Dispose();$file.Lease=$null
                 $writeLease=[OptiMiyoo.OnionPathLease]::Open($file.Path,$state.OriginalRoot,$false,$true,$false)
@@ -192,7 +192,8 @@ function Complete-ApplicationSdSession {
                 if([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($file.Bytes)){throw 'Original SD config changed during setup.'}
                 if(-not $state.BackupRoot){$state.BackupRoot=Join-Path $state.OriginalRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))}
                 $backup=Join-Path $state.BackupRoot $file.Folder
-                Assert-PlainOnionPath $backup $state.OriginalRoot;[void][IO.Directory]::CreateDirectory($backup)
+                Assert-PlainOnionPath $backup $state.OriginalRoot
+                $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$state.OriginalRoot)
                 $backupPath=Join-Path $backup 'config.json'
                 $backupLease=[OptiMiyoo.OnionPathLease]::Open($backupPath,$state.OriginalRoot,$false,$true,$true)
                 # Creating a filename is not proof of a recoverable backup. Keep
@@ -215,7 +216,7 @@ function Complete-ApplicationSdSession {
                 }
                 $result='Kept';if($restored){$result='Restored'}
                 $results.Add([pscustomobject]@{System=$file.Folder;State=$result})
-            }finally{if($backupLease){$backupLease.Dispose()};if($writeLease){$writeLease.Dispose()}}
+            }finally{if($backupLease){$backupLease.Dispose()};if($backupDirectoryLease){$backupDirectoryLease.Dispose()};if($writeLease){$writeLease.Dispose()}}
         }
         if(-not $cancelled){$cancelled=Test-ApplicationSdCancellation $ApplicationSession}
         if(-not $cancelled -and $Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}

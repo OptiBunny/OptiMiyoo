@@ -44,6 +44,9 @@ namespace OptiMiyoo {
         }
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(string name, IntPtr security);
         [DllImport("kernel32.dll", SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
@@ -97,6 +100,37 @@ namespace OptiMiyoo {
                 else {
                     try { lease.stream = new FileStream(handle, write ? FileAccess.ReadWrite : FileAccess.Read, 4096, false); }
                     catch { handle.Dispose(); throw; }
+                }
+                return lease;
+            } catch { lease.Dispose(); throw; }
+        }
+        public static OnionPathLease CreateDirectory(string path, string root) {
+            string full = Path.GetFullPath(path).TrimEnd('\\', '/');
+            string boundary = Path.GetFullPath(root).TrimEnd('\\', '/');
+            if (!full.Equals(boundary, StringComparison.OrdinalIgnoreCase) &&
+                !full.StartsWith(boundary + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("SD directory is outside the selected root.");
+            // Validate device-path syntax before any filesystem mutation. Preserve
+            // the separator on a drive root instead of opening drive-relative C:.
+            string volumeRoot = Path.GetPathRoot(Path.GetFullPath(root));
+            string rootPath = boundary.Length < volumeRoot.Length ? volumeRoot : boundary;
+            NativePath(full.Equals(boundary, StringComparison.OrdinalIgnoreCase) ? rootPath : full);
+            OnionPathLease lease = Open(rootPath, rootPath, true, false, false);
+            try {
+                if (full.Equals(boundary, StringComparison.OrdinalIgnoreCase)) return lease;
+                string current = rootPath;
+                foreach (string part in full.Substring(boundary.Length + 1).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) {
+                    if (String.IsNullOrEmpty(part) || part == "." || part == "..") throw new IOException("Invalid SD directory component.");
+                    current = Path.Combine(current, part);
+                    // Each parent is already pinned. Never recursively create
+                    // through an unverified intermediate directory or junction.
+                    if (!CreateDirectoryW(NativePath(current), IntPtr.Zero)) {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error != 183) throw new Win32Exception(error, "SD backup directory could not be created safely.");
+                    }
+                    // An existing or newly created entry is acceptable only
+                    // after no-follow validation and a share-read-only pin.
+                    lease.directories.Add(OpenHandle(current, true, false, false));
                 }
                 return lease;
             } catch { lease.Dispose(); throw; }
@@ -160,7 +194,7 @@ try {
             continue
         }
         $folder=$profile.Folder; $configPath=$support.ConfigPath
-        $stream=$null; $configLease=$null; $launchLock=$null; $coreLock=$null; $backupLease=$null; $original=$null; $writeStarted=$false
+        $stream=$null; $configLease=$null; $launchLock=$null; $coreLock=$null; $backupLease=$null; $backupDirectoryLease=$null; $original=$null; $writeStarted=$false
         try {
             $script:OnionStage='Preparing file types'
             if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
@@ -190,7 +224,7 @@ try {
             if ([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($original)) {throw 'Config changed during setup. Run the check again.'}
             $backup=Join-Path $backupRoot $support.EmuFolder
             Assert-PlainOnionPath $backup $OnionRoot
-            [void][IO.Directory]::CreateDirectory($backup)
+            $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$OnionRoot)
             $backupLease=[OptiMiyoo.OnionPathLease]::Open((Join-Path $backup 'config.json'),$OnionRoot,$false,$true,$true)
             # Verify the saved original before changing the live config. Both
             # checks use the held handles, including any subsequent restoration.
@@ -209,6 +243,7 @@ try {
             Write-OnionText ('SKIPPED: '+$folder+' - '+$_.Exception.Message) -Failure
         } finally {
             if ($backupLease) {$backupLease.Dispose()}
+            if ($backupDirectoryLease) {$backupDirectoryLease.Dispose()}
             if ($configLease) {$configLease.Dispose()}
             if ($coreLock) {$coreLock.Dispose()}
             if ($launchLock) {$launchLock.Dispose()}

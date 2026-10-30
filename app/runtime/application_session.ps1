@@ -249,6 +249,7 @@ namespace OptiMiyoo {
   private bool started,disposed,consoleSaved;
   private uint previousInputMode,previousOutputMode,lastRequest,pendingResponse;
   private string previousTitle;
+  private ConsoleColor previousForeground,previousBackground;
   private bool previousControlC,previousCursor;
   private long lastOutput,lastDrained,pauseStarted;
   private int outputInFlight;
@@ -348,7 +349,7 @@ namespace OptiMiyoo {
   private void SignalEvent(AutoResetEvent ready){lock(eventGate){if(!eventDisposalRequested)ready.Set();}}
   private void WaitForEvent(AutoResetEvent ready,int milliseconds){lock(eventGate){if(eventDisposalRequested)return;eventWaiters++;}try{ready.WaitOne(milliseconds);}finally{lock(eventGate){eventWaiters--;CloseEventsIfIdle();}}}
   private void DisposeEvents(){lock(eventGate){eventDisposalRequested=true;CloseEventsIfIdle();}}
-  private void SaveConsole(){Check(GetConsoleMode(GetStdHandle(-10),out previousInputMode),"Read host input mode");Check(GetConsoleMode(GetStdHandle(-11),out previousOutputMode),"Read host output mode");previousControlC=Console.TreatControlCAsInput;previousCursor=Console.CursorVisible;previousTitle=Console.Title;consoleSaved=true;Check(SetConsoleMode(GetStdHandle(-10),(previousInputMode|0x80u)&~0x40u),"Disable host QuickEdit");Check(SetConsoleMode(GetStdHandle(-11),previousOutputMode|4u),"Enable host terminal output");Console.TreatControlCAsInput=true;Console.Title="OptiMiyoo";}
+  private void SaveConsole(){Check(GetConsoleMode(GetStdHandle(-10),out previousInputMode),"Read host input mode");Check(GetConsoleMode(GetStdHandle(-11),out previousOutputMode),"Read host output mode");previousControlC=Console.TreatControlCAsInput;previousCursor=Console.CursorVisible;previousTitle=Console.Title;previousForeground=Console.ForegroundColor;previousBackground=Console.BackgroundColor;consoleSaved=true;Check(SetConsoleMode(GetStdHandle(-10),(previousInputMode|0x80u)&~0x40u),"Disable host QuickEdit");Check(SetConsoleMode(GetStdHandle(-11),previousOutputMode|4u),"Enable host terminal output");Console.TreatControlCAsInput=true;Console.Title="OptiMiyoo";}
   private void Fail(string reason){lock(outcomeGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   private void FailResponse(string reason){lock(outcomeGate){if(!CancellationRequested)Fail(reason);}}
   public void Stop(){lock(outcomeGate){CancellationRequested=true;stopping=true;paused=true;}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
@@ -428,7 +429,13 @@ namespace OptiMiyoo {
    foreach(Thread thread in new Thread[]{inputThread,inputWriterThread,outputThread,rpcThread})if(thread!=null&&thread!=Thread.CurrentThread)thread.Join(1000);
    Close(ref process);Close(ref job);if(sid!=IntPtr.Zero){FreeSid(sid);sid=IntPtr.Zero;}if(profile!=null){int hr=DeleteAppContainerProfile(profile);for(int retry=0;hr<0 && retry<3;retry++){Thread.Sleep(50*(1<<retry));hr=DeleteAppContainerProfile(profile);}if(hr<0)CleanupWarning="Application profile cleanup failed ("+hr.ToString("X8")+").";profile=null;}
    try{Cleanup();}catch(Exception e){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+e.Message+" Retained application scratch: "+RootPath;}finally{foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
-   if(consoleSaved){lock(consoleGate){try{WriteTerminal("\x1b[0m\x1b[r\x1b[?25h");Console.CursorVisible=previousCursor;Console.TreatControlCAsInput=previousControlC;Console.Title=previousTitle;SetConsoleMode(GetStdHandle(-10),previousInputMode);SetConsoleMode(GetStdHandle(-11),previousOutputMode);}catch{}consoleSaved=false;}}
+   if(consoleSaved){lock(consoleGate){
+    try{WriteTerminal("\x1b[0m\x1b[r\x1b[?25h");}catch{}
+    // The ANSI reset selects terminal defaults, not the caller's native colors.
+    try{Console.ForegroundColor=previousForeground;Console.BackgroundColor=previousBackground;}catch{}
+    try{Console.CursorVisible=previousCursor;Console.TreatControlCAsInput=previousControlC;Console.Title=previousTitle;SetConsoleMode(GetStdHandle(-10),previousInputMode);SetConsoleMode(GetStdHandle(-11),previousOutputMode);}catch{}
+    consoleSaved=false;
+   }}
    }finally{DisposeEvents();}
   }
  }

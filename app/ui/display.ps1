@@ -7,9 +7,11 @@
 . (Join-Path $PSScriptRoot '../shared/overwrite_prompt.ps1')
 # Percentages use completed preparation items, completed jobs or measured bytes.
 function Initialize-Display {
+    if ($null -eq $script:UiRestoreState) {$script:UiRestoreState=@{}}
+    $restore=$script:UiRestoreState
+    if ($script:UiPinned) {$restore.Pinned=$true}
     if ($script:UiFrameTimer) {try {$script:UiFrameTimer.Dispose()} catch {}}
     $script:UiFrameTimer=$null
-    $script:UiOldRendering=$null
     $script:Esc=[string][char]27
     $script:UiRows=0; $script:UiTick=0; $script:UiLastStage=''
     $script:UiIdlePoseOverride=$null
@@ -59,17 +61,25 @@ function Initialize-Display {
     $script:Trans=@('107;216;245','249;172;204','245;244;255','249;172;204','107;216;245')
     $script:UiWidth=78; $script:UiColumns=0; $script:UiHeight=0
     try {
+        if (-not $restore.ContainsKey('Encoding')) {$restore.Encoding=[Console]::OutputEncoding}
         [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
         $script:UiInteractive=($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
         if ($script:UiInteractive) {
             $script:UiWidth=[Math]::Min(296,[Math]::Max(16,[Console]::WindowWidth-4))
-            $script:UiOldCursor=$true
-            try {$script:UiOldCursor=[Console]::CursorVisible} catch {}
-            $script:UiOldForeground=$Host.UI.RawUI.ForegroundColor
-            $script:UiOldBackground=$Host.UI.RawUI.BackgroundColor
+            if (-not $restore.ContainsKey('Foreground')) {
+                $restore.Cursor=$true
+                try {$restore.Cursor=[Console]::CursorVisible} catch {}
+                $restore.Foreground=$Host.UI.RawUI.ForegroundColor
+                $restore.Background=$Host.UI.RawUI.BackgroundColor
+            }
+            $script:UiOldCursor=$restore.Cursor
+            $script:UiOldForeground=$restore.Foreground;$script:UiOldBackground=$restore.Background
             $Host.UI.RawUI.BackgroundColor='Black'
             $Host.UI.RawUI.ForegroundColor='White'
-            try {$Host.UI.RawUI.WindowTitle='OptiMiyoo v'+$script:AppVersion+' // DISK LINK'} catch {}
+            try {
+                if (-not $restore.ContainsKey('Title')) {$restore.Title=$Host.UI.RawUI.WindowTitle}
+                $Host.UI.RawUI.WindowTitle='OptiMiyoo v'+$script:AppVersion+' // DISK LINK'
+            } catch {}
             if ($script:UiInteractive) {
                 if ($env:OS -eq 'Windows_NT') {
                     if (-not ('OptiMiyoo.Terminal' -as [type])) {
@@ -81,6 +91,8 @@ namespace OptiMiyoo {
         [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int n);
         [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr h, out uint m);
         [DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr h, uint m);
+        public static bool ReadMode(out uint mode) { return GetConsoleMode(GetStdHandle(-11),out mode); }
+        public static bool RestoreMode(uint mode) { return SetConsoleMode(GetStdHandle(-11),mode); }
         public static bool Enable() {
             var h=GetStdHandle(-11); uint m;
             return GetConsoleMode(h,out m) && SetConsoleMode(h,m|4);
@@ -89,7 +101,11 @@ namespace OptiMiyoo {
 }
 '@
                     }
-                    $script:UiVT=[OptiMiyoo.Terminal]::Enable()
+                    if (-not $restore.ContainsKey('OutputMode')) {
+                        [uint32]$mode=0
+                        if ([OptiMiyoo.Terminal]::ReadMode([ref]$mode)) {$restore.OutputMode=$mode}
+                    }
+                    $script:UiVT=($restore.ContainsKey('OutputMode') -and [OptiMiyoo.Terminal]::Enable())
                 } else {$script:UiVT=($env:TERM -ne 'dumb')}
             }
         }
@@ -103,7 +119,8 @@ namespace OptiMiyoo {
     Sync-DisplayPreference
     if ($script:UiVT) {Initialize-FrameTimer}
     if ($script:UiVT -and (Get-Variable PSStyle -ErrorAction SilentlyContinue)) {
-        $script:UiOldRendering=$PSStyle.OutputRendering
+        if (-not $restore.ContainsKey('Rendering')) {$restore.Rendering=$PSStyle.OutputRendering}
+        $script:UiOldRendering=$restore.Rendering
         $PSStyle.OutputRendering='Ansi'
     }
 }
@@ -386,23 +403,31 @@ function Clear-DisplayPanel {
     }
 }
 function Restore-Display {
-    if ($script:UiFrameTimer) {try {$script:UiFrameTimer.Dispose()} catch {}}
-    $script:UiFrameTimer=$null
-    Complete-PreparationProgress
-    Clear-DisplayPanel
-    if ($script:UiPinned) {
-        # Reset margins without moving the caller's cursor onto the banner.
-        [Console]::Write($script:Esc+'7'+$script:Esc+'[r'+$script:Esc+'8')
+    $restore=$script:UiRestoreState
+    if ($null -eq $restore) {return}
+    $script:UiRestoreState=$null
+    try {
+        if ($script:UiFrameTimer) {try {$script:UiFrameTimer.Dispose()} catch {}}
+        $script:UiFrameTimer=$null
+        Complete-PreparationProgress
+        Clear-DisplayPanel
+    } finally {
+        if ($script:UiPinned -or $restore.Pinned) {
+            # Layout flags may have been reset by another Initialize-Display.
+            try {[Console]::Write($script:Esc+'7'+$script:Esc+'[r'+$script:Esc+'8')} catch {}
+        }
         $script:UiPinned=$false; $script:UiBannerRows=0
+        # Reset display attributes before restoring the caller's native colors.
+        if ($script:UiVT) {try {[Console]::Write($script:Esc+'[0m')} catch {}}
+        if ($restore.ContainsKey('Cursor')) {try {[Console]::CursorVisible=$restore.Cursor} catch {}}
+        if ($restore.ContainsKey('Foreground')) {try {$Host.UI.RawUI.BackgroundColor=$restore.Background;$Host.UI.RawUI.ForegroundColor=$restore.Foreground} catch {}}
+        if ($restore.ContainsKey('Title')) {try {$Host.UI.RawUI.WindowTitle=$restore.Title} catch {}}
+        if ($restore.ContainsKey('Encoding')) {try {[Console]::OutputEncoding=$restore.Encoding} catch {}}
+        if ($restore.ContainsKey('OutputMode')) {try {$null=[OptiMiyoo.Terminal]::RestoreMode($restore.OutputMode)} catch {}}
+        if ($restore.ContainsKey('Rendering')) {try {$PSStyle.OutputRendering=$restore.Rendering} catch {}}
+        $script:UiInteractive=$false; $script:UiAnsi=$false; $script:UiVT=$false
+        $script:UiPanel=$false; $script:UiOldRendering=$null
     }
-    if ($script:UiInteractive) {
-        try {[Console]::CursorVisible=$script:UiOldCursor} catch {}
-        try {$Host.UI.RawUI.BackgroundColor=$script:UiOldBackground; $Host.UI.RawUI.ForegroundColor=$script:UiOldForeground} catch {}
-    }
-    if ($script:UiVT) {[Console]::Write($script:Esc+'[0m')}
-    if ($null -ne $script:UiOldRendering) {$PSStyle.OutputRendering=$script:UiOldRendering}
-    $script:UiInteractive=$false; $script:UiAnsi=$false; $script:UiVT=$false
-    $script:UiPanel=$false; $script:UiOldRendering=$null
 }
 function Write-RetroStripe {
     Clear-DisplayPanel

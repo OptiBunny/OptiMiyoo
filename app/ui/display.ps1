@@ -793,7 +793,7 @@ function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$So
     $sourceIndex=0
     foreach ($text in $Lines) {
         $line=($text -replace '[\x00-\x1f\x7f-\x9f]',' ').TrimStart()
-        $isDefault=($line -match '^\d+\..*\(default\)')
+        $isDefault=($line -match '^(?:\d+|[A-Z])\..*\(default\)')
         if ($SourceDefaults -and $sourceIndex -lt $SourceDefaults.Count) {$isDefault=$SourceDefaults[$sourceIndex]}
         while ((Get-TextWidth $line) -gt $Width) {
             $prefix=Get-TextPrefix $line $Width
@@ -1535,9 +1535,14 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'Finished files go into DST.','',
             'C / Z: convert disk images; no playlists.',
             '1-9: make playlists; keep media formats.',
-            'S: enable supported file types on an Onion SD card.');Detail='Choose the task that matches your files.';Duration=10000},
-        @{Group='Setup';Mood='idle';Stage='Onion SD setup';System='MENU';Menu=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');Duration=14000},
-        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD';Detail='Read emulator settings and check supported file types.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems checked';Duration=5000},
+            'S: choose enabled file types on an Onion SD card.');Detail='Choose the task that matches your files.';Duration=10000},
+        @{Group='Setup';Mood='idle';Stage='Onion SD setup';System='MENU';Menu=@(Get-OnionSetupPathRows);Duration=10000},
+        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD';Detail='Read config file lists to find enabled and disabled types.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems checked';Duration=5000},
+        @{Group='Setup';Mood='idle';Stage='Choose SD file types';System='MENU';Menu=@((Get-OnionSetupChecklistModel -Items @(
+            foreach($id in 'AMIGA','COMMODORE','DOS','MSX','PS','SEGACD','VIC20','CPC','ZXS','LYNX') {
+                $state='On';if($id -eq 'COMMODORE'){$state='Partial'};if($id -in 'PS','LYNX'){$state='Off'}
+                [pscustomobject]@{Id=$id;State=$state;Available=$true;Intent='Keep';Reason=''}
+            })).Lines);Detail='Example scan. Toggle a number; 1 toggles all. Apply saves changes.';Duration=14000},
         @{Group='Setup';Mood='check';Stage='Enabling supported file types';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up each changed config, then add supported extensions.';SdProgress=$true;Progress=$true;SdTotal=3;SdUnit='configs updated';Duration=4500},
         @{Group='Setup';Mood='happy';Stage='SD setup results';System='MENU';Menu=@(
             'Example: SD setup finished','Updated: 3    Skipped: 7    Failed: 0','',

@@ -4,6 +4,46 @@ if (-not (Get-Command Get-PlaylistSupport -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 }
 
+function Get-OnionSetupPathRows {
+    @('Choose your Onion SD drive or folder.',
+      'Next: review which file types are enabled for each system.','',
+      'Turn systems on or off, then choose Apply to save.',
+      'Only the listed extensions in config.json are changed.',
+      'Other file types and your game files stay intact.','',
+      'Changed configs are backed up on the SD card.',
+      'Does not install or switch emulator cores.','',
+      'Esc. Back to main menu')
+}
+
+function Get-OnionSetupChecklistModel {
+    param([Parameter(Mandatory=$true)][object[]]$Items,[string]$Message='')
+    $rows=New-Object 'Collections.Generic.List[string]'
+    $rows.Add('On adds the listed types; Off removes them from the game list.')
+    $rows.Add('Other file types, games and emulator cores stay unchanged.')
+    $rows.Add('[x] On    [ ] Off    [-] Partly enabled    [--] Unavailable')
+    $rows.Add('')
+    $available=@($Items | Where-Object {$_.Available});$all=' '
+    if($available.Count -and @($available | Where-Object {$_.State -ne 'On'}).Count -eq 0){$all='x'}
+    elseif(@($available | Where-Object {$_.State -in 'On','Partial'}).Count){$all='-'}
+    $rows.Add(('1. [{0}] Toggle all installed systems' -f $all))
+    $index=-1
+    foreach($line in @(Get-OnionSetupMenuRows)) {
+        if($line -match '^\d+\. (.+)$') {
+            $index++;$item=$Items[$index];$description=$Matches[1].Replace(': enables ',': ')
+            $mark=switch($item.State){'On'{'x'}'Off'{' '}'Partial'{'-'}default{'--'}}
+            if(-not $item.Available){$description=($description -split ':',2)[0]+': '+$item.Reason}
+            $rows.Add(('{0}. [{1}] {2}' -f ($index+2),$mark,$description))
+        } elseif($index -ge 0 -and $line) {$rows.Add($line)}
+    }
+    $rows.Add('')
+    $rows.Add('Apply saves changes and backs up changed configs.')
+    $rows.Add('Refresh Onion''s game list afterwards.')
+    $rows.Add('A. Apply (default)     Esc. Cancel without saving')
+    $prompt='Type a number to toggle / Enter: Apply / Esc: Cancel'
+    if($Message){$prompt=$Message}
+    [pscustomobject]@{Title='Onion SD setup / file types';Lines=[string[]]$rows.ToArray();Prompt=$prompt}
+}
+
 function Get-OptiOriginalsRows {
     # The demo and trusted prompt describe the same choices. This helper only
     # returns text; confirmation and source-removal authority stay in the parent.
@@ -42,7 +82,7 @@ function Get-OptiMenuModel {
     if ($Page -eq 'Main') {
         $title='Main menu';$default='1'
         $crtState=if ($DisplayEffect -eq 'CRT') {'On'} else {'Off'}
-        & $addRow '  S. Onion SD setup: enable file types / preserve selected cores'
+        & $addRow '  S. Onion SD setup: choose file types / preserve selected cores'
         & $addRow '  C. Commodore 64: convert NIB/NBZ to G64' 'C. Commodore 64 / NIB/NBZ -> G64'
         & $addRow '  Z. ZX Spectrum: convert IPF to DSK' 'Z. ZX Spectrum / IPF -> DSK'
         & $addRow ''

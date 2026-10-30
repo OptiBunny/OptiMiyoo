@@ -85,7 +85,7 @@ function Get-ApplicationPromptModel {
     return [pscustomobject]@{Title=($title+' / existing output');Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages}
 }
 
-function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='') {
+function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='',[string]$EscapeValue='B') {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
@@ -126,7 +126,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
                 throw [OperationCanceledException]::new('Application cancelled.')
             }
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
-            if($key.Key -eq [ConsoleKey]::Escape){return 'B'}
+            if($key.Key -eq [ConsoleKey]::Escape){return $EscapeValue}
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
                 if($ReturnOnResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
                 $layout=Get-MenuLayout -Rows $rows;$dirty=$true;continue

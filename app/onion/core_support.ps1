@@ -324,7 +324,7 @@ function Get-OnionExtensionValueSpan([string]$Raw) {
             }
             if($stack.Count -eq 1 -and $frame.Key -ceq 'extlist') {
                 if(-not $string.Success){throw 'SD config extension list must be a JSON string.'}
-                $target=[pscustomobject]@{End=($string.Index+$string.Length-1);Value=[regex]::Unescape($string.Value.Substring(1,$string.Length-2))}
+                $target=[pscustomobject]@{Start=($string.Index+1);End=($string.Index+$string.Length-1);Value=[regex]::Unescape($string.Value.Substring(1,$string.Length-2))}
             }
         } else {
             if($frame.State -ceq 'ValueOrEnd' -and $punctuation -ceq ']'){$stack.RemoveAt($stack.Count-1);continue}
@@ -345,23 +345,75 @@ function Get-OnionExtensionValueSpan([string]$Raw) {
     return $target
 }
 
-function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions) {
-    # Build only the file-type-list edit. Launcher settings and unrelated JSON
-    # remain byte-identical; this helper never touches files or emulator cores.
+function Get-OnionConfigExtensionData([byte[]]$Original) {
     if($Original.Length -gt 1048576){throw 'config.json exceeds the supported 1 MiB text limit.'}
     $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
     $value=Get-OnionExtensionValueSpan $raw
     $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
     if($config.extlist -isnot [string] -or $config.extlist -cne $value.Value){throw 'SD config does not have a valid top-level extension list.'}
-    foreach($extension in $Extensions){if($extension -cnotmatch '^[A-Za-z0-9]+$'){throw 'Invalid SD file-list extension.'}}
-    $missing=@($Extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
-    if($missing.Count -eq 0){return ,$Original}
+    return [pscustomobject]@{Raw=$raw;Span=$value;Encoding=$utf8}
+}
+
+function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions,[string[]]$RemoveExtensions=@()) {
+    # Only the extlist string contents may change. Retained tokens keep their
+    # literal JSON spelling; launcher settings and unrelated bytes stay intact.
+    $data=Get-OnionConfigExtensionData $Original
+    $raw=$data.Raw;$value=$data.Span;$utf8=$data.Encoding
+    $remove=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($extension in $RemoveExtensions){
+        if($extension -cnotmatch '\A[A-Za-z0-9]+\z'){throw 'Invalid SD file-list extension.'}
+        [void]$remove.Add($extension)
+    }
+    foreach($extension in $Extensions){
+        if($extension -cnotmatch '\A[A-Za-z0-9]+\z'){throw 'Invalid SD file-list extension.'}
+        if($remove.Contains($extension)){throw 'An SD file-list extension cannot be both added and removed.'}
+    }
+    $encoded=$raw.Substring($value.Start,$value.End-$value.Start);$retained=$encoded;$decoded=$value.Value
+    if($remove.Count -gt 0) {
+        $keptRaw=New-Object Text.StringBuilder;$keptValue=New-Object Text.StringBuilder
+        # Skip complete JSON escapes before looking for the next separator.
+        # A literal \\u007c is token text; an actual \u007c escape is a pipe.
+        $separator=New-Object regex('(?<Pipe>\||\\u007[cC])|\\(?:u[0-9a-fA-F]{4}|["\\/bfnrt])')
+        $match=$separator.Match($encoded);$start=0;$prefix='';$kept=0
+        while($true) {
+            while($match.Success -and -not $match.Groups['Pipe'].Success){$match=$match.NextMatch()}
+            $end=$encoded.Length;if($match.Success){$end=$match.Index}
+            $token=$encoded.Substring($start,$end-$start);$tokenValue=[regex]::Unescape($token)
+            if(-not $remove.Contains($tokenValue)) {
+                # Keep the separator immediately preceding each retained token,
+                # except the first, which no longer needs a leading separator.
+                if($kept -gt 0){[void]$keptRaw.Append($prefix);[void]$keptValue.Append('|')}
+                [void]$keptRaw.Append($token);[void]$keptValue.Append($tokenValue);$kept++
+            }
+            if(-not $match.Success){break}
+            $prefix=$match.Value;$start=$match.Index+$match.Length;$match=$match.NextMatch()
+        }
+        $retained=$keptRaw.ToString();$decoded=$keptValue.ToString()
+    }
+    $existing=@($decoded -split '\|')
+    $missing=@($Extensions | Where-Object {$_ -notin $existing})
+    if($missing.Count -eq 0 -and $retained -ceq $encoded){return ,$Original}
     $addition=$missing -join '|'
-    if($config.extlist.Length -gt 0){$addition='|'+$addition}
-    $updated=$raw.Insert($value.End,$addition)
+    if($addition.Length -gt 0 -and $decoded.Length -gt 0){$addition='|'+$addition}
+    $updated=$raw.Remove($value.Start,$value.End-$value.Start).Insert($value.Start,$retained+$addition)
     $checked=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if($checked.extlist -cne ($config.extlist+$addition)){throw 'SD extension-list patch did not change the intended top-level value.'}
+    if($checked.extlist -cne ($decoded+$addition)){throw 'SD extension-list patch did not change the intended top-level value.'}
     return ,$utf8.GetBytes($updated)
+}
+
+function Get-OnionSetupExtensionState([byte[]]$Original,[string[]]$Extensions) {
+    $data=Get-OnionConfigExtensionData $Original
+    $requested=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($extension in $Extensions){
+        if($extension -cnotmatch '\A[A-Za-z0-9]+\z'){throw 'Invalid SD file-list extension.'}
+        [void]$requested.Add($extension)
+    }
+    $present=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($extension in @($data.Span.Value -split '\|')){[void]$present.Add($extension)}
+    $found=0;foreach($extension in $requested){if($present.Contains($extension)){$found++}}
+    if($found -eq 0){return 'Off'}
+    if($found -eq $requested.Count){return 'On'}
+    return 'Partial'
 }
 
 function Get-OnionSetupProfiles([string]$CodeRoot=(Split-Path -Parent $PSScriptRoot)) {

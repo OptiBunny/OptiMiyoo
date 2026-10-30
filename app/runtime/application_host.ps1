@@ -296,7 +296,7 @@ function Invoke-ApplicationHost {
         if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
         while ($again) {
             $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
-            $progressDisplay=$false;$previousEffect=$script:DisplayEffect;$cancelled=$false
+            $progressDisplay=$false;$previousEffect=$script:DisplayEffect;$cancelled=$false;$sdPlan=$null
             try {
                 if ($Entry -eq 'SD') {
                     $script:DisplayEffect=$displayEffect
@@ -305,7 +305,22 @@ function Invoke-ApplicationHost {
                 } else {Write-Host '';Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
                 $session=[OptiMiyoo.ApplicationSession]::Create()
                 $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
-                if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {$sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress}
+                if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {
+                    $sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress
+                    if($originalArguments.SelectionOnly) {
+                        $sdPlan=ConvertTo-ApplicationSdSelection -Session $sd -EnableSystems $originalArguments.EnableSystems -DisableSystems $originalArguments.DisableSystems
+                    } elseif($originalArguments.ContainsKey('EnableSystems') -or $originalArguments.ContainsKey('DisableSystems')) {
+                        throw 'SD system selections require SelectionOnly.'
+                    } elseif($menu) {
+                        $sdPlan=Invoke-ApplicationSdChecklist -SdSession $sd -ApplicationSession $session
+                        if($null -eq $sdPlan) {
+                            # Finally closes the frozen snapshot and idle session;
+                            # no worker starts and no card files are published.
+                            $selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=$true
+                            continue
+                        }
+                    }
+                }
                 $receipts=New-ApplicationReceiptStore
                 if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
                     $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
@@ -330,6 +345,7 @@ function Invoke-ApplicationHost {
                 if ($Entry -eq 'SD') {
                     if (-not $sd) {throw 'Supply the SD root, or choose S from the main menu.'}
                     $worker=@{OnionRoot=$sd.StagedRoot;NoAnimation=$NoAnimation;NoColor=$NoColor;DisplayEffect=$displayEffect;PlainProgress=(-not $session.Interactive)}
+                    if($sdPlan){foreach($key in $sdPlan.Keys){$worker[$key]=$sdPlan[$key]}}
                 }
                 Write-ApplicationBootstrap $session $Entry $worker $batch
                 $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')

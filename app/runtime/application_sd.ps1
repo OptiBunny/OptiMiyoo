@@ -69,7 +69,7 @@ function New-ApplicationSdSession {
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'
     if($originalPrefix.Equals($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $originalPrefix.StartsWith($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $workPrefix.StartsWith($originalPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'SD staging must be separate from the selected SD root.'}
     if(-not [IO.Directory]::Exists($work)){throw 'SD staging must already exist and belong to the application session.'}
-    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
+    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;SelectionFinalized=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
     $workLease=$null;$registered=$false
     try {
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
@@ -120,6 +120,104 @@ function New-ApplicationSdSession {
             }
         }finally{if($workLease){$workLease.Dispose()}}
     }
+}
+
+function Get-ApplicationSdSelection {
+    param([Parameter(Mandatory=$true)]$Session)
+    $state=Get-ApplicationSdState $Session
+    foreach($profile in @(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)) {
+        $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
+        $relative='Emu/'+$folder+'/config.json';$status='Unavailable';$reason='No config found';$available=$false
+        if($state.Files.ContainsKey($relative)) {
+            $file=$state.Files[$relative];$reason='Invalid config'
+            if($null -ne $file.Expected) {
+                $status=Get-OnionSetupExtensionState -Original $file.Bytes -Extensions @(Get-OnionSetupExtensions $profile)
+                $available=$true;$reason=''
+            }
+        }
+        # Return display-only copies. Callers never receive bytes or leases.
+        [pscustomobject]@{Id=[string]$profile.Folder;State=$status;Available=$available;Intent='Keep';Reason=$reason}
+    }
+}
+
+function Set-ApplicationSdSelection {
+    param([Parameter(Mandatory=$true)]$Session,[Parameter(Mandatory=$true)][object[]]$Items)
+    $state=Get-ApplicationSdState $Session
+    if($state.Completed -or $state.SelectionFinalized){throw 'SD selection has already been finalized.'}
+    $known=@(Get-ApplicationSdSelection $Session);$profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
+    if($Items.Count -ne $known.Count){throw 'SD selection must include each installed system profile exactly once.'}
+    $seen=@{};$expected=@{};$enable=New-Object 'Collections.Generic.List[string]';$disable=New-Object 'Collections.Generic.List[string]'
+    foreach($item in $Items) {
+        $id=[string]$item.Id;$match=@($known | Where-Object {$_.Id -ceq $id})
+        if($match.Count -ne 1 -or $seen.ContainsKey($id)){throw 'Unknown or duplicate SD selection.'}
+        $seen[$id]=$true;$trusted=$match[0]
+        if($item.Available -isnot [bool] -or $item.Available -ne $trusted.Available -or $item.Intent -cnotin 'Keep','On','Off') {throw 'Invalid SD selection state.'}
+        if(-not $trusted.Available -and $item.Intent -cne 'Keep'){throw 'Unavailable SD configs cannot be selected.'}
+        $profile=@($profiles | Where-Object {$_.Folder -ceq $id})[0]
+        $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
+        $relative='Emu/'+$folder+'/config.json'
+        if(-not $state.Files.ContainsKey($relative)){continue}
+        $file=$state.Files[$relative];$patch=$null
+        if($trusted.Available) {
+            $extensions=@(Get-OnionSetupExtensions $profile)
+            switch -CaseSensitive ($item.Intent) {
+                'Keep' {$patch=$file.Bytes}
+                'On' {$patch=Get-OnionConfigPatch -Original $file.Bytes -Extensions $extensions;$enable.Add($id)}
+                'Off' {$patch=Get-OnionConfigPatch -Original $file.Bytes -Extensions @() -RemoveExtensions $extensions;$disable.Add($id)}
+            }
+        }
+        $expected[$relative]=$patch
+    }
+    # Publish authority atomically only after the entire selection validates.
+    foreach($relative in $expected.Keys){$state.Files[$relative].Expected=$expected[$relative]}
+    $state.SelectionFinalized=$true
+    return @{SelectionOnly=$true;EnableSystems=[string[]]$enable.ToArray();DisableSystems=[string[]]$disable.ToArray()}
+}
+
+function ConvertTo-ApplicationSdSelection {
+    param([Parameter(Mandatory=$true)]$Session,[string[]]$EnableSystems=@(),[string[]]$DisableSystems=@())
+    $items=@(Get-ApplicationSdSelection $Session);$seen=@{}
+    foreach($intent in 'On','Off') {
+        $ids=$EnableSystems;if($intent -eq 'Off'){$ids=$DisableSystems}
+        foreach($id in $ids) {
+            $match=@($items | Where-Object {$_.Id -eq $id})
+            if($match.Count -ne 1 -or $seen.ContainsKey($id)){throw 'Unknown, duplicate or conflicting SD selection.'}
+            $seen[$id]=$true;$match[0].Intent=$intent
+        }
+    }
+    Set-ApplicationSdSelection -Session $Session -Items $items
+}
+
+function Invoke-ApplicationSdChecklist {
+    param([Parameter(Mandatory=$true)]$SdSession,$ApplicationSession=$null)
+    $items=@(Get-ApplicationSdSelection $SdSession);$message=''
+    # Display is already owned by the parent; this session has no running worker.
+    $controlC=$null
+    try {
+    if($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected) {
+        $controlC=[Console]::TreatControlCAsInput;[Console]::TreatControlCAsInput=$true
+    }
+    while($true) {
+        $model=Get-OnionSetupChecklistModel -Items $items -Message $message
+        $answer=Read-ApplicationConsoleChoice -Model $model -Session $ApplicationSession -EscapeValue ([string][char]27)
+        $message=''
+        if([string]::Equals($answer,([string][char]27),[StringComparison]::Ordinal)){return $null}
+        if($answer -in '','A'){return (Set-ApplicationSdSelection -Session $SdSession -Items $items)}
+        $number=0
+        if(-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $items.Count+1){$message='Choose a system number, A to apply, or Esc to cancel.';continue}
+        if($number -eq 1) {
+            $available=@($items | Where-Object {$_.Available})
+            if(-not $available.Count){$message='No valid installed configs are available to change.';continue}
+            $next='On';if(@($available | Where-Object {$_.State -ne 'On'}).Count -eq 0){$next='Off'}
+            foreach($item in $available){$item.State=$next;$item.Intent=$next}
+        } else {
+            $item=$items[$number-2]
+            if(-not $item.Available){$message=$item.Id+': '+$item.Reason+'.';continue}
+            $next='On';if($item.State -eq 'On'){$next='Off'}
+            $item.State=$next;$item.Intent=$next
+        }
+    }
+    } finally {if($null -ne $controlC){[Console]::TreatControlCAsInput=$controlC}}
 }
 
 function Test-ApplicationSdCancellation($ApplicationSession) {
@@ -363,7 +461,7 @@ function Read-ApplicationSdConsolePath {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
     $title='Onion SD setup';$prompt='SD drive or folder (for example E:\) / Esc: Back'
     if ($ErrorMessage) {$prompt=$ErrorMessage}
-    $rows=@(Get-OnionSetupMenuRows)+@('Esc. Back to main menu');$text=$InitialText;$dirty=$true
+    $rows=@(Get-OnionSetupPathRows);$text=$InitialText;$dirty=$true
     [void](Update-DisplaySize)
     $layout=Get-MenuLayout -Rows $rows
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)

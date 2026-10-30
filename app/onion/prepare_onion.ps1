@@ -2,8 +2,12 @@
 [CmdletBinding()]
 param([string]$OnionRoot,[switch]$NoAnimation,[switch]$NoColor,
       [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT',
-      [Parameter(DontShow=$true)][switch]$PlainProgress)
+      [Parameter(DontShow=$true)][switch]$PlainProgress,
+      [Parameter(DontShow=$true)][switch]$SelectionOnly,
+      [Parameter(DontShow=$true)][string[]]$EnableSystems,
+      [Parameter(DontShow=$true)][string[]]$DisableSystems)
 $ErrorActionPreference='Stop'
+if (-not $SelectionOnly -and ($PSBoundParameters.ContainsKey('EnableSystems') -or $PSBoundParameters.ContainsKey('DisableSystems'))) {throw 'SD system selections require SelectionOnly.'}
 . (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry SD -Arguments $PSBoundParameters)
@@ -163,22 +167,39 @@ try {
         Initialize-Display;$display=$true
         Show-OnionProgress -Stage 'Reading SD configuration' -Detail 'Checking installed system file lists.' -Force
     }
+    $profiles=@(Get-OnionSetupProfiles $ScriptDir)
+    $knownSystems=@{};$enabledSystems=@{};$disabledSystems=@{}
+    foreach ($profile in $profiles) {$knownSystems[[string]$profile.Folder]=$true}
+    if (@($EnableSystems).Count -gt $profiles.Count -or @($DisableSystems).Count -gt $profiles.Count) {throw 'Too many SD system selections.'}
+    foreach ($system in $EnableSystems) {
+        if ([string]::IsNullOrWhiteSpace($system) -or -not $knownSystems.ContainsKey($system)) {throw 'Unknown SD system selection.'}
+        if ($enabledSystems.ContainsKey($system)) {throw 'Duplicate SD system selection.'}
+        $enabledSystems[$system]=$true
+    }
+    foreach ($system in $DisableSystems) {
+        if ([string]::IsNullOrWhiteSpace($system) -or -not $knownSystems.ContainsKey($system)) {throw 'Unknown SD system selection.'}
+        if ($disabledSystems.ContainsKey($system)) {throw 'Duplicate SD system selection.'}
+        if ($enabledSystems.ContainsKey($system)) {throw 'SD system cannot be enabled and disabled together.'}
+        $disabledSystems[$system]=$true
+    }
     if ([string]::IsNullOrWhiteSpace($OnionRoot)) {throw 'SD setup requires the staged SD root supplied by the application host.'}
     $OnionRoot=(Resolve-Path -LiteralPath $OnionRoot).ProviderPath
     Assert-PlainOnionPath $OnionRoot $OnionRoot
     Initialize-OnionPathLease
     $rootLease=[OptiMiyoo.OnionPathLease]::Open($OnionRoot,$OnionRoot,$true,$false,$false)
-    $profiles=@(Get-OnionSetupProfiles $ScriptDir)
     $script:OnionTotal=$profiles.Count
     $backupRoot=Join-Path $OnionRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
     $changed=0; $unverified=0
-    Write-OnionText 'Checking installed system configs. Setup only adds file-list extensions to config.json.'
+    Write-OnionText 'Checking installed system configs. Setup only changes managed file-list extensions in config.json.'
     for ($profileIndex=0;$profileIndex -lt $profiles.Count;$profileIndex++) {
         $profile=$profiles[$profileIndex]
         # The count advances only after a profile's config assessment and
         # preparation have returned.
         $script:OnionCompleted=$profileIndex;$script:OnionStage='Checking system configs'
         if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
+        if ($SelectionOnly -and -not $enabledSystems.ContainsKey([string]$profile.Folder) -and -not $disabledSystems.ContainsKey([string]$profile.Folder)) {continue}
+        $disable=$disabledSystems.ContainsKey([string]$profile.Folder)
+        $action='enable';if ($disable) {$action='disable'}
         $support=Get-OnionSetupSupport $profile $OnionRoot
         if ($support.Status -eq 'NOT INSTALLED') {continue}
         if (-not $support.CanBuild) {
@@ -199,8 +220,9 @@ try {
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $original=$memory.ToArray()} finally {$memory.Dispose()}
             $extensions=@(Get-OnionSetupExtensions $profile)
-            $newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions
-            if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+($extensions -join ', ')); continue}
+            if ($disable) {$newBytes=Get-OnionConfigPatch -Original $original -Extensions @() -RemoveExtensions $extensions}
+            else {$newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions}
+            if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+($extensions -join ', ')+' already '+$action+'d'); continue}
             # An already prepared config only needs read access. Upgrade to a
             # writable handle only for a real edit, then recheck the bytes from
             # that handle so a change during the reopen cannot be overwritten.
@@ -221,7 +243,7 @@ try {
             $writeStarted=$true
             Write-OnionBytesVerified $stream $newBytes 'Updated config'
             $changed++
-            Write-OnionText ('PREPARED: '+$folder+' / '+($extensions -join ', ')+' to enable')
+            Write-OnionText ('PREPARED: '+$folder+' / '+($extensions -join ', ')+' to '+$action)
         } catch {
             $exitCode=1
             if ($writeStarted -and $stream -and $null -ne $original) {

@@ -57,7 +57,7 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
         $bytes=$null
         if($Config){$bytes=Read-ApplicationSdBytes $lease.Stream $Maximum}
         $State.TotalBytes+=$lease.Stream.Length
-        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder=''}
+        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder='';Extensions=@()}
         $lease=$null
     }finally{if($output){$output.Dispose()};if($lease){$lease.Dispose()}}
 }
@@ -100,6 +100,7 @@ function New-ApplicationSdSession {
             if($support.CanBuild) {
                 try {
                     $extensions=@(& $script:ApplicationSdModule {param($profile,$root,$support)Get-OnionSetupExtensions $profile $root $support} $profile $original $support)
+                    $file.Extensions=[string[]]$extensions
                     $file.Expected=Get-OnionConfigPatch -Original $file.Bytes -Extensions $extensions
                 }
                 catch{$file.Expected=$null}
@@ -239,6 +240,13 @@ function Test-ApplicationSdCancellation($ApplicationSession) {
     return $false
 }
 
+function Get-ApplicationSdFileTypeState([byte[]]$Bytes,[string[]]$Extensions) {
+    # Reporting must not interrupt a verified write or its recovery path.
+    if($null -eq $Bytes -or -not $Extensions.Count){return 'Unknown'}
+    try{return (Get-OnionSetupExtensionState -Original $Bytes -Extensions $Extensions)}
+    catch{return 'Unknown'}
+}
+
 function Complete-ApplicationSdSession {
     param([Parameter(Mandatory=$true)]$Session,[scriptblock]$Progress,$ApplicationSession=$null)
     $state=Get-ApplicationSdState $Session
@@ -267,7 +275,9 @@ function Complete-ApplicationSdSession {
             $file=$configs[$index]
             if($Progress){$null=& $Progress 'Updating SD file lists' $file.Folder $index $configs.Count 'systems'}
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
-            if(-not $file.Changed){$skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept'});continue}
+            $before=Get-ApplicationSdFileTypeState $file.Bytes $file.Extensions
+            $after=Get-ApplicationSdFileTypeState $file.Expected $file.Extensions
+            if(-not $file.Changed){$skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept';FileTypeState=$before;Failed=$false});continue}
             $writeLease=$null;$backupLease=$null;$backupDirectoryLease=$null;$writeStarted=$false;$restored=$false
             try {
                 $file.Lease.Dispose();$file.Lease=$null
@@ -287,7 +297,7 @@ function Complete-ApplicationSdSession {
                 [void]$state.UnverifiedBackups.Remove($backupRecord);$state.VerifiedBackups.Add($backupRecord)
                 $writeStarted=$true
                 & $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'Updated config'} $writeLease.Stream $file.Expected
-                $changed++;$results.Add([pscustomobject]@{System=$file.Folder;State='Updated'})
+                $changed++;$results.Add([pscustomobject]@{System=$file.Folder;State='Updated';FileTypeState=$after;Failed=$false})
             }catch {
                 $failed++
                 if($writeStarted -and $writeLease) {
@@ -299,7 +309,7 @@ function Complete-ApplicationSdSession {
                     }
                 }
                 $result='Kept';if($restored){$result='Restored'}
-                $results.Add([pscustomobject]@{System=$file.Folder;State=$result})
+                $results.Add([pscustomobject]@{System=$file.Folder;State=$result;FileTypeState='Unknown';Failed=$true})
             }finally{
                 # A failed backup close must not leave the config write handle
                 # or its parent directory pins held after setup has stopped.
@@ -335,6 +345,21 @@ function Get-ApplicationSdResultLines {
     foreach ($item in $Result.Results) {
         $status=[string]$item.State
         if ($status -eq 'Kept') {$status='Unchanged'}
+        if($item.Failed) {
+            $status='Failed (no changes saved)'
+            if($item.State -eq 'Restored'){$status='Failed (original settings restored)'}
+        } elseif($item.FileTypeState) {
+            if($item.State -eq 'Updated') {
+                switch($item.FileTypeState){'On'{$status='Enabled'}'Off'{$status='Disabled'}}
+            } elseif($item.State -eq 'Kept') {
+                switch($item.FileTypeState){
+                    'On'{$status='Already on'}
+                    'Off'{$status='Already off'}
+                    'Partial'{$status='Unchanged (partly enabled)'}
+                    'Unknown'{$status='Unchanged (unverified)'}
+                }
+            }
+        }
         ConvertTo-ApplicationPromptPath ($item.System+': '+$status)
     }
     if ($Result.VerifiedBackups) {

@@ -1865,7 +1865,10 @@ function Show-MioPreview([string]$Section='Tour') {
                         $rows=@(Get-MioPreviewMenuRows $scene)
                         $anchor=-1L; if ($resized) {$anchor=$pageAnchor}
                         $page=Get-MioPreviewMenuPage $rows $pageIndex $anchor
-                        $pageIndex=$page.Index; $pageCount=$page.Count; $pageAnchor=$page.Anchor
+                        $pageIndex=$page.Index; $pageCount=$page.Count
+                        # Compact views have no page anchor. Retain the last valid
+                        # reading position until the paged layout returns.
+                        if ($page.Anchor -ge 0) {$pageAnchor=$page.Anchor}
                         $script:UiDemoPage=$pageIndex+1; $script:UiDemoPageCount=$pageCount
                         Draw-MenuPanel ('DEMO / '+$scene.Stage) $page.Rows $script:UiSay '' -1 $scene.Mood -DefaultRows $page.DefaultRows
                     } else {Draw-DisplayPanel -Force}

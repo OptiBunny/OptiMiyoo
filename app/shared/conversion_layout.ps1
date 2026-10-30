@@ -296,7 +296,8 @@ function Reset-ConversionDescriptorCacheTargets($Cache,[object[]]$Targets) {
     }
 }
 
-function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Description,$Cache=$null) {
+function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Description,$Cache=$null,[switch]$RequireHeld) {
+    if($RequireHeld -and (-not $Cache -or $Cache.Disabled -or $Cache.Closed)){throw 'Conversion ownership could not remain protected through publication. Use a smaller or separate DST; previous output kept.'}
     if(-not $Cache){return Read-OptiTextFile $Path 1MB $Description $Root}
     if($Cache.Closed -or -not $Cache.Root.Equals([IO.Path]::GetFullPath($Root).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)){throw 'Conversion descriptor cache is closed or belongs to another output root.'}
     if($Cache.Disabled){return Read-OptiTextFile $Path 1MB $Description $Root}
@@ -309,6 +310,7 @@ function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Desc
         return $entry.Text
     }
     if($Cache.Entries.Count -ge $Cache.MaximumDescriptors){
+        if($RequireHeld){throw 'Conversion ownership exceeds its protected descriptor budget. Use a smaller or separate DST; previous output kept.'}
         Clear-ConversionDescriptorCache $Cache;$Cache.Disabled=$true
         return Read-OptiTextFile $Path 1MB $Description $Root
     }
@@ -321,6 +323,7 @@ function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Desc
         $text=Read-OptiBoundedText $lease.Stream 1MB $Description $lease.Stream.Length
         [long]$characters=$pathFull.Length+$text.Length
         if($characters -gt $Cache.MaximumCharacters-$Cache.Characters){
+            if($RequireHeld){throw 'Conversion ownership exceeds its protected descriptor text budget. Use a smaller or separate DST; previous output kept.'}
             Clear-ConversionDescriptorCache $Cache;$Cache.Disabled=$true
         }else{
             $Cache.Entries[$pathFull]=[pscustomobject]@{Text=$text;Lease=$lease;Characters=$characters}
@@ -330,8 +333,8 @@ function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Desc
     } finally {if($lease){$lease.Dispose()}}
 }
 
-function Get-ConversionCueDependencies([string]$Path,[string]$Root,$DescriptorCache=$null) {
-    $text=Read-ConversionDescriptorText $Path $Root 'Existing CUE' $DescriptorCache
+function Get-ConversionCueDependencies([string]$Path,[string]$Root,$DescriptorCache=$null,[switch]$RequireHeld) {
+    $text=Read-ConversionDescriptorText $Path $Root 'Existing CUE' $DescriptorCache -RequireHeld:$RequireHeld
     $lines=@($text -split '\r\n|\r|\n');$count=0
     if($lines.Count -gt 16384){throw 'Existing CUE exceeds the supported line count; output kept.'}
     foreach($line in $lines){
@@ -346,16 +349,25 @@ function Get-ConversionCueDependencies([string]$Path,[string]$Root,$DescriptorCa
     if(-not $count){throw 'Existing CUE contains no FILE references; output kept.'}
 }
 
-function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$DescriptorCache=$null) {
+function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$DescriptorCache=$null,[switch]$ProtectedPublication,[object[]]$CapturedTargets=@(),[object[]]$PrivateTargets=@()) {
     $root=[IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\','/');$names=@{};$directories=@{}
     if($DescriptorCache -and ($DescriptorCache.Closed -or -not $DescriptorCache.Root.Equals($root,[StringComparison]::OrdinalIgnoreCase))){throw 'Conversion descriptor cache is closed or belongs to another output root.'}
     $targets=[pscustomobject]@{Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
-    foreach($write in $Group.Plan.DataWrites){[void]$targets.Exact.Add($write.Destination);if($write.Folder){[void]$targets.Folders.Add($write.Destination)}}
+    $checkedWrites=@($Group.Plan.DataWrites);$referenceTargets=$checkedWrites;$privatePaths=$null
+    if($ProtectedPublication){
+        if(-not $DescriptorCache -or $DescriptorCache.Disabled -or $DescriptorCache.Closed){throw 'Conversion ownership could not remain protected through publication. Use a smaller or separate DST; previous output kept.'}
+        # Captured targets are temporarily absent. Their trusted backup guards
+        # protect the old bytes; this scan protects their foreign descriptors.
+        $referenceTargets=@($CapturedTargets);$checkedWrites=@()
+        $privatePaths=[pscustomobject]@{Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+        foreach($private in $PrivateTargets){[void]$privatePaths.Exact.Add($private.Destination);if($private.Folder){[void]$privatePaths.Folders.Add($private.Destination)}}
+    }
+    foreach($write in $referenceTargets){[void]$targets.Exact.Add($write.Destination);if($write.Folder){[void]$targets.Folders.Add($write.Destination)}}
     foreach ($item in $Group.Items) {
         $names[$item.Name]=$true;$parent=([string][IO.Path]::GetDirectoryName($item.Name)).Replace('\','/')
         while ($parent) {$directories[$parent]=$true;$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')}
     }
-    foreach ($write in $Group.Plan.DataWrites) {
+    foreach ($write in $checkedWrites) {
         if (-not $write.Destination.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)) {throw 'Conversion output leaves DST.'}
         Assert-PlainOutputParents $write.Destination $DestinationRoot
         if (-not (Test-Path -LiteralPath $write.Destination)) {continue}
@@ -386,26 +398,27 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
     $pending=New-Object 'System.Collections.Generic.Stack[string]';$pending.Push($root);$count=0
     while ($pending.Count) {foreach ($entry in @(Get-ChildItem -LiteralPath $pending.Pop() -Force)) {
         if (++$count -gt 100000) {throw 'Output ownership inspection exceeds its entry limit.'}
+        if($privatePaths -and (Test-ConversionReferenceTarget $entry.FullName $privatePaths)){continue}
         if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'An output link prevents checking playlist ownership.'}
         if ($entry.PSIsContainer) {$pending.Push($entry.FullName);continue}
         if($entry.Extension -eq '.cue'){
             # A standalone game descriptor owns its tracks even without an M3U.
             # Only descriptors replaced by this exact output set are exempt.
             if(Test-ConversionReferenceTarget $entry.FullName $targets){continue}
-            foreach($reference in @(Get-ConversionCueDependencies $entry.FullName $DestinationRoot $DescriptorCache)){
+            foreach($reference in @(Get-ConversionCueDependencies $entry.FullName $DestinationRoot $DescriptorCache -RequireHeld:$ProtectedPublication)){
                 if(Test-ConversionReferenceTarget $reference $targets){throw 'An existing CUE uses this conversion output; use a separate DST.'}
             }
             continue
         }
         if ($entry.Extension -notin '.m3u','.m3u8') {continue}
-        $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache
+        $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache -RequireHeld:$ProtectedPublication
         foreach ($line in @($text -split '\r\n|\r|\n')) {
             $line=$line.Trim();if (-not $line -or $line.StartsWith('#')) {continue}
             $reference=($line -split '#',2)[0].Replace('/','\')
             if (-not [IO.Path]::IsPathRooted($reference)) {$reference=Join-Path $entry.DirectoryName $reference};$reference=[IO.Path]::GetFullPath($reference)
             $references=New-Object 'System.Collections.Generic.List[string]';$references.Add($reference)
             if ([IO.Path]::GetExtension($reference) -ieq '.cue' -and (Test-Path -LiteralPath $reference)) {
-                foreach($track in @(Get-ConversionCueDependencies $reference $DestinationRoot $DescriptorCache)){$references.Add($track)}
+                foreach($track in @(Get-ConversionCueDependencies $reference $DestinationRoot $DescriptorCache -RequireHeld:$ProtectedPublication)){$references.Add($track)}
             }
             foreach ($owned in $references) {if(Test-ConversionReferenceTarget $owned $targets){throw 'An existing playlist uses this conversion output; use a separate DST.'}}
         }
@@ -430,9 +443,11 @@ function New-ConversionArchive([string]$Directory,[string]$Destination) {
 }
 
 function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$DestinationRoot,[bool]$Overwrite,$DescriptorCache=$null) {
-    Assert-ConversionGroupOwnership $Group $DestinationRoot $DescriptorCache
+    $ownsCache=$false
+    if(-not $DescriptorCache){$DescriptorCache=New-ConversionDescriptorCache $DestinationRoot;$ownsCache=$true}
     $staged=New-Object 'System.Collections.Generic.List[object]';$backups=New-Object 'System.Collections.Generic.List[object]';$installed=New-Object 'System.Collections.Generic.List[object]';$locks=$null;$parents=New-Object 'System.Collections.Generic.List[IDisposable]'
     try {
+        Assert-ConversionGroupOwnership $Group $DestinationRoot $DescriptorCache
         foreach ($write in $Group.Plan.DataWrites) {
             $parent=[IO.Path]::GetDirectoryName($write.Destination);$anchor=$parent
             while (-not [IO.Directory]::Exists($anchor)) {$anchor=[IO.Path]::GetDirectoryName($anchor)}
@@ -463,6 +478,11 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
                 $backups.Add([pscustomobject]@{Path=$backup;Destination=$output.Destination;Folder=$output.Folder})
             }
         }
+        if($backups.Count){
+            $capturedTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Destination;Folder=$_.Folder}})
+            $privateTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Path;Folder=$_.Folder}})+@($staged | ForEach-Object {[pscustomobject]@{Destination=$_.Container;Folder=$true}})
+            Assert-ConversionGroupOwnership $Group $DestinationRoot $DescriptorCache -ProtectedPublication -CapturedTargets $capturedTargets -PrivateTargets $privateTargets
+        }
         foreach ($output in $staged) {if ($output.Folder) {[IO.Directory]::Move($output.Staged,$output.Destination)} else {[IO.File]::Move($output.Staged,$output.Destination)};$installed.Add($output)}
         # Preserve the returned List itself, not an array containing that List.
         $locks=Open-SourcePolicyOutputs $staged.ToArray()
@@ -484,9 +504,11 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
         for ($i=$backups.Count-1;$i -ge 0;$i--) {try {if ($backups[$i].Folder) {[IO.Directory]::Move($backups[$i].Path,$backups[$i].Destination)} else {[IO.File]::Move($backups[$i].Path,$backups[$i].Destination)}} catch {Write-Notice 'WARNING' ('Could not restore previous output from: '+$backups[$i].Path)}}
         throw $message
     } finally {
+        try {
         Reset-ConversionDescriptorCacheTargets $DescriptorCache @($staged | ForEach-Object {[pscustomobject]@{Destination=$_.Container;Folder=$true}})
         foreach ($parent in $parents) {$parent.Dispose()}
         foreach ($output in $staged) {if (-not $output.Preserve -and $output.Identity -and (Test-Path -LiteralPath $output.Container)) {Remove-SourcePolicyOwnedPath -Path $output.Container -Root $DestinationRoot -Identity $output.Identity -MaximumEntries 400005}}
+        } finally {if($ownsCache){Close-ConversionDescriptorCache $DescriptorCache}}
     }
 }
 

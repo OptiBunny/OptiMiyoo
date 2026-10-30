@@ -944,6 +944,11 @@ function Complete-ApplicationBrokerBatch {
                     $validatePublication={param($capturedTargets,$capturedBackups)
                         & $batch.Module {param($plan,$targets,$references,$privateTargets)Assert-NoForeignPlaylistReferences $plan $targets $references -ProtectedPublication -PrivateTargets $privateTargets} $job.Plan $capturedTargets $referenceIndex (@($publicationPrivate)+@($capturedBackups))
                     }.GetNewClosure()
+                }else{
+                    $publicationPrivate=@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}})
+                    $validatePublication={param($capturedTargets,$capturedBackups)
+                        & $batch.Module {param($group,$root,$references,$targets,$privateTargets)Assert-ConversionGroupOwnership $group $root $references -ProtectedPublication -CapturedTargets $targets -PrivateTargets $privateTargets} $job.SourceJob $dst $referenceIndex $capturedTargets (@($publicationPrivate)+@($capturedBackups))
+                    }.GetNewClosure()
                 }
                 Reset-ApplicationBrokerReferences $batch $referenceIndex (@($job.Writes)+@($job.Retired)+@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}}))
                 $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator,$publicationValidator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator -ValidatePublication $publicationValidator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup $validatePublication

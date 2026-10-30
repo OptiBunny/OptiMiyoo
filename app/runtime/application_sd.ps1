@@ -216,7 +216,15 @@ function Complete-ApplicationSdSession {
                 }
                 $result='Kept';if($restored){$result='Restored'}
                 $results.Add([pscustomobject]@{System=$file.Folder;State=$result})
-            }finally{if($backupLease){$backupLease.Dispose()};if($backupDirectoryLease){$backupDirectoryLease.Dispose()};if($writeLease){$writeLease.Dispose()}}
+            }finally{
+                # A failed backup close must not leave the config write handle
+                # or its parent directory pins held after setup has stopped.
+                try{if($backupLease){$backupLease.Dispose()}}
+                finally{
+                    try{if($backupDirectoryLease){$backupDirectoryLease.Dispose()}}
+                    finally{if($writeLease){$writeLease.Dispose()}}
+                }
+            }
         }
         if(-not $cancelled){$cancelled=Test-ApplicationSdCancellation $ApplicationSession}
         if(-not $cancelled -and $Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}

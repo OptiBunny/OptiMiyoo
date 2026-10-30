@@ -122,6 +122,9 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null) {
             }
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return 'B'}
+            if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
+                $layout=Get-MenuLayout -Rows $rows;$dirty=$true;continue
+            }
             if(-not $fits) {
                 if([char]::ToUpperInvariant($key.KeyChar) -eq 'Q'){return 'Q'}
                 continue

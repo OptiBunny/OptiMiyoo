@@ -72,7 +72,6 @@ function Initialize-Display {
                 $restore.Foreground=$Host.UI.RawUI.ForegroundColor
                 $restore.Background=$Host.UI.RawUI.BackgroundColor
             }
-            $script:UiOldCursor=$restore.Cursor
             $script:UiOldForeground=$restore.Foreground;$script:UiOldBackground=$restore.Background
             $Host.UI.RawUI.BackgroundColor='Black'
             $Host.UI.RawUI.ForegroundColor='White'
@@ -120,7 +119,6 @@ namespace OptiMiyoo {
     if ($script:UiVT) {Initialize-FrameTimer}
     if ($script:UiVT -and (Get-Variable PSStyle -ErrorAction SilentlyContinue)) {
         if (-not $restore.ContainsKey('Rendering')) {$restore.Rendering=$PSStyle.OutputRendering}
-        $script:UiOldRendering=$restore.Rendering
         $PSStyle.OutputRendering='Ansi'
     }
 }
@@ -426,7 +424,7 @@ function Restore-Display {
         if ($restore.ContainsKey('OutputMode')) {try {$null=[OptiMiyoo.Terminal]::RestoreMode($restore.OutputMode)} catch {}}
         if ($restore.ContainsKey('Rendering')) {try {$PSStyle.OutputRendering=$restore.Rendering} catch {}}
         $script:UiInteractive=$false; $script:UiAnsi=$false; $script:UiVT=$false
-        $script:UiPanel=$false; $script:UiOldRendering=$null
+        $script:UiPanel=$false
     }
 }
 function Write-RetroStripe {
@@ -1155,6 +1153,9 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                     $script:UiIdlePoseOverride='idle'
                 }
                 if ($key.Key -eq [ConsoleKey]::Escape) {return 'B'}
+                if ($key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)) {
+                    $layout=Get-MenuLayout $Lines;$dirty=$true;continue
+                }
                 # Never accept an unseen default or confirmation on a tiny screen.
                 if (-not $layout.Fits) {
                     if ($key.Key -eq [ConsoleKey]::Q) {return 'Q'}

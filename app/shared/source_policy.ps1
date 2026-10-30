@@ -727,6 +727,32 @@ function Set-SourcePolicyCleanupEligibility($Plan) {
     }
 }
 
+function New-OptiPlaylistReferenceBudget {
+    return @{Count=0L;Characters=0L}
+}
+
+function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budget) {
+    if($null -eq $Budget -or -not $Budget.ContainsKey('Count') -or -not $Budget.ContainsKey('Characters') -or
+       ($Budget['Count'] -isnot [long] -and $Budget['Count'] -isnot [int]) -or ($Budget['Characters'] -isnot [long] -and $Budget['Characters'] -isnot [int]) -or
+       $Budget['Count'] -lt 0 -or $Budget['Count'] -gt 65536 -or $Budget['Characters'] -lt 0 -or $Budget['Characters'] -gt 16777216){throw 'Invalid playlist reference expansion budget.'}
+    if([string]::IsNullOrEmpty($Reference)){return}
+    # A literal '#' may occur before the actual archive-member separator.
+    # Count every interpretation before allocating prefixes or yielding any.
+    $count=1L;$characters=[long]$Reference.Length
+    if($count -gt 65536-$Budget['Count'] -or $characters -gt 16777216-$Budget['Characters']){throw 'Playlist reference expansion exceeds its descriptor budget.'}
+    for($separator=$Reference.IndexOf('#');$separator -ge 0;$separator=$Reference.IndexOf('#',$separator+1)){
+        if($separator -eq 0){continue}
+        $count++;$characters+=$separator
+        if($count -gt 128){throw 'Playlist reference expansion exceeds its 128-candidate line budget.'}
+        if($count -gt 65536-$Budget['Count'] -or $characters -gt 16777216-$Budget['Characters']){throw 'Playlist reference expansion exceeds its descriptor budget.'}
+    }
+    $Budget['Count']+=$count;$Budget['Characters']+=$characters
+    $Reference
+    for($separator=$Reference.IndexOf('#');$separator -ge 0;$separator=$Reference.IndexOf('#',$separator+1)){
+        if($separator -gt 0){$Reference.Substring(0,$separator)}
+    }
+}
+
 function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Stream]$Stream) {
     # Read only the already verified, held source descriptor. Never follow a
     # playlist to another filesystem root or change its bytes or job ownership.
@@ -747,13 +773,11 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
         if($lines.Count -gt 16384){throw 'Source playlist exceeds the 16,384-line limit. Split the playlist and retry; originals kept.'}
         $parent=[IO.Path]::GetDirectoryName($Path)
         $prefix=[IO.Path]::GetFullPath($Plan.Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+        $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach($line in $lines) {
             if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
             $value=$line.Trim();if(-not $value -or $value.StartsWith('#')){continue}
-            # A # can introduce an archive member or be a literal filename.
-            # Protect both interpretations if they name planned source files.
-            $names=@($value);$separator=$value.IndexOf('#');if($separator -gt 0){$names+= $value.Substring(0,$separator)}
-            foreach($name in $names) {
+            foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $value -Budget $referenceBudget)) {
                 if($name.StartsWith('file://',[StringComparison]::OrdinalIgnoreCase)){throw 'Source playlist has an unsupported local file URI; originals kept.'}
                 if($name -match '^[A-Za-z][A-Za-z0-9+.-]+://'){continue}
                 $relative=$name.Replace('/',[IO.Path]::DirectorySeparatorChar).Replace('\',[IO.Path]::DirectorySeparatorChar)

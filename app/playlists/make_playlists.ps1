@@ -1258,21 +1258,28 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
     try {
         Assert-PlaylistReferenceCapacity $Index 1
         $entry.Descriptor=Open-PlaylistReferenceDescriptor $Path $Index.Root
+        $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach($line in (Read-PlaylistLines $Path)){
             $reference=$line.Trim()
             if(-not $reference -or $reference.StartsWith('#')){continue}
-            $reference=($reference -split '#',2)[0].Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
-            try {
-                if([IO.Path]::IsPathRooted($reference)){$full=[IO.Path]::GetFullPath($reference)}
-                else{$full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $reference))}
-            } catch {throw ('Cannot verify an existing playlist reference: '+$Path)}
-            Add-PlaylistReferenceKey $Index $entry Exact $full
-            if([IO.Path]::GetExtension($full) -eq '.cue'){
-                if(-not $full.StartsWith($Index.Root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw ('An existing playlist references a CUE outside DST: '+$Path+'. Output left alone; use a separate DST.')}
-                Add-PlaylistReferenceKey $Index $entry Cues $full
-                $null=Get-PlaylistIndexedCue $Index $full 1
-                Add-PlaylistReferenceKey $Index $entry Guarded $full
-                foreach($track in $Index.Cues[$full].Tracks){Add-PlaylistReferenceKey $Index $entry Exact $track;Add-PlaylistReferenceKey $Index $entry Guarded $track}
+            foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
+                $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
+                try {
+                    if([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
+                    else{$full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $candidate))}
+                } catch {throw ('Cannot verify an existing playlist reference: '+$Path)}
+                Add-PlaylistReferenceKey $Index $entry Exact $full
+                if([IO.Path]::GetExtension($full) -eq '.cue'){
+                    if(-not $full.StartsWith($Index.Root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw ('An existing playlist references a CUE outside DST: '+$Path+'. Output left alone; use a separate DST.')}
+                    # A literal Game.zip#Disc.cue candidate may instead name an
+                    # archive member. Follow it only if that literal file exists;
+                    # the archive-prefix candidate still protects its container.
+                    if($candidate.Contains('#') -and -not (Test-Path -LiteralPath $full -PathType Leaf)){continue}
+                    Add-PlaylistReferenceKey $Index $entry Cues $full
+                    $null=Get-PlaylistIndexedCue $Index $full 1
+                    Add-PlaylistReferenceKey $Index $entry Guarded $full
+                    foreach($track in $Index.Cues[$full].Tracks){Add-PlaylistReferenceKey $Index $entry Exact $track;Add-PlaylistReferenceKey $Index $entry Guarded $track}
+                }
             }
         }
         foreach($dependency in $entry.Exact){
@@ -1408,24 +1415,27 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 continue
             }
             if ($file.Extension -notin '.m3u','.m3u8' -or $file.FullName.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)) {continue}
+            $referenceBudget=New-OptiPlaylistReferenceBudget
             foreach ($line in (Read-PlaylistLines $file.FullName)) {
                 $reference=$line.Trim()
                 if (-not $reference -or $reference.StartsWith('#')) {continue}
-                $reference=($reference -split '#',2)[0].Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
-                try {
-                    if ([IO.Path]::IsPathRooted($reference)) {$full=[IO.Path]::GetFullPath($reference)}
-                    else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $reference))}
-                } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
-                $references=@($full)
-                if([IO.Path]::GetExtension($full) -eq '.cue'){
-                    if(-not $full.StartsWith($Plan.Root.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw ('An existing playlist references a CUE outside DST: '+$file.FullName+'. Output left alone; use a separate DST.')}
-                    if(Test-Path -LiteralPath $full -PathType Leaf){$references+=@(Get-PlaylistCueDependencies $full $Plan.Root)}
-                }
-                foreach($dependency in $references){
-                    $used=$exactTargets.Contains($dependency)
-                    $parent=[IO.Path]::GetDirectoryName($dependency)
-                    while(-not $used -and $parent){$used=$folderTargets.Contains($parent);$parent=[IO.Path]::GetDirectoryName($parent)}
-                    if($used){throw ('Another playlist uses this output: '+$file.FullName+'. Output left alone; use a separate DST.')}
+                foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
+                    $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
+                    try {
+                        if ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}
+                        else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $candidate))}
+                    } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
+                    $references=@($full)
+                    if([IO.Path]::GetExtension($full) -eq '.cue'){
+                        if(-not $full.StartsWith($Plan.Root.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw ('An existing playlist references a CUE outside DST: '+$file.FullName+'. Output left alone; use a separate DST.')}
+                        if(Test-Path -LiteralPath $full -PathType Leaf){$references+=@(Get-PlaylistCueDependencies $full $Plan.Root)}
+                    }
+                    foreach($dependency in $references){
+                        $used=$exactTargets.Contains($dependency)
+                        $parent=[IO.Path]::GetDirectoryName($dependency)
+                        while(-not $used -and $parent){$used=$folderTargets.Contains($parent);$parent=[IO.Path]::GetDirectoryName($parent)}
+                        if($used){throw ('Another playlist uses this output: '+$file.FullName+'. Output left alone; use a separate DST.')}
+                    }
                 }
             }
         }

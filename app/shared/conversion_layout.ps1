@@ -412,15 +412,21 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
         }
         if ($entry.Extension -notin '.m3u','.m3u8') {continue}
         $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache -RequireHeld:$ProtectedPublication
+        $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach ($line in @($text -split '\r\n|\r|\n')) {
             $line=$line.Trim();if (-not $line -or $line.StartsWith('#')) {continue}
-            $reference=($line -split '#',2)[0].Replace('/','\')
-            if (-not [IO.Path]::IsPathRooted($reference)) {$reference=Join-Path $entry.DirectoryName $reference};$reference=[IO.Path]::GetFullPath($reference)
-            $references=New-Object 'System.Collections.Generic.List[string]';$references.Add($reference)
-            if ([IO.Path]::GetExtension($reference) -ieq '.cue' -and (Test-Path -LiteralPath $reference)) {
-                foreach($track in @(Get-ConversionCueDependencies $reference $DestinationRoot $DescriptorCache -RequireHeld:$ProtectedPublication)){$references.Add($track)}
+            foreach($candidate in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
+                $reference=$candidate.Replace('/','\')
+                if (-not [IO.Path]::IsPathRooted($reference)) {$reference=Join-Path $entry.DirectoryName $reference};$reference=[IO.Path]::GetFullPath($reference)
+                $references=New-Object 'System.Collections.Generic.List[string]';$references.Add($reference)
+                if ([IO.Path]::GetExtension($reference) -ieq '.cue') {
+                    if(-not $reference.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'An existing playlist references a CUE outside DST. Output left alone; use a separate DST.'}
+                    # An ordinary ZIP#Disc.cue reference is not itself a CUE file.
+                    # Follow a literal interpretation only when it exists in DST.
+                    if(Test-Path -LiteralPath $reference){foreach($track in @(Get-ConversionCueDependencies $reference $DestinationRoot $DescriptorCache -RequireHeld:$ProtectedPublication)){$references.Add($track)}}
+                }
+                foreach ($owned in $references) {if(Test-ConversionReferenceTarget $owned $targets){throw 'An existing playlist uses this conversion output; use a separate DST.'}}
             }
-            foreach ($owned in $references) {if(Test-ConversionReferenceTarget $owned $targets){throw 'An existing playlist uses this conversion output; use a separate DST.'}}
         }
     }}
 }

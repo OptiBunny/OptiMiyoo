@@ -1027,7 +1027,7 @@ function Get-OnionProgressRows([string]$Stage,[string]$Detail='',
         $remaining=('Remaining in this step: {0} {1}' -f ($Total-$Completed),$Unit)
         if ($Completed -eq $Total) {$next='100% finishes this step only; SD setup may still be running.'}
     }
-    if ($Stage -in 'Checking selected cores','Preparing file types') {
+    if ($Stage -in 'Checking system configs','Preparing file types') {
         $basis='Systems processed in this setup pass'
         $next='Each system is checked before its file types are prepared.'
         if ($Total -ge 0) {$remaining=('Remaining in this pass: {0} {1}' -f ($Total-$Completed),$Unit)}

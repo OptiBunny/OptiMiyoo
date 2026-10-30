@@ -41,15 +41,10 @@ function Read-ApplicationSdBytes([IO.Stream]$Stream,[long]$Maximum) {
     try{$Stream.CopyTo($memory);if($memory.Length -ne $Stream.Length -or $memory.Length -gt $Maximum){throw 'SD metadata changed while reading.'};return ,$memory.ToArray()}finally{$memory.Dispose();$Stream.Position=0}
 }
 
-function Get-ApplicationSdHash([IO.Stream]$Stream) {
-    $Stream.Position=0;$sha=[Security.Cryptography.SHA256]::Create()
-    try{return [BitConverter]::ToString($sha.ComputeHash($Stream)).Replace('-','')}finally{$sha.Dispose();$Stream.Position=0}
-}
-
 function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[switch]$Config) {
     if($State.Files.ContainsKey($Relative)){return}
-    # Callers supply only fixed profile paths and a core basename parsed by the
-    # installed literal-launcher parser; no path is taken from the child.
+    # Callers supply only fixed installed profile config paths;
+    # no path is taken from the child.
     $path=Join-Path $State.OriginalRoot $Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
     if(-not (Test-Path -LiteralPath $path)){return}
     $lease=[OptiMiyoo.OnionPathLease]::Open($path,$State.OriginalRoot,$false,$false,$false);$output=$null
@@ -59,10 +54,10 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
         $output=[IO.File]::Open($target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
         $lease.Stream.CopyTo($output);$output.Flush($true);$output.Dispose();$output=$null
-        $hash=Get-ApplicationSdHash $lease.Stream;$bytes=$null
+        $bytes=$null
         if($Config){$bytes=Read-ApplicationSdBytes $lease.Stream $Maximum}
         $State.TotalBytes+=$lease.Stream.Length
-        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Length=$lease.Stream.Length;Hash=$hash;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder=''}
+        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder=''}
         $lease=$null
     }finally{if($output){$output.Dispose()};if($lease){$lease.Dispose()}}
 }
@@ -78,26 +73,19 @@ function New-ApplicationSdSession {
     $workLease=$null;$registered=$false
     try {
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
-        $cores=Join-Path $original 'RetroArch/.retroarch/cores'
-        $coresLease=[OptiMiyoo.OnionPathLease]::Open($cores,$original,$true,$false,$false);$coresLease.Dispose()
+        $emu=Join-Path $original 'Emu'
+        $emuLease=[OptiMiyoo.OnionPathLease]::Open($emu,$original,$true,$false,$false);$emuLease.Dispose()
         $workLease=[OptiMiyoo.OnionPathLease]::Open($work,$work,$true,$false,$false)
         if(Test-Path -LiteralPath $state.StagedRoot){throw 'SD snapshot needs a fresh Onion staging folder.'}
-        [void][IO.Directory]::CreateDirectory((Join-Path $state.StagedRoot 'RetroArch/.retroarch/cores'))
+        [void][IO.Directory]::CreateDirectory((Join-Path $state.StagedRoot 'Emu'))
         $profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
         for($index=0;$index -lt $profiles.Count;$index++) {
             $profile=$profiles[$index]
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             if($folder -notmatch '^[A-Z0-9]+$'){throw 'Invalid installed SD profile.'}
             if($Progress){$null=& $Progress 'Reading SD setup files' $folder $index $profiles.Count 'systems'}
-            $config='Emu/'+$folder+'/config.json';$launch='Emu/'+$folder+'/launch.sh'
+            $config='Emu/'+$folder+'/config.json'
             Add-ApplicationSdSnapshotFile $state $config 1048576 -Config
-            if(-not $state.Files.ContainsKey($config)){continue}
-            Add-ApplicationSdSnapshotFile $state $launch 262144
-            if($state.Files.ContainsKey($launch)) {
-                $selected=$null
-                try{$text=[Text.Encoding]::UTF8.GetString((Read-ApplicationSdBytes $state.Files[$launch].Lease.Stream 262144));$selected=Get-SelectedRetroArchCore $text}catch{}
-                if($selected -and $selected -in @($profile.SupportedCores)) {Add-ApplicationSdSnapshotFile $state ('RetroArch/.retroarch/cores/'+$selected) 536870912}
-            }
         }
         if($Progress){$null=& $Progress 'Reading SD setup files' 'SD setup files collected.' $profiles.Count $profiles.Count 'systems'}
         for($index=0;$index -lt $profiles.Count;$index++) {
@@ -107,9 +95,9 @@ function New-ApplicationSdSession {
             $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder
             $support=& $script:ApplicationSdModule {param($profile,$root)Get-OnionSetupSupport $profile $root} $profile $original
-            # An unverified profile remains visible in the staged assessment but
-            # has no publication authority, even if the child changes its core.
-            if($support.CanBuild -and $state.Files.ContainsKey('Emu/'+$folder+'/launch.sh') -and $state.Files.ContainsKey('RetroArch/.retroarch/cores/'+$support.Core)) {
+            # Invalid configs have no publication authority even if the child
+            # replaces them with valid JSON. Only the frozen exact patch is allowed.
+            if($support.CanBuild) {
                 try {
                     $extensions=@(& $script:ApplicationSdModule {param($profile,$root,$support)Get-OnionSetupExtensions $profile $root $support} $profile $original $support)
                     $file.Expected=Get-OnionConfigPatch -Original $file.Bytes -Extensions $extensions
@@ -169,12 +157,10 @@ function Complete-ApplicationSdSession {
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
             $target=Join-Path $state.StagedRoot $file.Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
             $lease=[OptiMiyoo.OnionPathLease]::Open($target,$state.StagedRoot,$false,$false,$false);$stagedLeases.Add($lease)
-            if($file.Config) {
-                $bytes=Read-ApplicationSdBytes $lease.Stream 1048576
-                if([Convert]::ToBase64String($bytes) -ceq [Convert]::ToBase64String($file.Bytes)){$checked++;continue}
-                if($null -eq $file.Expected -or [Convert]::ToBase64String($bytes) -cne [Convert]::ToBase64String($file.Expected)){throw 'SD sandbox proposed an unapproved config change; originals kept.'}
-                $file.Changed=$true
-            } elseif($lease.Stream.Length -ne $file.Length -or (Get-ApplicationSdHash $lease.Stream) -cne $file.Hash){throw 'SD sandbox changed a launcher or core; originals kept.'}
+            $bytes=Read-ApplicationSdBytes $lease.Stream 1048576
+            if([Convert]::ToBase64String($bytes) -ceq [Convert]::ToBase64String($file.Bytes)){$checked++;continue}
+            if($null -eq $file.Expected -or [Convert]::ToBase64String($bytes) -cne [Convert]::ToBase64String($file.Expected)){throw 'SD sandbox proposed an unapproved config change; originals kept.'}
+            $file.Changed=$true
             $checked++
         }
         if(-not $cancelled -and $Progress){$null=& $Progress 'Verifying SD setup changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
@@ -266,54 +252,76 @@ function Get-ApplicationSdResultLines {
 }
 
 function Get-ApplicationSdResultModel {
-    param([Parameter(Mandatory=$true)]$Result,[int]$Page=0)
-    # Wrap before paging so even long redirected-drive paths fit the normal panel.
-    # Keep section separators inside pages and backup headings with their first row.
-    $pageSize=11
+    param([Parameter(Mandatory=$true)]$Result,[int]$Page=0,[long]$Anchor=-1)
+    $sourceLines=@(Get-ApplicationSdResultLines -Result $Result)
+    $title='Onion SD setup / results';$prompt='Enter / Esc: Main menu | Q: Exit'
+    # Let the shared renderer reclaim artwork or paragraph gaps before paging.
+    # Without an initialized viewport, retain the conservative minimum panel.
+    $textWidth=44;$pageSize=11
+    if($script:UiColumns -ge 44 -and $script:UiHeight -gt 0) {
+        $whole=Get-MenuLayout -Rows $sourceLines
+        if($whole.Fits) {
+            return [pscustomobject]@{Title=$title;Lines=@($whole.Rows);Prompt=$prompt;Page=0;Pages=1;Anchor=0L;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
+        }
+        $empty=Get-MenuLayout -Rows @('')
+        $textWidth=$empty.TextWidth
+        $overhead=8
+        if($empty.ShowMio -and $script:UiHeight -ge 26){$overhead=14}
+        $wrappedCount=@(Get-MenuRows $sourceLines $textWidth).Count
+        $navigationRows=@(Get-MenuRows @(('Page {0}/{0} | > Next | < Previous' -f $wrappedCount)) $textWidth).Count
+        $pageSize=[Math]::Max(3,$script:UiHeight-$overhead-$navigationRows)
+    }
+    # Keep backup headings with their first data row. Logical character anchors
+    # retain the current part of a long report when resize changes its wrapping.
     $pageRows=New-Object 'Collections.Generic.List[string]'
     $pageList=New-Object 'Collections.Generic.List[object]'
-    $separator=$false
-    foreach ($line in @(Get-ApplicationSdResultLines -Result $Result)) {
+    $separator=$false;$offset=0L;$pageAnchor=0L
+    foreach ($line in $sourceLines) {
         if (-not $line) {$separator=($pageRows.Count -gt 0);continue}
-        $wrapped=@(Get-MenuRows @($line) 44)
+        $wrapped=@(Get-MenuRows @($line) $textWidth)
         $needed=1
         if ($line -in @('Verified original config backups:','Incomplete or unverified backups; do not restore:')) {$needed=$wrapped.Count+1}
         $gap=0;if ($separator -and $pageRows.Count) {$gap=1}
         if ($pageRows.Count -and $pageRows.Count+$gap+$needed -gt $pageSize) {
-            $pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray()});$pageRows.Clear()
+            $pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset
         }
         if ($separator -and $pageRows.Count) {$pageRows.Add('')}
         $separator=$false
         foreach ($row in $wrapped) {
-            if ($pageRows.Count -eq $pageSize) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray()});$pageRows.Clear()}
-            $pageRows.Add($row)
+            if ($pageRows.Count -eq $pageSize) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset}
+            $pageRows.Add($row);$offset+=($row -replace '\s','').Length
         }
     }
-    if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray()})}
+    if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor})}
     $pages=$pageList.Count
     $page=[Math]::Max(0,[Math]::Min($Page,$pages-1))
+    if($Anchor -ge 0) {
+        $page=0
+        for($index=1;$index -lt $pages -and $pageList[$index].Anchor -le $Anchor;$index++){$page=$index}
+    }
     $lines=@($pageList[$page].Rows)
     if ($pages -gt 1) {$lines+=('Page {0}/{1} | > Next | < Previous' -f ($page+1),$pages)}
-    [pscustomobject]@{
-        Title='Onion SD setup / results';Lines=$lines
-        Prompt='Enter / Esc: Main menu | Q: Exit';Page=$page;Pages=$pages
-    }
+    [pscustomobject]@{Title=$title;Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages;Anchor=$pageList[$page].Anchor;TextWidth=$textWidth;PageSize=$pageSize}
 }
 
 function Read-ApplicationSdResult {
     param([Parameter(Mandatory=$true)]$Result,[switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
-    $previousEffect=$script:DisplayEffect;$display=$false;$page=0
+    $previousEffect=$script:DisplayEffect;$display=$false;$page=0;$anchor=-1L;$inputText=''
     try {
         $script:DisplayEffect=$DisplayEffect
         Initialize-Display;$display=$true
         while ($true) {
-            $model=Get-ApplicationSdResultModel -Result $Result -Page $page
-            $answer=Read-ApplicationConsoleChoice $model
+            [void](Update-DisplaySize)
+            $model=Get-ApplicationSdResultModel -Result $Result -Page $page -Anchor $anchor
+            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText
+            if($answer -isnot [string] -and $answer.Resized) {$page=$model.Page;if($anchor -lt 0){$anchor=$model.Anchor};$inputText=$answer.InputText;continue}
+            $inputText='';$anchor=-1L
             if ($answer -in '', 'B') {return $true}
             if ($answer -eq 'Q') {return $false}
             if ($answer -eq '>') {$page=[Math]::Min($model.Page+1,$model.Pages-1)}
             elseif ($answer -eq '<') {$page=[Math]::Max(0,$model.Page-1)}
+            else {$page=$model.Page}
         }
     }finally {
         try {if ($display) {Restore-Display}}
@@ -414,8 +422,8 @@ function Invoke-ApplicationSdFolderPrompt {
             if (-not [IO.Directory]::Exists($choice.Path)) {
                 $message='Folder not found. Check your SD path, or press Esc to go back.';continue
             }
-            if (-not [IO.Directory]::Exists((Join-Path $choice.Path 'RetroArch/.retroarch/cores'))) {
-                $message='No Onion cores here. Choose your SD root, or press Esc to go back.';continue
+            if (-not [IO.Directory]::Exists((Join-Path $choice.Path 'Emu'))) {
+                $message='No Emu folder here. Choose your SD root, or press Esc to go back.';continue
             }
             $selected=$choice.Path;break
         }

@@ -85,24 +85,29 @@ function Get-ApplicationPromptModel {
     return [pscustomobject]@{Title=($title+' / existing output');Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages}
 }
 
-function Read-ApplicationConsoleChoice($Model,$Session=$null) {
+function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='') {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
-    $text='';$caret=0;$dirty=$true
+    $text=$InitialText;$caret=$text.Length;$dirty=$true
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
-    [void](Update-DisplaySize)
+    $initialResize=Update-DisplaySize
     $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows
     if(-not $script:UiVT) {
         [Console]::WriteLine($Model.Title)
         foreach($line in $Model.Lines){[Console]::WriteLine($line)}
         [Console]::Write($Model.Prompt+': ')
     }
-    try {while($true) {
-        if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows;$dirty=$true}
+    try {
+    if($ReturnOnResize -and $script:UiVT -and $initialResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
+    while($true) {
+        if(Update-DisplaySize -Throttled){
+            if($ReturnOnResize -and $script:UiVT){return [pscustomobject]@{Resized=$true;InputText=$text}}
+            $layout=Get-MenuLayout -Rows $rows;$dirty=$true
+        }
         $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
         if($sparseIdle) {
             $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
@@ -123,6 +128,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null) {
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return 'B'}
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
+                if($ReturnOnResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
                 $layout=Get-MenuLayout -Rows $rows;$dirty=$true;continue
             }
             if(-not $fits) {

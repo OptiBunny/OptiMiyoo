@@ -15,7 +15,7 @@ $ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $ScriptDir 'shared/compile_support.ps1')
 . (Join-Path $ScriptDir 'shared/output_safety.ps1')
 . (Join-Path $ScriptDir 'ui/display.ps1')
-$script:OnionCompleted=0;$script:OnionTotal=-1;$script:OnionStage='Checking selected cores'
+$script:OnionCompleted=0;$script:OnionTotal=-1;$script:OnionStage='Checking system configs'
 $script:OnionErrors=New-Object 'System.Collections.Generic.List[string]'
 if ($PlainProgress) {$script:UiVT=$false}
 function Write-OnionText([string]$Text,[switch]$Failure) {
@@ -161,57 +161,46 @@ try {
     # The trusted host forwards its own mode so scripted runs retain plain text.
     if (-not $PlainProgress) {
         Initialize-Display;$display=$true
-        Show-OnionProgress -Stage 'Reading SD configuration' -Detail 'Checking the selected emulator settings.' -Force
+        Show-OnionProgress -Stage 'Reading SD configuration' -Detail 'Checking installed system file lists.' -Force
     }
     if ([string]::IsNullOrWhiteSpace($OnionRoot)) {throw 'SD setup requires the staged SD root supplied by the application host.'}
     $OnionRoot=(Resolve-Path -LiteralPath $OnionRoot).ProviderPath
     Assert-PlainOnionPath $OnionRoot $OnionRoot
     Initialize-OnionPathLease
     $rootLease=[OptiMiyoo.OnionPathLease]::Open($OnionRoot,$OnionRoot,$true,$false,$false)
-    $cores=Join-Path $OnionRoot 'RetroArch/.retroarch/cores'
-    Assert-PlainOnionPath $cores $OnionRoot
-    if (-not (Test-Path -LiteralPath $cores -PathType Container)) {throw 'This does not look like an Onion SD card root: RetroArch cores folder not found.'}
     $profiles=@(Get-OnionSetupProfiles $ScriptDir)
     $script:OnionTotal=$profiles.Count
     $backupRoot=Join-Path $OnionRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
-    $changed=0; $unsupported=0
-    Write-OnionText 'Checking selected cores. Setup only adds supported file-list extensions to config.json.'
+    $changed=0; $unverified=0
+    Write-OnionText 'Checking installed system configs. Setup only adds file-list extensions to config.json.'
     for ($profileIndex=0;$profileIndex -lt $profiles.Count;$profileIndex++) {
         $profile=$profiles[$profileIndex]
-        # The count advances only after a profile's assessment/preparation has
-        # returned. A slow core check never receives an invented percentage.
-        $script:OnionCompleted=$profileIndex;$script:OnionStage='Checking selected cores'
+        # The count advances only after a profile's config assessment and
+        # preparation have returned.
+        $script:OnionCompleted=$profileIndex;$script:OnionStage='Checking system configs'
         if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
         $support=Get-OnionSetupSupport $profile $OnionRoot
         if ($support.Status -eq 'NOT INSTALLED') {continue}
-        if ($profile.Folder -eq 'COMMODORE') {
-            $tapeSupport=Get-TapeSwapSupport $profile $OnionRoot $support
-            Write-OnionText ('TAPES '+$tapeSupport.Status+': COMMODORE / '+$tapeSupport.Core+' - '+$tapeSupport.Reason)
-        }
         if (-not $support.CanBuild) {
-            $unsupported++
-            Write-OnionText ($support.Status+': '+$profile.Folder+' / '+$support.Core+' - '+$support.Reason)
+            $unverified++
+            Write-OnionText ($support.Status+': '+$profile.Folder+' - '+$support.Reason)
             continue
         }
         $folder=$profile.Folder; $configPath=$support.ConfigPath
-        $stream=$null; $configLease=$null; $launchLock=$null; $coreLock=$null; $backupLease=$null; $backupDirectoryLease=$null; $original=$null; $writeStarted=$false
+        $stream=$null; $configLease=$null; $backupLease=$null; $backupDirectoryLease=$null; $original=$null; $writeStarted=$false
         try {
             $script:OnionStage='Preparing file types'
             if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
-            # Hold the launcher read-only while editing its config. A concurrent
-            # core change must not race the eligibility check on Windows.
-            $launchLock=[OptiMiyoo.OnionPathLease]::Open($support.LaunchPath,$OnionRoot,$false,$false,$false)
-            $coreLock=[OptiMiyoo.OnionPathLease]::Open((Join-Path $cores $support.Core),$OnionRoot,$false,$false,$false)
-            $fresh=Get-OnionSetupSupport $profile $OnionRoot
-            if (-not $fresh.CanBuild -or $fresh.Core -ne $support.Core) {throw 'Selected core changed during setup. Run the check again.'}
+            # Revalidate the config's complete JSON while its read lease is
+            # held, independently of the earlier eligibility assessment.
             $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$false,$false)
             $stream=$configLease.Stream
             if ($stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $original=$memory.ToArray()} finally {$memory.Dispose()}
-            $extensions=@(Get-OnionSetupExtensions $profile $OnionRoot $fresh)
+            $extensions=@(Get-OnionSetupExtensions $profile)
             $newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions
-            if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+$support.Core); continue}
+            if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+($extensions -join ', ')); continue}
             # An already prepared config only needs read access. Upgrade to a
             # writable handle only for a real edit, then recheck the bytes from
             # that handle so a change during the reopen cannot be overwritten.
@@ -232,7 +221,7 @@ try {
             $writeStarted=$true
             Write-OnionBytesVerified $stream $newBytes 'Updated config'
             $changed++
-            Write-OnionText ('PREPARED: '+$folder+' / '+$support.Core+' / '+($extensions -join ', ')+' to enable')
+            Write-OnionText ('PREPARED: '+$folder+' / '+($extensions -join ', ')+' to enable')
         } catch {
             $exitCode=1
             if ($writeStarted -and $stream -and $null -ne $original) {
@@ -242,18 +231,18 @@ try {
             }
             Write-OnionText ('SKIPPED: '+$folder+' - '+$_.Exception.Message) -Failure
         } finally {
-            if ($backupLease) {$backupLease.Dispose()}
-            if ($backupDirectoryLease) {$backupDirectoryLease.Dispose()}
-            if ($configLease) {$configLease.Dispose()}
-            if ($coreLock) {$coreLock.Dispose()}
-            if ($launchLock) {$launchLock.Dispose()}
+            try {if ($backupLease) {$backupLease.Dispose()}}
+            finally {
+                try {if ($backupDirectoryLease) {$backupDirectoryLease.Dispose()}}
+                finally {if ($configLease) {$configLease.Dispose()}}
+            }
         }
     }
-    $script:OnionCompleted=$profiles.Count;$script:OnionStage='Core checks finished'
-    Write-OnionText ("$changed system setup change(s) prepared; $unsupported unsupported/unverified.")
+    $script:OnionCompleted=$profiles.Count;$script:OnionStage='Config checks finished'
+    Write-OnionText ("$changed system setup change(s) prepared; $unverified config(s) could not be verified.")
     if ($exitCode -eq 0) {
         $script:OnionStage='Verification pending'
-        Write-OnionText 'Waiting for verification before updating the SD card. Selected cores are preserved.'
+        Write-OnionText 'Waiting for verification before updating the SD config file lists.'
     } else {
         $script:OnionStage='Setup could not finish'
         Write-OnionText 'SD changes will not be applied because setup failed.' -Failure

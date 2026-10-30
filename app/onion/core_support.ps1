@@ -346,17 +346,18 @@ function Get-OnionExtensionValueSpan([string]$Raw) {
 }
 
 function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions) {
-    # Build only the file-type-list edit. Each caller checks core eligibility
-    # independently before supplying extensions; this helper never touches files.
+    # Build only the file-type-list edit. Launcher settings and unrelated JSON
+    # remain byte-identical; this helper never touches files or emulator cores.
     if($Original.Length -gt 1048576){throw 'config.json exceeds the supported 1 MiB text limit.'}
     $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
     $value=Get-OnionExtensionValueSpan $raw
     $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if($config.launch -cne 'launch.sh' -or $config.extlist -isnot [string] -or -not $config.extlist -or $config.extlist -cne $value.Value){throw 'SD config does not have a verified launcher and extension list.'}
+    if($config.extlist -isnot [string] -or $config.extlist -cne $value.Value){throw 'SD config does not have a valid top-level extension list.'}
     foreach($extension in $Extensions){if($extension -cnotmatch '^[A-Za-z0-9]+$'){throw 'Invalid SD file-list extension.'}}
     $missing=@($Extensions | Where-Object {$_ -notin @($config.extlist -split '\|')})
     if($missing.Count -eq 0){return ,$Original}
-    $addition='|'+($missing -join '|')
+    $addition=$missing -join '|'
+    if($config.extlist.Length -gt 0){$addition='|'+$addition}
     $updated=$raw.Insert($value.End,$addition)
     $checked=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
     if($checked.extlist -cne ($config.extlist+$addition)){throw 'SD extension-list patch did not change the intended top-level value.'}
@@ -376,21 +377,41 @@ function Get-OnionSetupProfiles([string]$CodeRoot=(Split-Path -Parent $PSScriptR
 }
 
 function Get-OnionSetupSupport($Profile,[string]$SdRoot) {
-    if ($Profile.PSObject.Properties['SetupExtension']) {
-        return Get-OnionCoreSupport $Profile $SdRoot $Profile.SetupExtension
-    }
-    return Get-PlaylistSupport $Profile $SdRoot
+    $emuFolder=$Profile.Folder
+    if ($Profile.EmuFolder) {$emuFolder=$Profile.EmuFolder}
+    $result=[pscustomobject]@{ConfigPath=$null;EmuFolder=$emuFolder;CanBuild=$false;Status='UNVERIFIED';Reason='No SD root was supplied.'}
+    if (-not $SdRoot) {return $result}
+    $lease=$null;$memory=$null
+    try {
+        # Setup recognizes fixed system file-list additions. It does not assess
+        # the user's launcher or whether an installed core can load those files.
+        $null=@(Get-OnionSetupExtensions $Profile)
+        $result.ConfigPath=Join-Path (Join-Path (Join-Path $SdRoot 'Emu') $emuFolder) 'config.json'
+        Assert-PlainOnionPath $result.ConfigPath $SdRoot
+        if (-not (Test-Path -LiteralPath $result.ConfigPath -PathType Leaf)) {
+            $result.Status='NOT INSTALLED';$result.Reason='No system config.json found on this SD card.';return $result
+        }
+        $lease=Open-OptiInputLease $result.ConfigPath $SdRoot
+        if ($lease.Stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
+        $memory=New-Object IO.MemoryStream
+        $lease.Stream.CopyTo($memory)
+        # Reuse the strict byte-level patch validation without adding anything.
+        $null=Get-OnionConfigPatch -Original $memory.ToArray() -Extensions @()
+        $result.CanBuild=$true;$result.Status='READY';$result.Reason='Installed config has a valid file-type list.'
+    } catch {$result.Status='UNVERIFIED';$result.Reason=$_.Exception.Message}
+    finally {try {if ($memory) {$memory.Dispose()}} finally {if ($lease) {$lease.Dispose()}}}
+    return $result
 }
 
 function Get-OnionSetupExtensions($Profile,[string]$SdRoot,$Support) {
-    if (-not $Support.CanBuild) {return}
-    if ($Profile.PSObject.Properties['SetupExtension']) {
-        return $Profile.SetupExtension.TrimStart('.')
-    }
-    $Profile.Playlist.TrimStart('.')
-    if ($Profile.Folder -eq 'COMMODORE') {
-        $tape=Get-TapeSwapSupport $Profile $SdRoot $Support
-        if ($tape.CanBuild) {$tape.Extensions | ForEach-Object {$_.TrimStart('.')}}
+    # Keep the optional arguments for existing callers; setup additions do not
+    # depend on launcher selection, core binaries or playback support checks.
+    switch ([string]$Profile.Folder) {
+        'DOS' {'m3u8';return}
+        'COMMODORE' {'m3u';'tap';'t64';return}
+        'LYNX' {'lyx';return}
+        {$_ -in 'AMIGA','MSX','PS','SEGACD','VIC20','CPC','ZXS'} {'m3u';return}
+        default {throw 'Unknown SD setup system profile.'}
     }
 }
 

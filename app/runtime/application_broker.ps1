@@ -321,12 +321,16 @@ function Get-ApplicationBrokerFile([string]$Path,[string]$Root,[string]$CopyTo,[
     } finally {if($output){$output.Dispose()};$lease.Dispose()}
 }
 
-function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64','ZX')][string]$InspectMedia='') {
-    return (& $Module {param($path,$inspectMedia)
+function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64','ZX')][string]$InspectMedia='',$RenamedNames=$null) {
+    return (& $Module {param($path,$inspectMedia,$renamedNames)
         $profile='Media';$inspection=@{}
         if($inspectMedia){
             $profile='Floppy';$extension='.g64';if($inspectMedia -eq 'ZX'){$extension='.dsk'}
-            $inspection=@{InspectExtensions=@($extension);InspectPayload={param($stream,$length,$name)
+            $extensions=@($extension);if($renamedNames -and $renamedNames.Count){$extensions+=@('.m3u','.m3u8','.cue')}
+            $inspection=@{InspectExtensions=$extensions;InspectPayload={param($stream,$length,$name)
+                if([IO.Path]::GetExtension($name) -in '.m3u','.m3u8','.cue'){
+                    Assert-ConversionDescriptorStream $stream $length $name $renamedNames;return $true
+                }
                 if([IO.Path]::GetExtension($name) -ieq '.g64'){Assert-G64 -InputStream $stream;return $true}
                 return (Test-DskStream $stream $length)
             }}
@@ -334,7 +338,7 @@ function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64
         $archive=Open-ArchiveWithBudget -Path $path -Profile $profile
         try {return Invoke-ArchiveSandbox -ZipPath $path -Archive $archive -Profile $profile -Operation Hash @inspection}
         finally {$archive.Dispose()}
-    } $Path $InspectMedia)
+    } $Path $InspectMedia $RenamedNames)
 }
 
 function Assert-ApplicationBrokerPassthroughMedia($Module,$Lease,[string]$Operation) {
@@ -596,12 +600,15 @@ function Start-ApplicationBrokerBatch {
             $job.Paths=@($group.Paths);$job.SourceBlockReason=$group.SourceBlockReason;$job.BlockedReason=$group.Error
             try {
                 if($group.Error){if($group.Error -eq 'No supported disk images in this input.'){$job.BlockedResult='Skipped'};throw $group.Error}
+                # This map comes from the pinned source inventory, never worker
+                # completion claims. Companion bytes remain exact source hashes.
+                $renamedNames=& $module {param($items)Get-ConversionRenameMap $items} $group.Items
                 foreach($member in $group.Items){
                     $key=Get-ApplicationBrokerRelative $member.InputPath $src
                     if(-not $state.SourceSnapshot.Files.ContainsKey($key)){throw 'Converter input was not present in the frozen source manifest.'}
                     $input=$state.SourceSnapshot.Files[$key]
                     if($member.Type -eq 'Zip'){
-                        if(-not $archives.ContainsKey($member.InputPath)){$archives[$member.InputPath]=Get-ApplicationBrokerArchive $module $member.InputPath -InspectMedia $Operation}
+                        if(-not $archives.ContainsKey($member.InputPath)){$archives[$member.InputPath]=Get-ApplicationBrokerArchive $module $member.InputPath -InspectMedia $Operation -RenamedNames $renamedNames}
                         $input=$archives[$member.InputPath][$member.EntryName]
                     }
                     if(-not $input){throw 'Converter archive member was not present in the frozen source manifest.'}

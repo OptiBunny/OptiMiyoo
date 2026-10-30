@@ -200,7 +200,7 @@ function Invoke-ArchiveSandbox {
           [ValidateSet('Media','Floppy')][string]$Profile='Media',
           [ValidateSet('Hash','Extract','Read','File')][string]$Operation='Hash',
           [int]$EntryIndex=-1,[string]$Destination,[long]$MaximumBytes=16777216,[scriptblock]$Progress=$null,
-          [ValidateSet('.g64','.dsk')][string[]]$InspectExtensions=@(),[scriptblock]$InspectPayload=$null)
+          [ValidateSet('.g64','.dsk','.m3u','.m3u8','.cue')][string[]]$InspectExtensions=@(),[scriptblock]$InspectPayload=$null)
     if ((Get-Command Test-ApplicationWorker -ErrorAction SilentlyContinue) -and (Test-ApplicationWorker)) {
         if($InspectExtensions.Count -or $InspectPayload){throw 'Archive payload inspection is host-only.'}
         return (Invoke-ApplicationArchive @PSBoundParameters)
@@ -221,6 +221,7 @@ function Invoke-ArchiveSandbox {
             for($i=0;$i -lt $Archive.Entries.Count;$i++){
                 $entry=$Archive.Entries[$i]
                 if($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\') -or [IO.Path]::GetExtension($entry.FullName) -notin $InspectExtensions){continue}
+                if([IO.Path]::GetExtension($entry.FullName) -in '.m3u','.m3u8','.cue' -and $entry.Length -gt 1MB){throw 'Inspected conversion descriptor exceeds its supported text size limit.'}
                 if($entry.Length -gt 64MB -or $entry.Length -gt $inspectionLimit-$inspectedBytes){throw 'Inspected disk image exceeds its supported size limit.'}
                 $inspectedBytes+=$entry.Length;[void]$inspection.Add($i)
             }

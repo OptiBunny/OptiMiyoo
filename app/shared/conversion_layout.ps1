@@ -8,6 +8,96 @@ function Assert-ConversionRelativeName([string]$Name) {
     }
 }
 
+function Get-ConversionRenameMap([object[]]$Items) {
+    $renames=New-Object 'Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($item in $Items){
+        if(-not $item.Converter -or $item.InputName -ceq $item.Name){continue}
+        Assert-ConversionRelativeName $item.InputName;Assert-ConversionRelativeName $item.Name
+        $renames.Add([string]$item.InputName,[string]$item.Name)
+    }
+    return ,$renames
+}
+
+function Resolve-ConversionDescriptorTarget([string]$DescriptorName,[string]$Reference) {
+    $reference=$Reference.Replace('\','/')
+    # Only references within this archive can name one of its converted members.
+    # Normalize its virtual namespace without opening paths or following aliases.
+    if($reference.StartsWith('/') -or $reference.Contains(':')){return $null}
+    $parts=New-Object 'Collections.Generic.List[string]'
+    $slash=$DescriptorName.LastIndexOf('/')
+    if($slash -ge 0){foreach($part in $DescriptorName.Substring(0,$slash).Split('/')){$parts.Add($part)}}
+    foreach($part in $reference.Split('/')){
+        if(-not $part -or $part -eq '.'){continue}
+        if($part -eq '..'){
+            if(-not $parts.Count){return $null}
+            $parts.RemoveAt($parts.Count-1)
+        }else{$parts.Add($part)}
+    }
+    return ($parts.ToArray() -join '/')
+}
+
+function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorName,$RenamedNames) {
+    if(-not $RenamedNames -or -not $RenamedNames.Count){return}
+    $cue=[IO.Path]::GetExtension($DescriptorName) -ieq '.cue'
+    if(-not $cue -and [IO.Path]::GetExtension($DescriptorName) -notin '.m3u','.m3u8'){return}
+    if($Text.Length -gt 1MB -or $Text.IndexOf([char]0) -ge 0){throw ('Supplied conversion descriptor exceeds its text limit or contains invalid text: '+$DescriptorName)}
+    $lines=[regex]::Split($Text,'\r\n|\r|\n');$references=0
+    if($lines.Count -gt 16384){throw ('Supplied conversion descriptor exceeds its line limit: '+$DescriptorName)}
+    foreach($line in $lines){
+        if($line.Length -gt 8192){throw ('Supplied conversion descriptor contains an overlong line: '+$DescriptorName)}
+        if($cue){
+            if($line -notmatch '^\s*FILE\b'){continue}
+            if($line -notmatch '^\s*FILE\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$'){throw ('Supplied conversion descriptor has an unreadable FILE reference: '+$DescriptorName)}
+            $reference=$Matches[1];if(-not $reference){$reference=$Matches[2]}
+            if(++$references -gt 1024){throw ('Supplied conversion descriptor exceeds its reference limit: '+$DescriptorName)}
+        }else{
+            $reference=$line.Trim();if(-not $reference -or $reference.StartsWith('#')){continue}
+        }
+        $targets=@((Resolve-ConversionDescriptorTarget $DescriptorName $reference))
+        # Check the full spelling first: '#' is also legal in an image filename.
+        # A ZIP-member reference additionally owns the path before its separator.
+        if(-not $cue -and $reference.Contains('#')){$targets+=Resolve-ConversionDescriptorTarget $DescriptorName ($reference.Split('#')[0])}
+        foreach($target in $targets){
+            if($target -and $RenamedNames.ContainsKey($target)){
+                throw ('Supplied descriptor '+$DescriptorName+' references '+$target+', whose extension conversion changes. Update or remove that descriptor before conversion; original kept.')
+            }
+        }
+    }
+    if($cue -and -not $references){throw ('Supplied conversion descriptor contains no FILE references: '+$DescriptorName)}
+}
+
+function Assert-ConversionDescriptorStream([IO.Stream]$Stream,[long]$Length,[string]$DescriptorName,$RenamedNames) {
+    if(-not $RenamedNames -or -not $RenamedNames.Count){return}
+    if($Length -lt 0 -or $Length -gt 1MB){throw ('Supplied conversion descriptor exceeds its supported text size limit: '+$DescriptorName)}
+    if(-not $Stream.CanRead -or -not $Stream.CanSeek){throw 'Supplied conversion descriptor requires a readable pinned stream.'}
+    $position=$Stream.Position
+    try {
+        $Stream.Position=0;$bytes=New-Object byte[] ([int]$Length);$read=0
+        while($read -lt $bytes.Length){$count=$Stream.Read($bytes,$read,$bytes.Length-$read);if($count -le 0){throw 'Supplied conversion descriptor was truncated.'};$read+=$count}
+        if($Stream.ReadByte() -ne -1){throw 'Supplied conversion descriptor changed length.'}
+        # Reject undecodable text instead of overlooking a renamed Unicode path.
+        # BOMs select their original encoding; no descriptor bytes are rewritten.
+        $encoding=New-Object Text.UTF8Encoding($false,$true);$offset=0
+        if($bytes.Length -ge 4 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254 -and $bytes[2] -eq 0 -and $bytes[3] -eq 0){$encoding=New-Object Text.UTF32Encoding($false,$false,$true);$offset=4}
+        elseif($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 254 -and $bytes[3] -eq 255){$encoding=New-Object Text.UTF32Encoding($true,$false,$true);$offset=4}
+        elseif($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191){$offset=3}
+        elseif($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254){$encoding=New-Object Text.UnicodeEncoding($false,$false,$true);$offset=2}
+        elseif($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255){$encoding=New-Object Text.UnicodeEncoding($true,$false,$true);$offset=2}
+        try{$text=$encoding.GetString($bytes,$offset,$bytes.Length-$offset)}catch{throw ('Supplied conversion descriptor has invalid text encoding: '+$DescriptorName)}
+        Assert-ConversionDescriptorTargets $text $DescriptorName $RenamedNames
+    } finally {$Stream.Position=$position}
+}
+
+function Assert-ConversionGroupDescriptorTargets($Group,[string]$Directory,$RenamedNames) {
+    if(-not $RenamedNames -or -not $RenamedNames.Count){return}
+    foreach($item in $Group.Items){
+        if([IO.Path]::GetExtension($item.InputName) -notin '.m3u','.m3u8','.cue'){continue}
+        $lease=Open-SourcePolicyReadLease (Join-Path $Directory $item.InputName) $Directory
+        try{Assert-ConversionDescriptorStream $lease.Stream $lease.Stream.Length $item.InputName $RenamedNames}
+        finally{$lease.Dispose()}
+    }
+}
+
 function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
     $relative=$Relative.Replace('\','/'); Assert-ConversionRelativeName $relative
     $parent=([string][IO.Path]::GetDirectoryName($relative)).Replace('\','/')
@@ -428,6 +518,7 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
                 $overwrite=$true
             }
             Assert-ConversionGroupOwnership $group $destinationRoot $descriptorCache
+            $renamedNames=Get-ConversionRenameMap $group.Items
             foreach ($path in $group.Paths) {$leases.Add((Open-SourcePolicyReadLease $path $sourceRoot));$hashes[[IO.Path]::GetFullPath($path)]=Get-SourcePolicyHash $path}
             $temp=Join-Path (Get-OptiScratchRoot) ('ppg_'+[Guid]::NewGuid().ToString('N').Substring(0,12))
             New-SourcePolicyOwnedDirectory $temp;$tempOwned=$true
@@ -436,11 +527,17 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
             [void][IO.Directory]::CreateDirectory($inputDir);[void][IO.Directory]::CreateDirectory($convertedDir)
             if ($group.Items[0].Type -eq 'Zip') {
                 $zipPath=$group.Paths[0];$archive=Open-ArchiveWithBudget -Path $zipPath -Profile Floppy
-                try {$null=Invoke-ArchiveSandbox -ZipPath $zipPath -Archive $archive -Profile Floppy -Operation Extract -Destination $inputDir} finally {$archive.Dispose()}
+                try {
+                    if($renamedNames.Count){foreach($entry in $archive.Entries){
+                        if([IO.Path]::GetExtension($entry.FullName) -in '.m3u','.m3u8','.cue' -and $entry.Length -gt 1MB){throw ('Supplied conversion descriptor exceeds its supported text size limit: '+$entry.FullName)}
+                    }}
+                    $null=Invoke-ArchiveSandbox -ZipPath $zipPath -Archive $archive -Profile Floppy -Operation Extract -Destination $inputDir
+                } finally {$archive.Dispose()}
             } else {foreach ($item in $group.Items) {
                 $staged=Join-Path $inputDir $item.InputName;[IO.File]::Copy($item.InputPath,$staged)
                 if ((Get-SourcePolicyHash $staged) -ne $hashes[[IO.Path]::GetFullPath($item.InputPath)]) {throw 'Staged disk differs from its original.'}
             }}
+            Assert-ConversionGroupDescriptorTargets $group $inputDir $renamedNames
             $index=0;$mediaCount=@($group.Items | Where-Object {$_.Media}).Count
             foreach ($item in $group.Items) {
                 $source=Join-Path $inputDir $item.InputName;$target=Join-Path $convertedDir $item.Name

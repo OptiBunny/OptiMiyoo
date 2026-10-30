@@ -467,7 +467,7 @@ function Get-PlaylistMediaIdentity([string]$Relative) {
         $tag=$found[0].Groups[1].Value.ToLowerInvariant();$tagged=$true
         $title=[regex]::Replace($title,$pattern,'').Trim()
         $title=[regex]::Replace($title,'\s{2,}',' ')
-    } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])$') {
+    } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
         $tag=$Matches[1].ToLowerInvariant();$tagged=$true
         $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
         $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')

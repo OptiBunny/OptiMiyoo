@@ -91,7 +91,7 @@ function New-ApplicationSdSession {
         for($index=0;$index -lt $profiles.Count;$index++) {
             $profile=$profiles[$index]
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
-            if($Progress){$null=& $Progress 'Checking supported file types' $folder $index $profiles.Count 'systems'}
+            if($Progress){$null=& $Progress 'Checking config files' $folder $index $profiles.Count 'systems'}
             $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder
             $support=& $script:ApplicationSdModule {param($profile,$root)Get-OnionSetupSupport $profile $root} $profile $original
@@ -106,7 +106,7 @@ function New-ApplicationSdSession {
                 catch{$file.Expected=$null}
             }
         }
-        if($Progress){$null=& $Progress 'Checking supported file types' 'Ready for isolated setup checks.' $profiles.Count $profiles.Count 'systems'}
+        if($Progress){$null=& $Progress 'Checking config files' 'Ready for isolated setup checks.' $profiles.Count $profiles.Count 'systems'}
         $handle=[pscustomobject]@{Id=([Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'));StagedRoot=$state.StagedRoot}
         $state.Handle=$handle;$script:ApplicationSdStates[$handle.Id]=$state
         $registered=$true

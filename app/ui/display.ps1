@@ -1027,9 +1027,9 @@ function Get-OnionProgressRows([string]$Stage,[string]$Detail='',
         $remaining=('Remaining in this step: {0} {1}' -f ($Total-$Completed),$Unit)
         if ($Completed -eq $Total) {$next='100% finishes this step only; SD setup may still be running.'}
     }
-    if ($Stage -in 'Checking system configs','Preparing file types') {
+    if ($Stage -eq 'Preparing selected changes') {
         $basis='Systems processed in this setup pass'
-        $next='Each system is checked before its file types are prepared.'
+        $next='Preparing your On/Off choices in temporary config copies.'
         if ($Total -ge 0) {$remaining=('Remaining in this pass: {0} {1}' -f ($Total-$Completed),$Unit)}
     }
     if ($Stage -eq 'SD setup finished') {$next='Review the results before returning to the main menu.'}
@@ -1543,7 +1543,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
                 $state='On';if($id -eq 'COMMODORE'){$state='Partial'};if($id -in 'PS','LYNX'){$state='Off'}
                 [pscustomobject]@{Id=$id;State=$state;Available=$true;Intent='Keep';Reason=''}
             })).Lines);Detail='Example scan. Toggle a number; 1 toggles all. Apply saves changes.';Duration=14000},
-        @{Group='Setup';Mood='check';Stage='Enabling supported file types';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Back up each changed config, then add supported extensions.';SdProgress=$true;Progress=$true;SdTotal=3;SdUnit='configs updated';Duration=4500},
+        @{Group='Setup';Mood='check';Stage='Preparing selected changes';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Prepare additions and removals in temporary config copies.';SdProgress=$true;Progress=$true;SdTotal=3;SdUnit='systems';Duration=4500},
         @{Group='Setup';Mood='happy';Stage='SD setup results';System='MENU';Menu=@(
             'Example: SD setup finished','Updated: 3    Skipped: 7    Failed: 0','',
             'PlayStation: enabled .m3u playlists',

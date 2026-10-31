@@ -53,9 +53,11 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
         $target=Join-Path $State.StagedRoot $Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
         $output=[IO.File]::Open($target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-        $lease.Stream.CopyTo($output);$output.Flush($true);$output.Dispose();$output=$null
         $bytes=$null
-        if($Config){$bytes=Read-ApplicationSdBytes $lease.Stream $Maximum}
+        # Use one pinned read for both the staged copy and patch authority.
+        if($Config){$bytes=Read-ApplicationSdBytes $lease.Stream $Maximum;$output.Write($bytes,0,$bytes.Length)}
+        else{$lease.Stream.CopyTo($output)}
+        $output.Flush($true);$output.Dispose();$output=$null
         $State.TotalBytes+=$lease.Stream.Length
         $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder='';Extensions=@()}
         $lease=$null
@@ -83,30 +85,21 @@ function New-ApplicationSdSession {
             $profile=$profiles[$index]
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             if($folder -notmatch '^[A-Z0-9]+$'){throw 'Invalid installed SD profile.'}
-            if($Progress){$null=& $Progress 'Reading SD setup files' $folder $index $profiles.Count 'systems'}
-            $config='Emu/'+$folder+'/config.json'
-            Add-ApplicationSdSnapshotFile $state $config 1048576 -Config
-        }
-        if($Progress){$null=& $Progress 'Reading SD setup files' 'SD setup files collected.' $profiles.Count $profiles.Count 'systems'}
-        for($index=0;$index -lt $profiles.Count;$index++) {
-            $profile=$profiles[$index]
-            $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
-            if($Progress){$null=& $Progress 'Checking config files' $folder $index $profiles.Count 'systems'}
-            $relative='Emu/'+$folder+'/config.json';if(-not $state.Files.ContainsKey($relative)){continue}
+            if($Progress){$null=& $Progress 'Reading config files' $folder $index $profiles.Count 'systems'}
+            $relative='Emu/'+$folder+'/config.json'
+            Add-ApplicationSdSnapshotFile $state $relative 1048576 -Config
+            if(-not $state.Files.ContainsKey($relative)){continue}
             $file=$state.Files[$relative];$file.Folder=$folder
-            $support=& $script:ApplicationSdModule {param($profile,$root)Get-OnionSetupSupport $profile $root} $profile $original
-            # Invalid configs have no publication authority even if the child
-            # replaces them with valid JSON. Only the frozen exact patch is allowed.
-            if($support.CanBuild) {
-                try {
-                    $extensions=@(& $script:ApplicationSdModule {param($profile,$root,$support)Get-OnionSetupExtensions $profile $root $support} $profile $original $support)
-                    $file.Extensions=[string[]]$extensions
-                    $file.Expected=Get-OnionConfigPatch -Original $file.Bytes -Extensions $extensions
-                }
-                catch{$file.Expected=$null}
+            # The original and its parents are already pinned. Validate the
+            # captured bytes without reopening or rereading the SD card.
+            # Invalid configs never receive authority for a replacement.
+            try {
+                $file.Extensions=[string[]]@(Get-OnionSetupExtensions $profile)
+                $file.Expected=Get-OnionConfigPatch -Original $file.Bytes -Extensions $file.Extensions
             }
+            catch{$file.Expected=$null}
         }
-        if($Progress){$null=& $Progress 'Checking config files' 'Ready for isolated setup checks.' $profiles.Count $profiles.Count 'systems'}
+        if($Progress){$null=& $Progress 'Reading config files' 'Config files read and checked.' $profiles.Count $profiles.Count 'systems'}
         $handle=[pscustomobject]@{Id=([Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'));StagedRoot=$state.StagedRoot}
         $state.Handle=$handle;$script:ApplicationSdStates[$handle.Id]=$state
         $registered=$true
@@ -259,7 +252,7 @@ function Complete-ApplicationSdSession {
         # write. Extra child files are never imported or executed.
         $checked=0
         foreach($file in $state.Files.Values) {
-            if($Progress){$null=& $Progress 'Verifying SD setup changes' $file.Relative $checked $state.Files.Count 'files'}
+            if($Progress){$null=& $Progress 'Checking selected changes' $file.Relative $checked $state.Files.Count 'files'}
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
             $target=Join-Path $state.StagedRoot $file.Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
             $lease=[OptiMiyoo.OnionPathLease]::Open($target,$state.StagedRoot,$false,$false,$false);$stagedLeases.Add($lease)
@@ -269,11 +262,11 @@ function Complete-ApplicationSdSession {
             $file.Changed=$true
             $checked++
         }
-        if(-not $cancelled -and $Progress){$null=& $Progress 'Verifying SD setup changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
+        if(-not $cancelled -and $Progress){$null=& $Progress 'Checking selected changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
         $configs=@($state.Files.Values | Where-Object {$_.Config} | Sort-Object Relative)
         for($index=0;-not $cancelled -and $index -lt $configs.Count;$index++) {
             $file=$configs[$index]
-            if($Progress){$null=& $Progress 'Updating SD file lists' $file.Folder $index $configs.Count 'systems'}
+            if($Progress){$null=& $Progress 'Saving config changes' $file.Folder $index $configs.Count 'systems'}
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
             $before=Get-ApplicationSdFileTypeState $file.Bytes $file.Extensions
             $after=Get-ApplicationSdFileTypeState $file.Expected $file.Extensions

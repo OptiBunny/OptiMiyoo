@@ -19,7 +19,7 @@ $ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $ScriptDir 'shared/compile_support.ps1')
 . (Join-Path $ScriptDir 'shared/output_safety.ps1')
 . (Join-Path $ScriptDir 'ui/display.ps1')
-$script:OnionCompleted=0;$script:OnionTotal=-1;$script:OnionStage='Checking system configs'
+$script:OnionCompleted=0;$script:OnionTotal=-1;$script:OnionStage='Preparing selected changes'
 $script:OnionErrors=New-Object 'System.Collections.Generic.List[string]'
 if ($PlainProgress) {$script:UiVT=$false}
 function Write-OnionText([string]$Text,[switch]$Failure) {
@@ -165,7 +165,7 @@ try {
     # The trusted host forwards its own mode so scripted runs retain plain text.
     if (-not $PlainProgress) {
         Initialize-Display;$display=$true
-        Show-OnionProgress -Stage 'Reading SD configuration' -Detail 'Checking installed system file lists.' -Force
+        Show-OnionProgress -Stage 'Preparing selected changes' -Detail 'Preparing your choices in temporary config copies.' -Force
     }
     $profiles=@(Get-OnionSetupProfiles $ScriptDir)
     $knownSystems=@{};$enabledSystems=@{};$disabledSystems=@{}
@@ -195,7 +195,7 @@ try {
         $profile=$profiles[$profileIndex]
         # The count advances only after a profile's config assessment and
         # preparation have returned.
-        $script:OnionCompleted=$profileIndex;$script:OnionStage='Checking system configs'
+        $script:OnionCompleted=$profileIndex;$script:OnionStage='Preparing selected changes'
         if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
         if ($SelectionOnly -and -not $enabledSystems.ContainsKey([string]$profile.Folder) -and -not $disabledSystems.ContainsKey([string]$profile.Folder)) {continue}
         $disable=$disabledSystems.ContainsKey([string]$profile.Folder)
@@ -210,8 +210,6 @@ try {
         $folder=$profile.Folder; $configPath=$support.ConfigPath
         $stream=$null; $configLease=$null; $backupLease=$null; $backupDirectoryLease=$null; $original=$null; $writeStarted=$false
         try {
-            $script:OnionStage='Preparing file types'
-            if (-not $PlainProgress) {Show-OnionProgress -Stage $script:OnionStage -Detail $profile.Name -Completed $script:OnionCompleted -Total $script:OnionTotal -Unit systems -Force}
             # Revalidate the config's complete JSON while its read lease is
             # held, independently of the earlier eligibility assessment.
             $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$false,$false)
@@ -260,10 +258,9 @@ try {
             }
         }
     }
-    $script:OnionCompleted=$profiles.Count;$script:OnionStage='Config checks finished'
+    $script:OnionCompleted=$profiles.Count;$script:OnionStage='Preparing selected changes'
     Write-OnionText ("$changed system setup change(s) prepared; $unverified config(s) could not be verified.")
     if ($exitCode -eq 0) {
-        $script:OnionStage='Verification pending'
         Write-OnionText 'Waiting for verification before updating the SD config file lists.'
     } else {
         $script:OnionStage='Setup could not finish'

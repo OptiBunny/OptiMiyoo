@@ -48,6 +48,7 @@ toggle it. **Enter / Esc** returns to the main menu; **Q** exits.
 
 Changed configs are backed up on the card before they are replaced, in a dated
 folder such as `Backups/OptiMiyoo_2026-10-31-10-30-00/Emu`.
+
 To restore a setting, use a **verified backup** listed in the results: copy its
 `config.json` into the matching system folder under the card's `Emu` folder.
 PlayStation's config folder is `Emu/PSX`; its games still go in `Roms/PS`.
@@ -103,7 +104,7 @@ Onion's game list. Games with one disc or tape side stay visible without a playl
 
 ### Systems and ROM folders
 
-| Menu | System | Onion folder |
+| # | System | Onion folder |
 | --- | --- | --- |
 | **1** | Amiga | `Roms/AMIGA` |
 | **2** | Commodore 64 | `Roms/COMMODORE` |

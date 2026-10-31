@@ -498,7 +498,9 @@ function Show-ApplicationSdResult {
 
 function Resolve-ApplicationSdInput([string]$Text) {
     $choice=[pscustomobject]@{Path=$null;Error=$null}
-    $candidate=$Text.Trim().Trim('"')
+    # Only surrounding ASCII spaces are prompt padding. Unicode whitespace can
+    # be part of a real folder name and must not select a different sibling.
+    $candidate=$Text.Trim(' ').Trim('"')
     if ([string]::IsNullOrWhiteSpace($candidate)) {
         $choice.Error='Enter your SD path, e.g. E:\, or press Esc to go back.';return $choice
     }
@@ -512,6 +514,13 @@ function Resolve-ApplicationSdInput([string]$Text) {
     }
     try {$choice.Path=[IO.Path]::GetFullPath($candidate)}
     catch {$choice.Error='Check the SD path, or press Esc to go back.'}
+    # Some Windows PowerShell runtimes trim Unicode whitespace in GetFullPath.
+    # Refuse that normalization rather than silently selecting a sibling folder.
+    $trailingWhitespace=[regex]::Match($candidate,'\s+$').Value
+    if($choice.Path -and $trailingWhitespace -and -not $choice.Path.EndsWith($trailingWhitespace,[StringComparison]::Ordinal)){
+        $choice.Path=$null
+        $choice.Error='Windows cannot preserve the end of this SD path. Use another path, or press Esc to go back.'
+    }
     return $choice
 }
 
@@ -527,7 +536,11 @@ function Read-ApplicationSdConsolePath {
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
-    if(-not $script:UiVT){[Console]::WriteLine($title);foreach($line in $rows){[Console]::WriteLine($line)};[Console]::Write($prompt+': ')}
+    $fallbackTextLength=0
+    if(-not $script:UiVT){
+        $visibleText=ConvertTo-SafeExternalLine $text;$fallbackTextLength=$visibleText.Length
+        [Console]::WriteLine($title);foreach($line in $rows){[Console]::WriteLine($line)};[Console]::Write($prompt+': '+$visibleText)
+    }
     try {while($true) {
         if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows;$dirty=$true}
         $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
@@ -536,7 +549,12 @@ function Read-ApplicationSdConsolePath {
             if($pose -cne $script:UiIdlePoseOverride){$script:UiIdlePoseOverride=$pose;$dirty=$true}
         }
         if(Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible){$dirty=$true}
-        if($script:UiVT -and $dirty){Draw-MenuPanel $title $rows $prompt $text $text.Length 'wait';$dirty=$false}
+        if($script:UiVT -and $dirty){
+            # Escape only the displayed copy; edits and path resolution use the
+            # original characters, including valid Unicode filename controls.
+            $visibleText=ConvertTo-SafeExternalLine $text
+            Draw-MenuPanel $title $rows $prompt $visibleText $visibleText.Length 'wait';$dirty=$false
+        }
         if([Console]::KeyAvailable) {
             $key=[Console]::ReadKey($true)
             if($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control)) {
@@ -551,13 +569,17 @@ function Read-ApplicationSdConsolePath {
             if($script:UiVT -and -not $layout.Fits){continue}
             if($key.Key -eq [ConsoleKey]::Enter){
                 if(-not $script:UiVT){[Console]::WriteLine()}
-                $selected=$text.Trim().Trim('"')
+                $selected=$text.Trim(' ').Trim('"')
                 return $selected
             }
-            if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
-            elseif(-not [char]::IsControl($key.KeyChar) -and $key.KeyChar -notmatch '[\u202a-\u202e\u2066-\u2069]' -and $text.Length -lt 32767){$text+=[string]$key.KeyChar}
+            if($key.Key -eq [ConsoleKey]::Backspace){if($text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}}
+            elseif($key.KeyChar -ne [char]0 -and $text.Length -lt 32767){$text+=[string]$key.KeyChar}
             $dirty=$true
-            if(-not $script:UiVT){[Console]::Write("`r"+$prompt+': '+$text+' ')}
+            if(-not $script:UiVT){
+                $visibleText=ConvertTo-SafeExternalLine $text
+                [Console]::Write("`r"+$prompt+': '+$visibleText+(' '*[Math]::Max(1,$fallbackTextLength-$visibleText.Length)))
+                $fallbackTextLength=$visibleText.Length
+            }
         }else{Wait-DisplayFrame 30}
     }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }

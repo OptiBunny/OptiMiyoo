@@ -38,12 +38,12 @@ function ConvertTo-ApplicationPromptPath([string]$Path) {
     })
 }
 
-function Get-ApplicationPromptModel {
+function New-ApplicationPromptPreparation {
     param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
           [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',
-          [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
+          [string[]]$ConflictPaths=@(),[switch]$Folder)
     $title=Get-ApplicationPromptTitle $Operation $System $Storage
     if($Kind -eq 'SourcePolicy' -and $Operation -eq 'SD'){throw 'SD setup cannot remove source media.'}
     if($Kind -ne 'Overwrite' -and $ConflictPaths.Count){throw 'Unexpected conflict paths in a policy prompt.'}
@@ -54,8 +54,7 @@ function Get-ApplicationPromptModel {
             $lines+=@(('Single games: '+$names[$SingleStorage]),('Playlist media: '+$names[$Storage]))
         }
         $lines+=@(Get-OptiOriginalsRows)
-        if($Invalid){$lines+='Choose 1, 2, B or Q.'}
-        return [pscustomobject]@{Title=($title+' / originals');Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
+        return [pscustomobject]@{Kind=$Kind;Title=($title+' / originals');Lines=$lines}
     }
     if($Operation -eq 'SD'){throw 'SD setup does not use output overwrite authority.'}
     if(-not $ConflictPaths.Count -or $ConflictPaths.Count -gt 20000){throw 'A bounded parent conflict list is required.'}
@@ -66,8 +65,21 @@ function Get-ApplicationPromptModel {
         $details.Add(('Output {0} of {1}:' -f ($index+1),$ConflictPaths.Count))
         do {$chunk=Get-TextPrefix $remaining 42;$details.Add('| '+$chunk);$remaining=$remaining.Substring($chunk.Length)} while($remaining.Length)
     }
+    # This copied display state belongs to one trusted prompt invocation. It is
+    # never accepted from a worker or exposed through a prompt/RPC parameter.
+    return [pscustomobject]@{Kind=$Kind;Title=($title+' / existing output');Details=$details.ToArray();Folder=[bool]$Folder}
+}
+
+function Get-ApplicationPreparedPromptModel {
+    param([Parameter(Mandatory=$true)]$Preparation,[int]$Page=0,[switch]$Invalid)
+    if($Preparation.Kind -eq 'SourcePolicy') {
+        $lines=@($Preparation.Lines)
+        if($Invalid){$lines+='Choose 1, 2, B or Q.'}
+        return [pscustomobject]@{Title=$Preparation.Title;Lines=$lines;Prompt='Choose originals [Enter = 1, Keep]';Page=0;Pages=1}
+    }
+    $details=$Preparation.Details
     $fixed=@('Skipped originals stay in SRC.')
-    if($Folder){$fixed+='Replacing a folder replaces ALL its contents.'}
+    if($Preparation.Folder){$fixed+='Replacing a folder replaces ALL its contents.'}
     $fixed+=@('')+@(Get-OverwriteChoiceRows)
     $prompt=Get-OverwriteInputPrompt
     if($Invalid){$fixed+='Choose one of the shown options.'}
@@ -82,7 +94,17 @@ function Get-ApplicationPromptModel {
         if($at -lt $details.Count){$lines+=$details[$at]}else{$lines+=''}
     }
     $lines+=('Page {0}/{1} | > Next | < Previous' -f ($page+1),$pages);$lines+=$fixed
-    return [pscustomobject]@{Title=($title+' / existing output');Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages}
+    return [pscustomobject]@{Title=$Preparation.Title;Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages}
+}
+
+function Get-ApplicationPromptModel {
+    param([Parameter(Mandatory=$true)][ValidateSet('SourcePolicy','Overwrite')][string]$Kind,
+          [Parameter(Mandatory=$true)][ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,[string]$System,
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',
+          [string[]]$ConflictPaths=@(),[switch]$Folder,[int]$Page=0,[switch]$Invalid)
+    $preparation=New-ApplicationPromptPreparation -Kind $Kind -Operation $Operation -System $System -Storage $Storage -SingleStorage $SingleStorage -ConflictPaths $ConflictPaths -Folder:$Folder
+    return Get-ApplicationPreparedPromptModel $preparation -Page $Page -Invalid:$Invalid
 }
 
 function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='',[string]$EscapeValue='B') {
@@ -156,7 +178,8 @@ function Invoke-ApplicationPolicyPrompt {
     # Validate before taking terminal ownership. Callers must resolve conflict
     # capabilities through the host broker; never pass child-supplied filenames.
     $parameters=@{Kind=$Kind;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;ConflictPaths=$ConflictPaths;Folder=$Folder}
-    $model=Get-ApplicationPromptModel @parameters
+    $preparation=New-ApplicationPromptPreparation @parameters
+    $model=Get-ApplicationPreparedPromptModel $preparation
     $paused=$false;$display=$false;$result=$null;$previousEffect=$script:DisplayEffect
     try {
         [void]$Session.PauseRelay()
@@ -166,7 +189,7 @@ function Invoke-ApplicationPolicyPrompt {
         Initialize-Display;$display=$true
         $invalid=$false;$page=0
         while($true) {
-            $model=Get-ApplicationPromptModel @parameters -Page $page -Invalid:$invalid
+            $model=Get-ApplicationPreparedPromptModel $preparation -Page $page -Invalid:$invalid
             $answer=Read-ApplicationConsoleChoice $model -Session $Session
             if($Kind -eq 'Overwrite' -and $answer -in '<','>') {
                 if($answer -eq '>'){$page=[Math]::Min($model.Pages-1,$model.Page+1)}else{$page=[Math]::Max(0,$model.Page-1)}

@@ -496,7 +496,10 @@ function Open-SourcePolicyReadLease([string]$Path,[string]$Root) {
     return [OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($Path)
 }
 
-function Open-VerifiedSourcePolicyFile([string]$Path,[string]$ExpectedHash,[string]$Root,[scriptblock]$Progress=$null,[switch]$ReadOnly,[scriptblock]$CancellationCheck=$null) {
+function Open-VerifiedSourcePolicyFile {
+    [CmdletBinding()]
+    param([string]$Path,[string]$ExpectedHash,[string]$Root,[scriptblock]$Progress=$null,[switch]$ReadOnly,[scriptblock]$CancellationCheck=$null)
+    $verificationCommand=$PSCmdlet
     if($CancellationCheck){& $CancellationCheck}
     Assert-SourcePolicyPath $Path $Root
     $lease=$null;$transferred=$false
@@ -504,16 +507,14 @@ function Open-VerifiedSourcePolicyFile([string]$Path,[string]$ExpectedHash,[stri
         if ($ReadOnly) {$lease=Open-SourcePolicyReadLease $Path $Root}
         else {$lease=Open-SourcePolicyRemovalLease $Path $Root}
         $progressAction=Get-SourcePolicyProgressAction $Progress 'Checking originals' $Path
-        $verifyAction=$progressAction
-        if($CancellationCheck){
-            # Cancellation is separate from best-effort rendering: it must escape
-            # the native verification callback and release the untransferred lease.
-            $callback={param([long]$done,[long]$total)
-                & $CancellationCheck
-                if($progressAction){$progressAction.Invoke($done,$total)}
-            }.GetNewClosure()
-            $verifyAction=[Action[long,long]]$callback
-        }
+        # Observe engine Stop even when the caller supplies no progress or
+        # cancellation callback, before transferring this native lease.
+        $callback={param([long]$done,[long]$total)
+            if($verificationCommand.Stopping){throw [Management.Automation.PipelineStoppedException]::new()}
+            if($CancellationCheck){& $CancellationCheck}
+            if($progressAction){$progressAction.Invoke($done,$total)}
+        }.GetNewClosure()
+        $verifyAction=[Action[long,long]]$callback
         $lease.Verify($ExpectedHash,$verifyAction)
         $transferred=$true
         return $lease

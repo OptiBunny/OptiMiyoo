@@ -1549,7 +1549,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'PlayStation: enabled .m3u playlists',
             'C64: enabled supported playlists and tape files',
             'Lynx: enabled .lyx games','',
-            'Original configs saved in Backups/OptiMiyoo_Backup_<ID>/Emu/',
+            'Original configs saved in Backups/OptiMiyoo_<ID>/Emu/',
             'Refresh Onion''s game list after setup.',
             'S does not change the other menus.','',
             'The results screen waits for you.',

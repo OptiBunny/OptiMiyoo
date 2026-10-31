@@ -247,7 +247,7 @@ function Complete-ApplicationSdSession {
     if($state.Completed){throw 'SD setup result has already been consumed.'}
     $state.Completed=$true
     $results=New-Object 'Collections.Generic.List[object]';$stagedLeases=New-Object 'Collections.Generic.List[object]'
-    $changed=0;$failed=0;$skipped=0;$cancelled=$false
+    $changed=0;$failed=0;$skipped=0;$cancelled=$false;$backupSetLease=$null
     try {
         # Freeze and validate the entire selected snapshot before any original
         # write. Extra child files are never imported or executed.
@@ -280,7 +280,10 @@ function Complete-ApplicationSdSession {
                 $writeLease=[OptiMiyoo.OnionPathLease]::Open($file.Path,$state.OriginalRoot,$false,$true,$false)
                 $current=Read-ApplicationSdBytes $writeLease.Stream 1048576
                 if([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($file.Bytes)){throw 'Original SD config changed during setup.'}
-                if(-not $state.BackupRoot){$state.BackupRoot=Join-Path (Join-Path $state.OriginalRoot 'Backups') ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))}
+                if(-not $state.BackupRoot){
+                    $backupSetLease=[OptiMiyoo.OnionPathLease]::CreateBackupSet($state.OriginalRoot)
+                    $state.BackupRoot=$backupSetLease.DirectoryPath
+                }
                 $backup=Join-Path (Join-Path $state.BackupRoot 'Emu') $file.Folder
                 Assert-PlainOnionPath $backup $state.OriginalRoot
                 $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$state.OriginalRoot)
@@ -319,7 +322,10 @@ function Complete-ApplicationSdSession {
         if(-not $cancelled){$cancelled=Test-ApplicationSdCancellation $ApplicationSession}
         if(-not $cancelled -and $Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}
         return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;Cancelled=$cancelled;BackupRoot=$state.BackupRoot;VerifiedBackups=$state.VerifiedBackups.ToArray();UnverifiedBackups=$state.UnverifiedBackups.ToArray();Results=$results.ToArray()}
-    }finally{foreach($lease in $stagedLeases){$lease.Dispose()}}
+    }finally{
+        try{foreach($lease in $stagedLeases){$lease.Dispose()}}
+        finally{if($backupSetLease){$backupSetLease.Dispose()}}
+    }
 }
 
 function Close-ApplicationSdSession {

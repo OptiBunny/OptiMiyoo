@@ -57,6 +57,7 @@ namespace OptiMiyoo {
         private readonly List<SafeFileHandle> directories = new List<SafeFileHandle>();
         private FileStream stream;
         public FileStream Stream { get { return stream; } }
+        public string DirectoryPath { get; private set; }
         private static string NativePath(string path) {
             string full = Path.GetFullPath(path);
             if (full.StartsWith(@"\\?\", StringComparison.Ordinal) || full.StartsWith(@"\\.\", StringComparison.Ordinal)) throw new IOException("Device paths are not supported.");
@@ -139,6 +140,32 @@ namespace OptiMiyoo {
                 return lease;
             } catch { lease.Dispose(); throw; }
         }
+        public static OnionPathLease CreateBackupSet(string root) {
+            string fullRoot = Path.GetFullPath(root);
+            string parent = Path.Combine(fullRoot, "Backups");
+            OnionPathLease lease = CreateDirectory(parent, fullRoot);
+            try {
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                string previous = null;
+                while (timer.ElapsedMilliseconds < 5000) {
+                    string id = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture);
+                    if (id == previous) { System.Threading.Thread.Sleep(50); continue; }
+                    previous = id;
+                    string candidate = Path.Combine(parent, "OptiMiyoo_" + id);
+                    // Reserve a new set atomically. A same-second collision must
+                    // never merge this run's originals into an existing backup.
+                    if (!CreateDirectoryW(NativePath(candidate), IntPtr.Zero)) {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error == 183) continue;
+                        throw new Win32Exception(error, "SD backup set could not be created safely.");
+                    }
+                    lease.directories.Add(OpenHandle(candidate, true, false, false));
+                    lease.DirectoryPath = candidate;
+                    return lease;
+                }
+                throw new IOException("A new timestamped SD backup folder could not be reserved. Retry SD setup.");
+            } catch { lease.Dispose(); throw; }
+        }
         public void Dispose() {
             try { if (stream != null) { stream.Dispose(); stream = null; } }
             finally {
@@ -159,7 +186,7 @@ function Write-OnionBytesVerified([IO.FileStream]$Stream,[byte[]]$Bytes,[string]
     if ([Convert]::ToBase64String($checked) -cne [Convert]::ToBase64String($Bytes)) {throw ($Description+' verification failed.')}
 }
 
-$rootLease=$null;$display=$false
+$rootLease=$null;$backupSetLease=$null;$backupRoot=$null;$display=$false
 try {
     # ConPTY looks interactive to the worker even when its parent is redirected.
     # The trusted host forwards its own mode so scripted runs retain plain text.
@@ -188,7 +215,6 @@ try {
     Initialize-OnionPathLease
     $rootLease=[OptiMiyoo.OnionPathLease]::Open($OnionRoot,$OnionRoot,$true,$false,$false)
     $script:OnionTotal=$profiles.Count
-    $backupRoot=Join-Path (Join-Path $OnionRoot 'Backups') ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
     $changed=0; $unverified=0
     Write-OnionText 'Checking installed system configs. Setup only changes managed file-list extensions in config.json.'
     for ($profileIndex=0;$profileIndex -lt $profiles.Count;$profileIndex++) {
@@ -237,6 +263,10 @@ try {
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $current=$memory.ToArray()} finally {$memory.Dispose()}
             if ([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($original)) {throw 'Config changed during setup. Run the check again.'}
+            if (-not $backupRoot) {
+                $backupSetLease=[OptiMiyoo.OnionPathLease]::CreateBackupSet($OnionRoot)
+                $backupRoot=$backupSetLease.DirectoryPath
+            }
             $backup=Join-Path (Join-Path $backupRoot 'Emu') $emuFolder
             Assert-PlainOnionPath $backup $OnionRoot
             $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$OnionRoot)
@@ -276,7 +306,10 @@ try {
     $exitCode=1;$script:OnionStage='Setup could not finish'
     Write-OnionText ('ERROR: '+$_.Exception.Message) -Failure
 } finally {
-    try {if ($rootLease) {$rootLease.Dispose()}}
+    try {
+        try {if ($backupSetLease) {$backupSetLease.Dispose()}}
+        finally {if ($rootLease) {$rootLease.Dispose()}}
+    }
     finally {
         try {if ($display) {Restore-Display}}
         finally {

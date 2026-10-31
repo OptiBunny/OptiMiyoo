@@ -390,8 +390,11 @@ function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions,[string[]]
         }
         $retained=$keptRaw.ToString();$decoded=$keptValue.ToString()
     }
-    $existing=@($decoded -split '\|')
-    $missing=@($Extensions | Where-Object {$_ -notin $existing})
+    # Match the exact extension tokens used by state detection and removal.
+    # Linguistic membership can ignore characters inside a different token.
+    $existing=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($extension in @($decoded -split '\|')){[void]$existing.Add($extension)}
+    $missing=@($Extensions | Where-Object {-not $existing.Contains($_)})
     if($missing.Count -eq 0 -and $retained -ceq $encoded){return ,$Original}
     $addition=$missing -join '|'
     if($addition.Length -gt 0 -and $decoded.Length -gt 0){$addition='|'+$addition}

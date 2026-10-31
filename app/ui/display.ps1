@@ -1540,6 +1540,33 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
     $profileData=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../systems.json') -Raw | ConvertFrom-Json
     $profiles=@($profileData)
     $byFolder=@{};foreach ($profile in $profiles) {$byFolder[$profile.Folder]=$profile}
+    $sdItems=@(foreach($id in 'AMIGA','COMMODORE','DOS','MSX','PS','SEGACD','VIC20','CPC','ZXS','LYNX') {
+        $state='On';$reason='';$available=$true
+        if($id -eq 'COMMODORE'){$state='Partial'}
+        if($id -in 'PS','CPC','ZXS','LYNX'){$state='Off'}
+        if($id -eq 'DOS'){$state='Unavailable';$available=$false;$reason='No config found'}
+        [pscustomobject]@{Id=$id;State=$state;Available=$available;Intent='Keep';Reason=$reason}
+    })
+    # Independent snapshots let Previous/Restart show the original scan again.
+    $sdSelected=@(foreach($item in $sdItems) {
+        $state=$item.State;$intent='Keep'
+        if($item.Id -in 'COMMODORE','PS'){$state='On';$intent='On'}
+        if($item.Id -eq 'MSX'){$state='Off';$intent='Off'}
+        [pscustomobject]@{Id=$item.Id;State=$state;Available=$item.Available;Intent=$intent;Reason=$item.Reason}
+    })
+    $sdBackup='Backups/OptiMiyoo_2026-10-31-10-30-00/Emu/'
+    $sdResult=[pscustomobject]@{
+        Changed=3;Skipped=6;Failed=0;Cancelled=$false
+        Results=@(foreach($item in @($sdSelected | Where-Object {$_.Available} | Sort-Object Id)) {
+            $folder=$item.Id;if($folder -eq 'PS'){$folder='PSX'}
+            $state='Kept';if($item.Intent -ne 'Keep'){$state='Updated'}
+            [pscustomobject]@{System=$folder;State=$state;FileTypeState=$item.State;Failed=$false}
+        })
+        VerifiedBackups=@(foreach($folder in 'COMMODORE','MSX','PSX') {
+            [pscustomobject]@{System=$folder;Path=($sdBackup+$folder+'/config.json')}
+        })
+        UnverifiedBackups=@()
+    }
     $scenes=@(
         @{Group='Tour';Mood='happy';Stage='Welcome to the demo';System='MENU';Menu=@(
             'A guided tour of every menu and the main features.',
@@ -1558,23 +1585,56 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             '1-9: make playlists; keep media formats.',
             'S: choose enabled file types on an Onion SD card.');Detail='Choose the task that matches your files.';Duration=10000},
         @{Group='Setup';Mood='idle';Stage='Onion SD setup';System='MENU';Menu=@(Get-OnionSetupPathRows);Duration=10000},
-        @{Group='Setup';Mood='scan';Stage='Checking an Onion SD card';System='SD SETUP';Game='Example SD';Detail='Read config file lists to find enabled and disabled types.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems checked';Duration=5000},
-        @{Group='Setup';Mood='idle';Stage='Choose SD file types';System='MENU';Menu=@((Get-OnionSetupChecklistModel -Items @(
-            foreach($id in 'AMIGA','COMMODORE','DOS','MSX','PS','SEGACD','VIC20','CPC','ZXS','LYNX') {
-                $state='On';if($id -eq 'COMMODORE'){$state='Partial'};if($id -in 'PS','LYNX'){$state='Off'}
-                [pscustomobject]@{Id=$id;State=$state;Available=$true;Intent='Keep';Reason=''}
-            })).Lines);Detail='Example scan. Toggle a number; 1 toggles all. Apply saves changes.';Duration=14000},
-        @{Group='Setup';Mood='check';Stage='Preparing selected changes';System='SD SETUP';Game='Example Emu/PSX/config.json';Detail='Prepare additions and removals in temporary config copies.';SdProgress=$true;Progress=$true;SdTotal=3;SdUnit='systems';Duration=4500},
-        @{Group='Setup';Mood='happy';Stage='SD setup results';System='MENU';Menu=@(
-            'Example: SD setup finished','Updated: 3    Skipped: 7    Failed: 0','',
-            'PlayStation: enabled .m3u playlists',
-            'C64: enabled supported playlists and tape files',
-            'Lynx: enabled .lyx games','',
-            'Original configs saved in Backups/OptiMiyoo_<ID>/Emu/',
-            'Refresh Onion''s game list after setup.',
-            'S does not change the other menus.','',
-            'The results screen waits for you.',
-            'Enter / Esc: main menu    Q: exit');Detail='Setup keeps games and installed emulator cores unchanged.';Duration=12000}
+        @{Group='Setup';Mood='scan';Stage='Reading config files';System='SD SETUP';Game='Example SD';Detail='Read each installed system''s file-type list. Nothing is saved yet.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems';Duration=5000},
+        @{Group='Setup';Mood='idle';Stage='Choose SD file types';System='MENU';SdItems=$sdItems;Menu=@((Get-OnionSetupChecklistModel -Items $sdItems).Lines);Detail='Example scan: C64 is partly enabled; DOS has no config.';Duration=14000},
+        @{Group='Setup';Mood='idle';Stage='Change the selection';System='MENU';Menu=@(
+            'Example choices for this card:','',
+            '3: turn C64 from Partly enabled to On.',
+            '5: turn MSX from On to Off.',
+            '6: turn PlayStation from Off to On.','',
+            'On adds the listed file types to the game list.',
+            'Off removes those file types, not the game files.','',
+            '1 turns all available systems On.',
+            'If they are all On, 1 turns them all Off.',
+            'Unavailable systems are left alone.');Detail='These are example key presses, not live SD controls.';Duration=12000},
+        @{Group='Setup';Mood='idle';Stage='Review SD changes';System='MENU';SdItems=$sdSelected;Menu=@((Get-OnionSetupChecklistModel -Items $sdSelected).Lines);Detail='C64 and PlayStation are now On; MSX is Off. Nothing is saved yet.';Duration=14000},
+        @{Group='Setup';Mood='idle';Stage='Apply or cancel SD changes';System='MENU';Menu=@(
+            'A / Enter: apply your selection.',
+            'Esc: leave without saving any of these choices.','',
+            'This example applies three changes:',
+            'C64: add the missing playlist and tape extensions.',
+            'MSX: remove the playlist extension.',
+            'PlayStation: add the playlist extension.','',
+            'Other extensions and game files stay unchanged.',
+            'S does not install or switch emulator cores.',
+            'S does not change the other menu defaults.');Detail='The following screens simulate applying the selection.';Duration=11000},
+        @{Group='Setup';Mood='check';Stage='Preparing selected changes';System='SD SETUP';Game='Example SD';Detail='Prepare the chosen file-type lists in temporary config copies.';SdProgress=$true;Progress=$true;SdTotal=10;SdUnit='systems';Duration=4500},
+        @{Group='Setup';Mood='check';Stage='Checking selected changes';System='SD SETUP';Game='Example SD';Detail='Verify the prepared configs contain only the selected changes.';SdProgress=$true;Progress=$true;SdTotal=9;SdUnit='files';Duration=4500},
+        @{Group='Setup';Mood='work';Stage='Saving config changes';System='SD SETUP';Game='Example SD';Detail='Back up each changed config, then save and verify its new settings.';SdProgress=$true;Progress=$true;SdTotal=9;SdUnit='systems';Duration=5000},
+        @{Group='Setup';Mood='happy';Stage='SD setup results';System='MENU';SdResult=$sdResult;Menu=@(
+            'SD setup finished.','Updated: 3 | Skipped: 6 | Failed: 0',
+            'Refresh Onion''s game list.','',
+            'AMIGA: Already on','COMMODORE: Enabled','CPC: Already off',
+            'LYNX: Already off','MSX: Disabled','PSX: Enabled',
+            'SEGACD: Already on','VIC20: Already on','ZXS: Already off','',
+            'Verified original config backups:')+@($sdResult.VerifiedBackups | ForEach-Object {$_.System+': '+$_.Path})+@('',
+            'Enter / Esc: Main menu | Q: Exit');Detail='Three configs changed. Six already matched; DOS had no config.';Duration=14000},
+        @{Group='Setup';Mood='idle';Stage='Read the SD results';System='MENU';Menu=@(
+            'Enabled / Disabled: the listed file types were changed.',
+            'Already on / Already off: no edit was needed.',
+            'Unchanged (partly enabled): a mixed setting was left alone.',
+            'DOS had no config, so it has no result row.','',
+            'A config is backed up before an update is saved.',
+            'The backup folder mirrors the SD card''s Emu folder.',
+            'Use the verified backups listed in the results to undo an edit.','',
+            'The results stay open until you leave them.',
+            'Refresh Onion''s game list on the Miyoo afterwards.');Detail='Enabling an extension does not add new emulator features.';Duration=12000},
+        @{Group='Setup';Mood='wait';Stage='Stopping SD setup';System='MENU';Menu=@(
+            'Before Apply: Esc cancels without saving.',
+            'After Apply: Ctrl+C asks setup to stop.','',
+            'Completed config updates and their verified backups remain.',
+            'Configs not yet changed keep their original settings.',
+            'Read the results to see which changes finished.');Detail='Cancellation does not undo changes already saved.';Duration=10000}
     )
     foreach ($converter in @(
         @{Group='C64';Name='Commodore 64';System='COMMODORE 64';Input='NIB/NBZ';Source='NIB';Target='G64';Game='Demo disk set';Engine='Converting NIB to G64'},
@@ -1607,7 +1667,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         )
     }
     $zxResult=@($scenes | Where-Object {$_.Group -eq 'ZX' -and $_.Stage -eq 'Conversion complete'})[0]
-    $zxResult.Menu+=@('Fuse cannot load playlists.')
+    $zxResult.Menu+=@('The default Fuse core cannot load playlists.')
     $scenes+=@{Group='Playlists';Mood='idle';Stage='Two separate storage choices';System='MENU';Menu=@(
         'First: single games',
         'Choose how games with one disc or tape side stay in DST.','',
@@ -1637,7 +1697,9 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
     $scenes+=@(
         @{Group='Playlists';Mood='idle';Stage='Name and group the discs';System='MENU';Menu=@(
             'Separate images:','Demo Adventure (Disc 1).chd','Demo Adventure (Disc 2).chd','',
-            'Inside a game folder: Disc 1.chd, Disc 2.chd',
+            'Inside a named game folder: Disc 1.chd, Disc 2.chd',
+            'There, (Disc 1).chd and [Disc 2].chd also work.',
+            'At SRC root, include the game name in each filename.',
             'C64 tapes: Game (Side A).tap, Game (Side B).tap','',
             'Keep a CUE with its tracks and any matching SBI files.',
             'Keep different versions of a disc in separate batches.');Detail='Numbered systems do not convert image formats.';Duration=12000},
@@ -1659,8 +1721,9 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         @{Group='Playlists';Mood='idle';Stage='Copy to the SD card';System='MENU';Menu=@(
             'Copy the contents of DST to the system''s ROM folder.',
             'Include .hidden when it exists.',
+            'Use S if supported file types are missing from the game list.',
             'Refresh Onion''s game list.','',
-            'Launch the playlist for a multi-disc game.',
+            'With a playlist-capable core, launch the game''s playlist.',
             'RetroArch: Quick Menu > Disk Control',
             'Eject, select the next image, then insert it.',
             'DOSBox Pure has its own disc-selection controls.',
@@ -1674,15 +1737,30 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         @{Group='Results';Mood='oops';Stage='Failed: a CUE track is missing';System='RESULT';Game='Demo Disc 2.cue';Detail='This set fails; its originals are kept. Other sets continue.';Total=3;Ok=1;Skipped=1;Failed=1;Status='Failed / originals kept'},
         @{Group='Results';Mood='oops';Stage='Batch complete';System='SUMMARY';Game='Demo collection';Detail='Three sets: one ready, one skipped, one failed.';Progress=$true;Complete=$true;Total=3;Ok=1;Skipped=1;Failed=1},
         @{Group='Results';Mood='idle';Stage='Review the batch results';System='MENU';Menu=@(
-            'Ready: 1    Skipped: 1    Failed: 1',
+            'Published: 1 | Skipped: 1 | Failed: 1','',
+            'Source policy: KEEP',
+            'Originals in this batch: 0 removed | 3 kept | 0 removal failures','',
             'Skipped and failed originals stay in SRC.',
             'Fix the missing CUE track before trying that set again.','',
+            'Report and Log paths point to saved batch details.','',
             'The results screen waits for you.','',
             'Enter: main menu',
             'Q: exit');Detail='These are sample results, not an actual batch.';Duration=10000},
         @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='New batch: check the restored track, then verify and save.';Total=1;Progress=$true;CompleteSet=$true},
         @{Group='Results';Mood='happy';Stage='Corrected set complete';System='RESULT';Game='Demo Disc 2.cue';Detail='The new batch has one verified output.';Progress=$true;Complete=$true;Total=1;Ok=1},
-        @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Add matching files to SRC, then start a new batch.';Status='No matching inputs';Total=0}
+        @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Add matching files to SRC, then start a new batch.';Status='No matching inputs';Total=0},
+        @{Group='Results';Mood='wait';Stage='Stopping a batch';System='MENU';Menu=@(
+            'Ctrl+C asks the current batch to stop.','',
+            'Outputs already saved and verified stay in DST.',
+            'The current output set may finish saving before stopping.',
+            'Later sets are not published.',
+            'Originals not yet removed stay in SRC.','',
+            'With Remove selected, a connected group of source files',
+            'may finish removal before stopping.',
+            'Completed removals are not undone.','',
+            'If results are shown, review the output and original counts.',
+            'Cancellation exits the run instead of starting another batch.',
+            'Stopping does not hide errors already found.');Detail='Real errors are still reported if a batch is cancelled.';Duration=12000}
     )
     $poseNames=@{idle='At rest';blink='Blink';scanleft='Look left';scanright='Look right';work='Working';check='Checking';happy='Happy';happyturn='Happy turn';oops='Oops';wait='Waiting'}
     foreach ($pose in 'idle','blink','scanleft','scanright','work','check','happy','happyturn','oops','wait') {

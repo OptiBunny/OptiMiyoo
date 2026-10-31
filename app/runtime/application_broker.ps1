@@ -565,6 +565,14 @@ function Start-ApplicationBrokerBatch {
           [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
           [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',[scriptblock]$CancellationCheck=$null)
+    if(-not $CancellationCheck){
+        # Direct startup has no live console session yet. Observe engine Stop
+        # inside native verification, before transferring the file lease.
+        $batchCommand=$PSCmdlet
+        $CancellationCheck={
+            if($batchCommand.Stopping){throw [Management.Automation.PipelineStoppedException]::new()}
+        }.GetNewClosure()
+    }
     if($CancellationCheck){& $CancellationCheck}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}

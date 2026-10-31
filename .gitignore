@@ -24,3 +24,4 @@ __pycache__/
 
 # SD configuration backups can contain local settings.
 OptiMiyoo_Backup_*/
+OptiMiyoo_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/

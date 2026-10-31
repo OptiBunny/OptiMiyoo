@@ -77,7 +77,7 @@ function Initialize-Display {
             $Host.UI.RawUI.ForegroundColor='White'
             try {
                 if (-not $restore.ContainsKey('Title')) {$restore.Title=$Host.UI.RawUI.WindowTitle}
-                $Host.UI.RawUI.WindowTitle='OptiMiyoo v'+$script:AppVersion+' // DISK LINK'
+                $Host.UI.RawUI.WindowTitle='OptiMiyoo'
             } catch {}
             if ($script:UiInteractive) {
                 if ($env:OS -eq 'Windows_NT') {

@@ -106,7 +106,14 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
     if (-not $Archive) {
         $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
         $found=[regex]::Matches($title,$pattern)
-        if ($found.Count -eq 1) {$tag=$found[0].Groups[1].Value.ToLowerInvariant();$title=[regex]::Replace([regex]::Replace($title,$pattern,''),'\s{2,}',' ').Trim()}
+        if ($found.Count -eq 1) {
+            $tag=$found[0].Groups[1].Value.ToLowerInvariant();$title=[regex]::Replace([regex]::Replace($title,$pattern,''),'\s{2,}',' ').Trim()
+            if (-not $title -and $parent) {
+                # A label-only filename uses its game folder, just like Disc 1.
+                $usedFolderTitle=$true
+                $title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+            }
+        }
         elseif ($found.Count -gt 1) {$errorText='Multiple disk labels in one filename; separate the input sets.'}
         elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
             $usedFolderTitle=$true

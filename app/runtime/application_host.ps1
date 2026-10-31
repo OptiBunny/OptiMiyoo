@@ -212,6 +212,7 @@ exit $code
 
 function Write-ApplicationVerifiedReport([string]$Root,$Result) {
     $lease=$null;$csvStream=$null;$logStream=$null;$csvWriter=$null;$logWriter=$null
+    $reportError=$null
     $stamp=(Get-Date -Format 'yyyyMMdd_HHmmss_fff')+'_'+[Guid]::NewGuid().ToString('N').Substring(0,8)
     $csv=Join-Path $Root ('OptiMiyoo_'+$stamp+'.csv');$log=Join-Path $Root ('OptiMiyoo_'+$stamp+'.log')
     try {
@@ -233,12 +234,17 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
         $csvWriter.Flush();$csvStream.Flush($true);$logWriter.Flush();$logStream.Flush($true)
         Write-Host ('Report: '+(ConvertTo-SafeExternalLine $csv))
         Write-Host ('Log: '+(ConvertTo-SafeExternalLine $log))
-    } catch {Write-Warning ('Could not save the verified result report: '+(ConvertTo-SafeExternalLine $_.Exception.Message))}
+    } catch {$reportError=$_.Exception.Message}
     finally {
-        if ($csvWriter) {$csvWriter.Dispose()} elseif ($csvStream) {$csvStream.Dispose()}
-        if ($logWriter) {$logWriter.Dispose()} elseif ($logStream) {$logStream.Dispose()}
-        if ($lease) {$lease.Dispose()}
+        # A failed writer flush must not leave another report or the root locked.
+        # Close raw streams too, including when writer construction did not finish.
+        foreach ($resource in @($csvWriter,$csvStream,$logWriter,$logStream,$lease)) {
+            if ($resource) {
+                try {$resource.Dispose()} catch {if ($null -eq $reportError) {$reportError=$_.Exception.Message}}
+            }
+        }
     }
+    if ($null -ne $reportError) {Write-Warning ('Could not save the verified result report: '+(ConvertTo-SafeExternalLine $reportError))}
 }
 
 function Initialize-ApplicationVersion([string]$ApplicationRoot) {

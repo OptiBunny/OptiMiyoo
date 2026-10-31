@@ -888,7 +888,47 @@ function Format-MenuPrompt([string]$Text,[int]$Width,[switch]$HasFooter) {
     return Fit-Text $Text $Width
 }
 
+function Get-MioPreviewControlRows([string]$Prompt,[string[]]$ControlRows,[bool[]]$ControlDefaults,[int]$Width) {
+    $state=($Prompt -split ' \| ',2)[0]
+    $action='Pause';if($state -eq 'PAUSED'){$action='Resume'}
+    $effect='On';if($Prompt -match '\[E\] CRT: Off'){$effect='Off'}
+    $rows=New-Object 'Collections.Generic.List[object]'
+    # A simulated screen can show its own navigation. Label it separately so
+    # the playback keys below are the only controls that appear to be live.
+    for($i=0;$i -lt $ControlRows.Count;$i++) {
+        $isDefault=($i -lt $ControlDefaults.Count -and $ControlDefaults[$i])
+        foreach($line in @(Get-MenuRows @('Example: '+$ControlRows[$i].Trim()) $Width)) {
+            $rows.Add([pscustomobject]@{Left='';Right=$line;IsDefault=$isDefault;Kind='DemoExample'})
+        }
+    }
+    $transport='[Space] '+$action+'   [P] Previous   [N] Next'
+    $utility='[R] Restart   [E] CRT: '+$effect+'   [B/Esc] Back   [Q] Quit'
+    if($Width -lt 60) {
+        $transport='[Space] '+$action+' [P] Prev [N] Next'
+        $utility='[R] Restart [E] CRT [B] Back [Q] Quit'
+    }
+    if($state -eq 'RESIZE'){$transport='Enlarge window to continue'}
+    $rows.Add([pscustomobject]@{Left=$state;Right=$transport;IsDefault=$false;Kind=('Demo'+$state)})
+    $rows.Add([pscustomobject]@{Left='';Right=$utility;IsDefault=$false;Kind='DemoKeys'})
+    return $rows.ToArray()
+}
+
+function Format-MioPreviewKeys([string]$Text) {
+    $start=0
+    $result=[Text.StringBuilder]::new()
+    foreach($key in [regex]::Matches($Text,'\[[^\]]+\]')) {
+        [void]$result.Append((Color-Text $Text.Substring($start,$key.Index-$start) '218;224;244'))
+        [void]$result.Append((Color-Text $key.Value '107;216;245'))
+        $start=$key.Index+$key.Length
+    }
+    [void]$result.Append((Color-Text $Text.Substring($start) '218;224;244'))
+    return $result.ToString()
+}
+
 function Get-MenuFooterLayout([string]$Prompt,[string[]]$ControlRows,[bool[]]$ControlDefaults,[int]$Width) {
+    if($Prompt -match '^(PLAYING|PAUSED|RESIZE) \| \[Space\] ') {
+        return Get-MioPreviewControlRows $Prompt $ControlRows $ControlDefaults $Width
+    }
     $controls=New-Object 'Collections.Generic.List[string]'
     $defaults=New-Object 'Collections.Generic.List[bool]'
     for($i=0;$i -lt $ControlRows.Count;$i++) {
@@ -919,6 +959,16 @@ function Get-MenuFooterLayout([string]$Prompt,[string[]]$ControlRows,[bool[]]$Co
 function Format-MenuFooterRows([object[]]$Rows,[int]$Width,[string]$PromptColor='249;202;226') {
     foreach($row in $Rows) {
         $gap=[Math]::Max(0,$Width-(Get-TextWidth $row.Left)-(Get-TextWidth $row.Right))
+        if($row.PSObject.Properties['Kind']) {
+            if($row.Kind -eq 'DemoExample') {
+                $rgb='174;181;205';if($row.IsDefault){$rgb='255;221;144'}
+                (' '*$gap)+(Color-Text $row.Right $rgb)
+            } else {
+                $rgb='144;225;173';if($row.Kind -in @('DemoPAUSED','DemoRESIZE')){$rgb='255;221;144'}
+                (Color-Text $row.Left $rgb)+(' '*$gap)+(Format-MioPreviewKeys $row.Right)
+            }
+            continue
+        }
         $rgb='107;216;245';if($row.IsDefault){$rgb='255;221;144'}
         (Color-Text $row.Left $PromptColor)+(' '*$gap)+(Color-Text $row.Right $rgb)
     }
@@ -962,7 +1012,7 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[s
         $body=[Math]::Max(12,$wrapped.Count)
         # Keep the full logo when a footer needs the space normally reserved
         # for Mio. A shorter, full-width body can fit both text and controls.
-        $footerNeedsSpace=($controls.Count -gt 0 -and $script:UiHeight -ge 26 -and $script:UiHeight -lt $body+$fullOverhead)
+        $footerNeedsSpace=(($controls.Count -gt 0 -or $footer.Count -gt 1) -and $script:UiHeight -ge 26 -and $script:UiHeight -lt $body+$fullOverhead)
         if ($script:UiHeight -ge $body+$overhead -and -not $footerNeedsSpace) {
             $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-28);BodyRows=$body;RequiredHeight=($body+$overhead);ShowMio=$true;Fits=$true}
         }
@@ -1205,6 +1255,19 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
     $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Fit-Text ('OptiMiyoo / '+$Title) $width))
     $lines.Add('  '+(Fit-Text ('Enlarge window: '+$RequiredHeight+' rows, '+$RequiredWidth+'+ columns.') $width))
+    if($script:UiDemo) {
+        # An undersized viewport pauses the tour automatically. Keep the way
+        # back visible even when there is no room for the full playback strip.
+        if($width -ge 40 -and $script:UiHeight -ge 9) {
+            foreach($row in @(Format-MenuFooterRows @(Get-MenuFooterLayout (Get-MioPreviewControls $true $true) @() @() $width) $width)) {
+                $lines.Add('  '+$row)
+            }
+        } else {
+            foreach($row in @('[B/Esc] Back','[Q] Quit')) {$lines.Add('  '+(Format-MioPreviewKeys (Format-RightAlignedText $row $width)))}
+        }
+        Write-TerminalPanel $lines.ToArray()
+        return
+    }
     $lines.Add('  '+(Format-MenuPrompt $Detail $width))
     if ($Caret -ge 0) {
         $fieldWidth=$width-8; $inputView=Get-InputViewport $InputText $Caret $fieldWidth
@@ -1700,9 +1763,9 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'A guided tour of every menu and the main features.',
             'All games, progress and results here are examples.',
             'No game files or SD cards are read or changed.','',
-            'Space: pause / resume','N / Right / Enter: next',
-            'P / Left: previous','R: restart this section',
-            'E: turn the CRT effect on or off','B / Esc: return to demo selection','Q: exit OptiMiyoo');Detail='Use the controls below at any time.';Duration=13000},
+            'Use the controls below to explore at your own pace.',
+            'Left / Right also move between screens.',
+            'Enter goes forward; Esc goes back to demo selection.');Detail='Use the controls below at any time.';Duration=13000},
         @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';MenuPage='Main';Lesson='S prepares an SD card. C/Z convert. Numbers create playlists.';Duration=12000},
         @{Group='Tour';Mood='idle';Stage='Choose a demo';System='MENU';MenuPage='Demo';Lesson='Each section can also be watched on its own.';Duration=10000},
         @{Group='Tour';Mood='idle';Stage='Start with SRC and DST';System='MENU';Menu=@(
@@ -2016,19 +2079,11 @@ function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
     return [pscustomobject]@{Rows=@($pages[$index].Rows)+$controls;DefaultRows=@($pages[$index].DefaultRows)+@($parts.ControlDefaults);Index=$index;Count=$count;Anchor=$pages[$index].Anchor}
 }
 function Get-MioPreviewControls([bool]$Paused,[bool]$NeedsSpace=$false) {
-    $action='pause';if ($Paused) {$action='resume'}
-    $prefix='DEMO';if ($Paused) {$prefix='PAUSED'}
-    if ($NeedsSpace) {$prefix='RESIZE PAUSED'}
+    $action='Pause';if ($Paused) {$action='Resume'}
+    $prefix='PLAYING';if ($Paused) {$prefix='PAUSED'}
+    if ($NeedsSpace) {$prefix='RESIZE'}
     $state='On';if ($script:DisplayEffect -eq 'Smooth') {$state='Off'}
-    $width=[Math]::Max(1,$script:UiWidth-10)
-    $options=@(
-        ($prefix+' | Space '+$action+' | N/P step | R restart | E CRT '+$state+' | B back / Esc | Q quit'),
-        ($prefix+' | Space '+$action+' | N/P | R | E CRT | B back / Esc | Q quit'),
-        ('Space '+$action+' | N/P | B back / Esc | Q quit'),
-        ('Space '+$action+' | B back / Esc | Q quit')
-    )
-    foreach ($option in $options) {if ($option.Length -le $width) {return $option}}
-    return 'B/Esc back Q quit'
+    return $prefix+' | [Space] '+$action+' | [P] Previous | [N] Next | [R] Restart | [E] CRT: '+$state+' | [B/Esc] Back | [Q] Quit'
 }
 function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[double]$Duration) {
     # Progress has its own scene clock: low-CPU mode freezes decorative effects,

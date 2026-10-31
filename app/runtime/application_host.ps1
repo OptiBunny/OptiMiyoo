@@ -304,7 +304,6 @@ function Invoke-ApplicationHost {
                     $null=& $sdProgress 'Preparing SD setup' 'Starting a protected setup session.' 0 -1 systems
                 } else {Write-Host '';Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
                 $session=[OptiMiyoo.ApplicationSession]::Create()
-                $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
                 if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {
                     $sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress
                     if($originalArguments.SelectionOnly) {
@@ -321,6 +320,12 @@ function Invoke-ApplicationHost {
                         }
                     }
                 }
+                # SD cancellation needs only the snapshot/checklist. Build the
+                # isolated updater after Apply, once there is work to prepare.
+                if ($Entry -eq 'SD') {
+                    $null=& $sdProgress 'Preparing selected changes' 'Preparing the protected config updater.' 0 -1 systems
+                }
+                $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
                 $receipts=New-ApplicationReceiptStore
                 if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
                     $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath

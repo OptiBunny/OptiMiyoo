@@ -200,24 +200,30 @@ try {
         if ($SelectionOnly -and -not $enabledSystems.ContainsKey([string]$profile.Folder) -and -not $disabledSystems.ContainsKey([string]$profile.Folder)) {continue}
         $disable=$disabledSystems.ContainsKey([string]$profile.Folder)
         $action='enable';if ($disable) {$action='disable'}
-        $support=Get-OnionSetupSupport $profile $OnionRoot
-        if ($support.Status -eq 'NOT INSTALLED') {continue}
-        if (-not $support.CanBuild) {
-            $unverified++
-            Write-OnionText ($support.Status+': '+$profile.Folder+' - '+$support.Reason)
-            continue
-        }
-        $folder=$profile.Folder; $configPath=$support.ConfigPath
+        $folder=$profile.Folder; $emuFolder=$folder
+        if ($profile.EmuFolder) {$emuFolder=$profile.EmuFolder}
         $stream=$null; $configLease=$null; $backupLease=$null; $backupDirectoryLease=$null; $original=$null; $writeStarted=$false
         try {
-            # Revalidate the config's complete JSON while its read lease is
-            # held, independently of the earlier eligibility assessment.
-            $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$false,$false)
-            $stream=$configLease.Stream
-            if ($stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
-            $memory=New-Object IO.MemoryStream
-            try {$stream.CopyTo($memory); $original=$memory.ToArray()} finally {$memory.Dispose()}
-            $extensions=@(Get-OnionSetupExtensions $profile)
+            # Assess and prepare from one bounded capture, keeping the same
+            # native read lease until a real edit requires a writable handle.
+            try {
+                $extensions=@(Get-OnionSetupExtensions $profile)
+                $configPath=Join-Path (Join-Path (Join-Path $OnionRoot 'Emu') $emuFolder) 'config.json'
+                Assert-PlainOnionPath $configPath $OnionRoot
+                if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {continue}
+                $configLease=[OptiMiyoo.OnionPathLease]::Open($configPath,$OnionRoot,$false,$false,$false)
+                $stream=$configLease.Stream
+                if ($stream.Length -gt 1MB) {throw 'config.json exceeds the supported 1 MiB text limit.'}
+                $memory=New-Object IO.MemoryStream
+                try {$stream.CopyTo($memory); $original=$memory.ToArray()} finally {$memory.Dispose()}
+                $null=Get-OnionConfigExtensionData $original
+            } catch {
+                # Invalid or inaccessible configs remain unverified skips.
+                # Patch/write failures below still fail the whole preparation.
+                $unverified++
+                Write-OnionText ('UNVERIFIED: '+$folder+' - '+$_.Exception.Message)
+                continue
+            }
             if ($disable) {$newBytes=Get-OnionConfigPatch -Original $original -Extensions @() -RemoveExtensions $extensions}
             else {$newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions}
             if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+($extensions -join ', ')+' already '+$action+'d'); continue}
@@ -231,7 +237,7 @@ try {
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $current=$memory.ToArray()} finally {$memory.Dispose()}
             if ([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($original)) {throw 'Config changed during setup. Run the check again.'}
-            $backup=Join-Path $backupRoot $support.EmuFolder
+            $backup=Join-Path $backupRoot $emuFolder
             Assert-PlainOnionPath $backup $OnionRoot
             $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$OnionRoot)
             $backupLease=[OptiMiyoo.OnionPathLease]::Open((Join-Path $backup 'config.json'),$OnionRoot,$false,$true,$true)

@@ -156,7 +156,8 @@ function Set-ApplicationSdSelection {
             $extensions=@(Get-OnionSetupExtensions $profile)
             switch -CaseSensitive ($item.Intent) {
                 'Keep' {$patch=$file.Bytes}
-                'On' {$patch=Get-OnionConfigPatch -Original $file.Bytes -Extensions $extensions;$enable.Add($id)}
+                # Startup already computed the exact On patch from the pinned bytes.
+                'On' {$patch=$file.Expected;$enable.Add($id)}
                 'Off' {$patch=Get-OnionConfigPatch -Original $file.Bytes -Extensions @() -RemoveExtensions $extensions;$disable.Add($id)}
             }
         }
@@ -268,9 +269,11 @@ function Complete-ApplicationSdSession {
             $file=$configs[$index]
             if($Progress){$null=& $Progress 'Saving config changes' $file.Folder $index $configs.Count 'systems'}
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
-            $before=Get-ApplicationSdFileTypeState $file.Bytes $file.Extensions
+            if(-not $file.Changed){
+                $before=Get-ApplicationSdFileTypeState $file.Bytes $file.Extensions
+                $skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept';FileTypeState=$before;Failed=$false});continue
+            }
             $after=Get-ApplicationSdFileTypeState $file.Expected $file.Extensions
-            if(-not $file.Changed){$skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept';FileTypeState=$before;Failed=$false});continue}
             $writeLease=$null;$backupLease=$null;$backupDirectoryLease=$null;$writeStarted=$false;$restored=$false
             try {
                 $file.Lease.Dispose();$file.Lease=$null

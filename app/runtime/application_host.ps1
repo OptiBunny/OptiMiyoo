@@ -373,7 +373,14 @@ function Invoke-ApplicationHost {
                 }
                 if ($Entry -eq 'SD' -and $exitCode -eq 0) {
                     # Drain no more worker output over the parent's verified update panel.
-                    if ($session.Interactive) {[void]$session.PauseRelay()}
+                    if ($session.Interactive) {
+                        try {[void]$session.PauseRelayForPublication()}
+                        catch {
+                            if ($session.Failure) {throw $session.Failure}
+                            if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
+                            throw
+                        }
+                    }
                     $script:DisplayEffect=$displayEffect
                     Initialize-Display;$progressDisplay=$true
                     $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress -ApplicationSession $session

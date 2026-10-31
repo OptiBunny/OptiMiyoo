@@ -389,7 +389,18 @@ namespace OptiMiyoo {
   }
   private void WriteTerminal(string text){if(!Interactive){Console.Write(text);return;}uint written;Check(WriteConsole(GetStdHandle(-11),text,(uint)text.Length,out written,IntPtr.Zero)&&written==text.Length,"Write host terminal");}
   private void InputLoop(){try{InputRecord[] records=new InputRecord[1];while(!stopping&&!HasExited){lock(consoleGate){if(!paused){uint available;Check(GetNumberOfConsoleInputEvents(GetStdHandle(-10),out available),"Inspect host input");if(available>0){uint count;Check(ReadConsoleInput(GetStdHandle(-10),records,1,out count),"Read host input");InputRecord record=records[0];if(count==1&&record.EventType==1&&record.KeyDown!=0){ConsoleKeyInfo key=new ConsoleKeyInfo(record.Character,(ConsoleKey)record.VirtualKey,(record.Control&0x10)!=0,(record.Control&3)!=0,(record.Control&12)!=0);if(key.Key==ConsoleKey.C&&(key.Modifiers&ConsoleModifiers.Control)!=0){Stop();break;}string text=KeyText(key);for(int repeat=0;repeat<Math.Max(1,Math.Min(32,(int)record.Repeat));repeat++)SendKeys(text);}}short w=(short)Math.Max(20,Math.Min(300,Console.WindowWidth)),h=(short)Math.Max(6,Math.Min(120,Console.WindowHeight));if(w!=columns||h!=rows){int hr=ResizePseudoConsole(pseudo,new COORD{X=w,Y=h});if(hr<0)Marshal.ThrowExceptionForHR(hr);columns=w;rows=h;}}}Thread.Sleep(8);}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard/resize channel failed.");}}
-  public void PauseRelay(){if(!Interactive||!started||disposed||stopping)throw new InvalidOperationException("An interactive application relay is required for a trusted prompt.");lock(consoleGate){paused=true;ClearQueuedInput();pauseStarted=Stopwatch.GetTimestamp();filter.Reset();WriteTerminal("\x1b[0m\x1b[r\x1b[?25h\x1b[2J\x1b[H");Console.Title="OptiMiyoo";Check(FlushConsoleInputBuffer(GetStdHandle(-10)),"Flush pre-prompt input");}}
+  public void PauseRelay(){PauseRelayCore(false);}
+  public void PauseRelayForPublication(){PauseRelayCore(true);}
+  private void PauseRelayCore(bool publication){
+   if(!Interactive||!started||disposed||stopping)throw new InvalidOperationException("An interactive application relay is required for a trusted prompt.");
+   lock(consoleGate){
+    if(publication&&!HasExited)throw new InvalidOperationException("Publication requires a finished application worker.");
+    paused=true;ClearQueuedInput();pauseStarted=Stopwatch.GetTimestamp();filter.Reset();WriteTerminal("\x1b[0m\x1b[r\x1b[?25h\x1b[2J\x1b[H");Console.Title="OptiMiyoo";
+    // After worker exit, the parent must still observe queued cancellation
+    // before publication. Trusted prompts retain their usual input flush.
+    if(!publication)Check(FlushConsoleInputBuffer(GetStdHandle(-10)),"Flush pre-prompt input");
+   }
+  }
   public void ResumeRelay(){
    if(!paused||disposed||stopping)throw new InvalidOperationException("The application relay cannot resume.");Stopwatch watch=Stopwatch.StartNew();
    while(watch.ElapsedMilliseconds<2000){lock(consoleGate){double quiet=(Stopwatch.GetTimestamp()-lastOutput)*1000.0/Stopwatch.Frequency;if(lastDrained>=pauseStarted&&Interlocked.CompareExchange(ref outputInFlight,0,0)==0&&quiet>=50){Check(FlushConsoleInputBuffer(GetStdHandle(-10)),"Flush prompt input");filter.Reset();WriteTerminal("\x1b[0m\x1b[r\x1b[2J\x1b[H");Console.Title="OptiMiyoo";paused=false;return;}}Thread.Sleep(10);}

@@ -19,6 +19,7 @@ function Get-ConversionRenameMap([object[]]$Items) {
 }
 
 function Resolve-ConversionDescriptorTarget([string]$DescriptorName,[string]$Reference) {
+    $DescriptorName=$DescriptorName.Replace('\','/')
     $reference=$Reference.Replace('\','/')
     # Only references within this archive can name one of its converted members.
     # Normalize its virtual namespace without opening paths or following aliases.
@@ -138,7 +139,7 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
                     if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {continue}
                     $name=$entry.FullName.Replace('\','/');Assert-ConversionRelativeName $name
                     $convert=[IO.Path]::GetExtension($name) -in $extensions
-                    $entries.Add([pscustomobject]@{InputPath=$file.FullName;Type='Zip';EntryName=$name;InputName=$name;Name=$name;Converter='';Media=$convert;Error='';SourceBlockReason=''})
+                    $entries.Add([pscustomobject]@{InputPath=$file.FullName;Type='Zip';EntryName=$entry.FullName;InputName=$name;Name=$name;Converter='';Media=$convert;Error='';SourceBlockReason=''})
                 }
             } else {
                 if ($file.Length -gt 512MB) {throw 'Disk image exceeds the 512 MiB input limit.'}

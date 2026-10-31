@@ -369,7 +369,10 @@ function Get-ConversionCueDependencies([string]$Path,[string]$Root,$DescriptorCa
 }
 
 function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$DescriptorCache=$null,[switch]$ProtectedPublication,[object[]]$CapturedTargets=@(),[object[]]$PrivateTargets=@()) {
-    $root=[IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\','/');$names=@{};$directories=@{}
+    $root=[IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\','/')
+    # Ownership follows Windows filename identity, not linguistic equivalence.
+    $names=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $directories=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     if($DescriptorCache -and ($DescriptorCache.Closed -or -not $DescriptorCache.Root.Equals($root,[StringComparison]::OrdinalIgnoreCase))){throw 'Conversion descriptor cache is closed or belongs to another output root.'}
     $targets=[pscustomobject]@{Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
     $checkedWrites=@($Group.Plan.DataWrites);$referenceTargets=$checkedWrites;$privatePaths=$null
@@ -383,8 +386,8 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
     }
     foreach($write in $referenceTargets){[void]$targets.Exact.Add($write.Destination);if($write.Folder){[void]$targets.Folders.Add($write.Destination)}}
     foreach ($item in $Group.Items) {
-        $names[$item.Name]=$true;$parent=([string][IO.Path]::GetDirectoryName($item.Name)).Replace('\','/')
-        while ($parent) {$directories[$parent]=$true;$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')}
+        [void]$names.Add($item.Name);$parent=([string][IO.Path]::GetDirectoryName($item.Name)).Replace('\','/')
+        while ($parent) {[void]$directories.Add($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')}
     }
     foreach ($write in $checkedWrites) {
         if (-not $write.Destination.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)) {throw 'Conversion output leaves DST.'}
@@ -399,17 +402,17 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
                 if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'Existing output contains a link; it was kept.'}
                 $name=$entry.FullName.Substring($prefix.Length).Replace('\','/')
                 if ($entry.PSIsContainer) {
-                    if (-not $directories.ContainsKey($name)) {throw 'Existing game folder contains unrelated folders; it was kept.'}
+                    if (-not $directories.Contains($name)) {throw 'Existing game folder contains unrelated folders; it was kept.'}
                     $pending.Push($entry.FullName)
-                } elseif (-not $names.ContainsKey($name)) {throw 'Existing game folder contains unrelated files; it was kept.'}
+                } elseif (-not $names.Contains($name)) {throw 'Existing game folder contains unrelated files; it was kept.'}
             }}
         } elseif (-not $Group.Plan.LooseFiles) {
             $archive=Open-ArchiveWithBudget -Path $existing.FullName -Profile Floppy
             try {foreach ($entry in $archive.Entries) {
                 $name=$entry.FullName.Replace('\','/')
                 if ($name.EndsWith('/')) {
-                    if (-not $directories.ContainsKey($name.TrimEnd('/'))) {throw 'Existing ZIP contains unrelated folders; it was kept.'}
-                } elseif (-not $names.ContainsKey($name)) {throw 'Existing ZIP contains unrelated files; it was kept.'}
+                    if (-not $directories.Contains($name.TrimEnd('/'))) {throw 'Existing ZIP contains unrelated folders; it was kept.'}
+                } elseif (-not $names.Contains($name)) {throw 'Existing ZIP contains unrelated files; it was kept.'}
             }} finally {$archive.Dispose()}
         }
     }

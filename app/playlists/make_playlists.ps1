@@ -1514,9 +1514,11 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames,$Referenc
                     $expected+=[IO.Path]::ChangeExtension($name,'.sbi')
                 }
                 if ($oldArchive) {
+                    $expectedNameSet=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+                    foreach ($name in $expected) {[void]$expectedNameSet.Add($name)}
                     foreach ($entry in $oldArchive.Entries) {
                         if ($entry.FullName.EndsWith('/')) {continue}
-                        if ([IO.Path]::GetExtension($entry.FullName) -in '.m3u','.m3u8' -or $entry.FullName -notin $expected) {
+                        if ([IO.Path]::GetExtension($entry.FullName) -in '.m3u','.m3u8' -or -not $expectedNameSet.Contains($entry.FullName)) {
                             throw 'Existing hidden ZIP may contain another game or unowned files. Use a clean/separate DST; output left alone.'
                         }
                     }

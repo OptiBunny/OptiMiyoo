@@ -2119,11 +2119,11 @@ function Show-MioPreview([string]$Section='Tour') {
         $script:UiPreparing=$false; $script:UiDemoNeedsSpace=$false
         $animateDemo=$script:UiVT
         $script:Clock=[Diagnostics.Stopwatch]::StartNew()
-        $index=0; $paused=$false; $requestedPage=0
+        $index=0; $paused=$false; $requestedPage=0; $requestedAnchor=-1L
         while ($index -ge 0 -and $index -lt $scenes.Count) {
             $scene=$scenes[$index]; $script:UiDemoScene=$index+1
             $pageIndex=0; if ($scene.Menu) {$pageIndex=$requestedPage}
-            $requestedPage=0; $pageCount=1; $pageAnchor=-1L
+            $requestedPage=0; $pageCount=1; $pageAnchor=$requestedAnchor; $pendingAnchor=$requestedAnchor; $requestedAnchor=-1L
             $script:UiDemoPage=1; $script:UiDemoPageCount=1
             $script:UiSystem='DEMO / '+$scene.System; $script:UiGame=$scene.Game
             $script:UiStage=$scene.Stage; $script:UiDetail=$scene.Detail
@@ -2159,8 +2159,8 @@ function Show-MioPreview([string]$Section='Tour') {
                     $script:UiDemoNeedsSpace=$false
                     if ($scene.Menu) {
                         $rows=@(Get-MioPreviewMenuRows $scene)
-                        $anchor=-1L; if ($resized) {$anchor=$pageAnchor}
-                        $page=Get-MioPreviewMenuPage $rows $pageIndex $anchor
+                        $anchor=$pendingAnchor; if ($anchor -lt 0 -and $resized) {$anchor=$pageAnchor}
+                        $page=Get-MioPreviewMenuPage $rows $pageIndex $anchor; $pendingAnchor=-1L
                         $pageIndex=$page.Index; $pageCount=$page.Count
                         # Compact views have no page anchor. Retain the last valid
                         # reading position until the paged layout returns.
@@ -2187,11 +2187,11 @@ function Show-MioPreview([string]$Section='Tour') {
                         $script:UiDemoPaused=$paused; $dirty=$true
                     }
                     elseif ($key.Key -in [ConsoleKey]::N,[ConsoleKey]::RightArrow,[ConsoleKey]::Enter) {
-                        if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1}
+                        if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1; $requestedAnchor=(Get-MioPreviewMenuPage $rows $requestedPage).Anchor}
                         break
                     }
                     elseif ($key.Key -in [ConsoleKey]::P,[ConsoleKey]::LeftArrow) {
-                        if ($pageIndex -gt 0) {$next=$index; $requestedPage=$pageIndex-1}
+                        if ($pageIndex -gt 0) {$next=$index; $requestedPage=$pageIndex-1; $requestedAnchor=(Get-MioPreviewMenuPage $rows $requestedPage).Anchor}
                         else {$next=[Math]::Max(0,$index-1); if ($index -gt 0) {$requestedPage=-1}}
                         break
                     }
@@ -2201,11 +2201,17 @@ function Show-MioPreview([string]$Section='Tour') {
                 # Ignored keys and effect toggles must not postpone expiry
                 # while a held key keeps the input queue nonempty.
                 if (-not $paused -and -not $resizePaused -and $timer.ElapsedMilliseconds -ge $duration) {
-                    if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1}
+                    if ($pageIndex+1 -lt $pageCount) {
+                        $next=$index; $requestedPage=$pageIndex+1
+                        # A queued effect toggle can change menu text before expiry.
+                        $requestedAnchor=(Get-MioPreviewMenuPage @(Get-MioPreviewMenuRows $scene) $requestedPage).Anchor
+                    }
                     break
                 }
                 if (-not $keyAvailable) {Wait-DisplayFrame 30}
             }
+            # Carry the next page's text position across the geometry refresh
+            # in Clear-DisplayPanel; numeric pages change when rows rewrap.
             Clear-DisplayPanel; $index=$next
         }
     } finally {

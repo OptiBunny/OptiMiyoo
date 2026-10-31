@@ -6,7 +6,7 @@ $env:PSModuleAnalysisCachePath='NUL'
 function New-OptiTerminalCommand([string]$EntryPoint,[string]$Root,[switch]$NoAnimation) {
     # Keep paths out of Windows Terminal's semicolon-delimited command syntax.
     $application=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $EntryPoint))
-    $command="`$env:PSModuleAnalysisCachePath='NUL'; Set-Location -LiteralPath '"+$application.Replace("'","''")+"'; & '"+$EntryPoint.Replace("'","''")+"' -DisplayEffect CRT"
+    $command="`$ErrorActionPreference='Stop'; `$env:PSModuleAnalysisCachePath='NUL'; Set-Location -LiteralPath '"+$application.Replace("'","''")+"'; & '"+$EntryPoint.Replace("'","''")+"' -DisplayEffect CRT"
     if ($NoAnimation) {$command+=' -NoAnimation'}
     if ($Root) {$command+=" -Root '"+$Root.Replace("'","''")+"'"}
     $command+='; exit $LASTEXITCODE'

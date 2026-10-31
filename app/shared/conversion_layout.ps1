@@ -189,7 +189,13 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
             $source=$identity.Stem;if ($archive) {$source=$relative}
             $groups[$key]=[pscustomobject]@{Source=$source;SourceKey=$key;Stem=$identity.Stem;Items=(New-Object 'System.Collections.Generic.List[object]');Paths=@();Error=$identity.Error;SourceBlockReason='';Plan=$null}
         }
-        $group=$groups[$key];$item | Add-Member NoteProperty DiskTag $identity.Tag -Force
+        $group=$groups[$key]
+        # PowerShell's linguistic keys can equate distinct Unicode path names.
+        # Retain every input in the failed group so none can be published or removed.
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals($group.SourceKey,$key)) {
+            $group.Error='Ambiguous game names: rename inputs that differ only in Unicode spelling.'
+        }
+        $item | Add-Member NoteProperty DiskTag $identity.Tag -Force
         if ($item.PSObject.Properties['Error'] -and $item.Error) {$group.Error=$item.Error}
         if ($item.SourceBlockReason) {$group.SourceBlockReason=$item.SourceBlockReason}
         $group.Items.Add($item)

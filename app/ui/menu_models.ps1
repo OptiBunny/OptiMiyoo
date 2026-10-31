@@ -5,14 +5,12 @@ if (-not (Get-Command Get-PlaylistSupport -ErrorAction SilentlyContinue)) {
 }
 
 function Get-OnionSetupPathRows {
-    @('Choose your Onion SD card''s drive or folder below.',
-      'Next, review the file types enabled for each system.','',
-      'On: show files of the listed types in Onion''s game list.',
-      'Off: hide those files from the list without deleting them.','',
-      'Choose Apply to save your changes.',
-      'Original config files are backed up on your SD card first.',
-      'Other file types stay as they are.',
-      'Emulator cores are not installed or changed.','',
+    @('Enable playlists, C64 tapes and Atari Lynx .lyx files',
+      'in Onion''s game list.','',
+      'Choose your SD card''s drive or main folder below.',
+      'OptiMiyoo reads its config files to see what is enabled.','',
+      'Next, review the settings and choose what to enable or disable.',
+      'Nothing is saved until you choose Apply.','',
       'Esc. Back to main menu')
 }
 

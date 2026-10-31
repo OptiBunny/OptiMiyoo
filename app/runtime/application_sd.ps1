@@ -42,13 +42,32 @@ function Read-ApplicationSdBytes([IO.Stream]$Stream,[long]$Maximum) {
 }
 
 function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[switch]$Config) {
-    if($State.Files.ContainsKey($Relative)){return}
+    if($State.Files.ContainsKey($Relative) -or $State.UnavailableConfigs.ContainsKey($Relative)){return}
     # Callers supply only fixed installed profile config paths;
     # no path is taken from the child.
     $path=Join-Path $State.OriginalRoot $Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
     if(-not (Test-Path -LiteralPath $path)){return}
-    $lease=[OptiMiyoo.OnionPathLease]::Open($path,$State.OriginalRoot,$false,$false,$false);$output=$null
+    $lease=$null;$output=$null;$unavailable=''
     try {
+        try{$lease=[OptiMiyoo.OnionPathLease]::Open($path,$State.OriginalRoot,$false,$false,$false)}
+        catch {
+            $cause=$_.Exception
+            while($cause -and $cause -isnot [ComponentModel.Win32Exception]){$cause=$cause.InnerException}
+            if(-not $Config -or -not $cause -or $cause.NativeErrorCode -notin 32,33){throw}
+            # Only an original sharing conflict is skippable. A linked or
+            # wrong-type path must still fail even when it is also in use.
+            Assert-PlainOnionPath $path $State.OriginalRoot
+            $item=Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SD config is linked or has the wrong type; left unchanged.'}
+            $unavailable='Config is in use'
+        }
+        if($lease -and $Config -and $lease.Stream.Length -gt $Maximum){$unavailable='Config exceeds 1 MiB'}
+        if($unavailable){
+            # These records carry no captured bytes, lease or patch authority.
+            # They exist only for the checklist and accurate skipped receipts.
+            $State.UnavailableConfigs[$Relative]=[pscustomobject]@{Relative=$Relative;Folder=$Relative.Split('/')[1];Reason=$unavailable}
+            return
+        }
         if($lease.Stream.Length -gt $Maximum -or $State.TotalBytes+$lease.Stream.Length -gt 2147483648){throw 'SD snapshot exceeds its supported inspection size.'}
         $target=Join-Path $State.StagedRoot $Relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
@@ -71,7 +90,7 @@ function New-ApplicationSdSession {
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'
     if($originalPrefix.Equals($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $originalPrefix.StartsWith($workPrefix,[StringComparison]::OrdinalIgnoreCase) -or $workPrefix.StartsWith($originalPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'SD staging must be separate from the selected SD root.'}
     if(-not [IO.Directory]::Exists($work)){throw 'SD staging must already exist and belong to the application session.'}
-    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};TotalBytes=0L;Closed=$false;Completed=$false;SelectionFinalized=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
+    $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};UnavailableConfigs=@{};TotalBytes=0L;Closed=$false;Completed=$false;SelectionFinalized=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
     $workLease=$null;$registered=$false
     try {
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
@@ -128,6 +147,8 @@ function Get-ApplicationSdSelection {
                 $status=Get-OnionSetupExtensionState -Original $file.Bytes -Extensions @(Get-OnionSetupExtensions $profile)
                 $available=$true;$reason=''
             }
+        } elseif($state.UnavailableConfigs.ContainsKey($relative)) {
+            $reason=$state.UnavailableConfigs[$relative].Reason
         }
         # Return display-only copies. Callers never receive bytes or leases.
         [pscustomobject]@{Id=[string]$profile.Folder;State=$status;Available=$available;Intent='Keep';Reason=$reason}
@@ -272,11 +293,14 @@ function Complete-ApplicationSdSession {
             $checked++
         }
         if(-not $cancelled -and $Progress){$null=& $Progress 'Checking selected changes' 'All staged files verified.' $checked $state.Files.Count 'files'}
-        $configs=@($state.Files.Values | Where-Object {$_.Config} | Sort-Object Relative)
+        $configs=@((@($state.Files.Values | Where-Object {$_.Config})+@($state.UnavailableConfigs.Values)) | Sort-Object Relative)
         for($index=0;-not $cancelled -and $index -lt $configs.Count;$index++) {
             $file=$configs[$index]
             if($Progress){$null=& $Progress 'Saving config changes' $file.Folder $index $configs.Count 'systems'}
             if(Test-ApplicationSdCancellation $ApplicationSession){$cancelled=$true;break}
+            if($state.UnavailableConfigs.ContainsKey($file.Relative)){
+                $skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept';FileTypeState='Unknown';Failed=$false;Reason=$file.Reason});continue
+            }
             if(-not $file.Changed){
                 $before=Get-ApplicationSdFileTypeState $file.Bytes $file.Extensions
                 $skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept';FileTypeState=$before;Failed=$false});continue

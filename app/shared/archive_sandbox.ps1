@@ -310,6 +310,12 @@ function Invoke-ArchiveSandbox {
             $destinationLease=Open-SourcePolicyDirectoryLease $destinationParent
             Assert-PlainOutputParents $Destination $destinationParent
         }
+        # Native hashing must observe engine Stop before another payload read.
+        $archiveCommand=$PSCmdlet
+        $payloadHashCallback={param([long]$done,[long]$total)
+            if($archiveCommand.Stopping){throw [Management.Automation.PipelineStoppedException]::new()}
+        }.GetNewClosure()
+        $payloadHashAction=[Action[long,long]]$payloadHashCallback
         $manifest=@{};$readBytes=$null
         foreach($index in $rows.Keys) {
             $entry=$Archive.Entries[$index];$row=$rows[$index]
@@ -318,7 +324,7 @@ function Invoke-ArchiveSandbox {
                 $payloadLease=Open-SourcePolicyReadLease $payload $job.WorkPath
                 try {
                     if($payloadLease.Stream.Length -ne $row.Length) {throw 'Archive sandbox payload length mismatch.'}
-                    $actual=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($payloadLease.Stream,$null)
+                    $actual=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($payloadLease.Stream,$payloadHashAction)
                     if($actual -cne $row.Hash) {throw 'Archive sandbox payload hash mismatch.'}
                     $payloadLease.Stream.Position=0
                     if($inspection.Contains($index)) {

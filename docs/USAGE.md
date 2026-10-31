@@ -5,14 +5,15 @@
 Open **`OptiMiyoo.bat`**. Type a number or letter, then press **Enter**.
 Press **Enter** on its own to use the default shown at the prompt.
 
-In selection menus, **B** goes back and **Q** exits. In SD setup (**S**), use
-**Esc** to go back. Demo playback and overwrite prompts have their own controls below.
+In selection menus, **B** goes back and **Q** exits. While choosing SD settings
+(**S**), use **Esc** to go back without saving. Demo playback and overwrite
+prompts have their own controls below.
 
 To create playlists or convert files, [prepare your games](#prepare-a-batch) first.
 
 | Choose | Task |
 | --- | --- |
-| **S** | [Enable supported file types in Onion's game list](#sd-setup). |
+| **S** | [Choose file types in Onion's game list](#sd-setup). |
 | **C** | [C64 converter](#c64-converter-c). |
 | **Z** | [ZX Spectrum converter](#zx-converter-z). |
 | **1–9** | [Create playlists](#create-playlists) without converting disk images. |
@@ -22,14 +23,34 @@ To create playlists or convert files, [prepare your games](#prepare-a-batch) fir
 
 ## SD setup
 
-Connect your Onion SD card to the PC, choose **S**, and enter its drive, such as `E:\`.
-Setup checks the installed emulator cores and enables the file types they support
-in Onion's game list: playlists, C64 tape files, and Atari Lynx `.lyx` files.
-It updates file-type settings without installing or switching cores. Unsupported
-or unverified cores are skipped. **Esc** goes back.
+Use **S** to enable or disable playlists, C64 tape files, and Atari Lynx `.lyx`
+files in Onion's game list.
 
-To undo setup, copy each saved `config.json` from `Backups/OptiMiyoo_<ID>/Emu` on the
-SD card to its matching folder under `Emu`.
+Connect the card to your PC, choose **S**, and enter its drive or main folder,
+such as `E:\`. OptiMiyoo reads the existing `Emu` config files and shows which
+of the listed file types are **On**, **Off**, or **Partly enabled**. A system is
+**Unavailable** if its config is missing, unreadable, or invalid.
+
+- Type **1**, then **Enter**, to turn all available systems on, or off if they are
+  already all on.
+- Type a system's number, then **Enter**, to toggle that system.
+- Choose **A / Enter** to **Apply**, or **Esc** to leave without saving.
+
+**On** adds the listed file types; **Off** removes them from the game list.
+Other file types and the game files themselves stay unchanged. Setup does not
+check, install, or switch emulator cores. The menu's support notes explain which
+cores can use the enabled files.
+
+After Apply, the results show what was enabled or disabled. **Already on/off**
+means no change was needed. A partly enabled system stays as it was unless you
+toggle it. **Enter / Esc** returns to the main menu; **Q** exits.
+[Refresh Onion's game list](#copy-to-your-miyoo) after making changes.
+
+Changed configs are backed up on the card before they are replaced, in a dated
+folder such as `Backups/OptiMiyoo_2026-10-31-10-30-00/Emu`.
+To restore a setting, use a **verified backup** listed in the results: copy its
+`config.json` into the matching system folder under the card's `Emu` folder.
+PlayStation's config folder is `Emu/PSX`; its games still go in `Roms/PS`.
 
 ## Convert disk images
 
@@ -64,7 +85,8 @@ Game (Disc 1).chd
 Game (Disc 2).chd
 ```
 
-Inside a game folder, `Disc 1.chd` and `Disc 2.chd` also work.
+Inside a folder named after the game, `Disc 1.chd` and `Disc 2.chd` also work,
+as do names such as `(Disc 1).chd` and `(Disc 2).chd`.
 For C64 tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 
 Keep CUE files, their tracks, and any matching SBI files together. A CUE file
@@ -101,20 +123,25 @@ ZX conversion remains available through **Z**.
 ## Demo
 
 Choose **D**, then **1** for a walkthrough of the menus, animations, and main
-features. Options **2–7** show individual topics. The demo does not change game
-or SD files.
+features. To see one topic, choose **2** for C64, **3** for ZX, **4** for playlists,
+**5** for results and overwrite choices, **6** for the bunny animations, or
+**7** for core support and SD setup. All progress and results are examples;
+the demo does not change game or SD files.
 
 During playback, keys work without Enter:
 
 - **Space:** pause/resume.
 - **Left / P:** previous screen. **Right / N / Enter:** next screen.
-- **R:** restart the demo.
+- **R:** restart the selected demo section.
 - **E:** turn the CRT effect on or off.
 - **B / Q / Esc:** return to demo selection.
 
 ## CRT effect and exit
 
 At the main menu, choose **E** to turn the CRT effect on or off, or **Q** to exit.
+
+To turn off decorative animations as well, start the app from a terminal in its
+folder with `.\OptiMiyoo.bat -NoAnimation`.
 
 ## Prepare a batch
 
@@ -127,12 +154,12 @@ folder onto `OptiMiyoo.bat`.
 
 ## Choose how to save
 
-Numbered systems have two storage menus:
+C and Z ask once for the converted files. Numbered systems ask separately for:
 
 1. **Single games:** how to save games with one disc or tape side, which stay visible.
 2. **Playlist media:** how to store multi-disc or multi-side game files in `.hidden`.
 
-Both menus offer:
+The storage choices are:
 
 | Choice | How the game files are saved |
 | --- | --- |
@@ -147,9 +174,13 @@ The default depends on the system and the menu:
 | --- | --- |
 | **Single games** | **4: Loose files** for PlayStation, Sega CD and Amstrad CPC; **2: ZIPs** for the others. |
 | **Playlist media** | **2: ZIPs** for Amiga, C64 and VIC-20; **3: Folders** for the others. |
-| **C / Z converted files** | **2: ZIPs**. Each converter asks once, using the same four choices above. |
+| **C / Z converted files** | **2: ZIPs**. |
 
-For playlist media, ZIPs work with the standard Amiga, C64 and VIC-20 cores.
+For playlist media, **Auto** preserves the input layout inside `.hidden`.
+The playlist file itself always stays outside `.hidden`, whichever storage
+choice you make.
+
+Playlists can point inside ZIPs with the standard Amiga, C64 and VIC-20 cores.
 For the other systems, choose **Folders** or **Loose files** and check that
 your core supports playlists. Follow the support notes shown beside ZIP choices.
 For conversion, **Auto** keeps the input layout while converting the files.
@@ -161,7 +192,8 @@ to start processing.
 
 Choose **1: Keep originals** (default) to leave the files in `SRC`.
 **2: Remove originals** deletes processed files from `SRC` after checking the
-finished files in `DST`. Skipped or failed files are kept.
+finished files in `DST`. Skipped or failed files are kept, as are files still
+needed by a playlist that remains in `SRC`.
 
 If a file or folder with the same name already exists in `DST`:
 
@@ -175,8 +207,16 @@ If a file or folder with the same name already exists in `DST`:
 Overwriting a folder replaces all of its contents.
 Use **> / <** to see more of the file list. Here, **B / Q** also skips this output.
 
-When processing finishes, review the results. At that prompt, **Enter** returns
-to the main menu and **Q** exits.
+### Results and stopping a batch
+
+When processing finishes, review the saved, skipped, and failed outputs, along
+with the counts of originals removed or kept. The CSV report and log are saved
+beside `SRC` and `DST`; their paths appear in the results. **Enter** returns to
+the main menu and **Q** exits.
+
+Press **Ctrl+C** during processing to request a stop. The current operation may
+finish before the app closes. Stopping does not undo completed work: saved
+outputs stay saved, and originals already removed are not restored.
 
 ## Copy to your Miyoo
 
@@ -189,7 +229,9 @@ On the Miyoo, open **Games**, press **SELECT**, and choose
 
 ### Swap discs
 
-Launch the playlist. When the game asks for another disc, open
+With a core that supports playlists, launch the playlist. When the game asks for
+another disc, open
 **RetroArch → Quick Menu → [Disc Control](https://docs.libretro.com/guides/disc-swapping/)**.
 Eject the current disc, select the next image, and insert it.
-C64 tapes may also need keyboard/load commands.
+C64 tapes may also need keyboard/load commands. DOSBox Pure also provides
+[image selection in its start menu](https://docs.libretro.com/library/dosbox_pure/#mount-disc-images-from-inside-zip-files).

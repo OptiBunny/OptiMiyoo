@@ -322,7 +322,7 @@ function Get-OnionExtensionValueSpan([string]$Raw) {
                 if($punctuation -cne ','){throw 'SD config contains an invalid JSON object separator.'}
                 $frame.State='Key';continue
             }
-            if($stack.Count -eq 1 -and $frame.Key -ceq 'extlist') {
+            if($stack.Count -eq 1 -and [StringComparer]::Ordinal.Equals($frame.Key,'extlist')) {
                 if(-not $string.Success){throw 'SD config extension list must be a JSON string.'}
                 $target=[pscustomobject]@{Start=($string.Index+1);End=($string.Index+$string.Length-1);Value=[regex]::Unescape($string.Value.Substring(1,$string.Length-2))}
             }
@@ -350,7 +350,7 @@ function Get-OnionConfigExtensionData([byte[]]$Original) {
     $utf8=New-Object Text.UTF8Encoding($false,$true);$raw=$utf8.GetString($Original)
     $value=Get-OnionExtensionValueSpan $raw
     $config=$raw.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if($config.extlist -isnot [string] -or $config.extlist -cne $value.Value){throw 'SD config does not have a valid top-level extension list.'}
+    if($config.extlist -isnot [string] -or -not [StringComparer]::Ordinal.Equals($config.extlist,$value.Value)){throw 'SD config does not have a valid top-level extension list.'}
     return [pscustomobject]@{Raw=$raw;Span=$value;Encoding=$utf8}
 }
 
@@ -406,7 +406,7 @@ function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions,[string[]]
         throw $sizeFailure
     }
     $checked=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if($checked.extlist -cne ($decoded+$addition)){throw 'SD extension-list patch did not change the intended top-level value.'}
+    if(-not [StringComparer]::Ordinal.Equals($checked.extlist,($decoded+$addition))){throw 'SD extension-list patch did not change the intended top-level value.'}
     return ,$patched
 }
 

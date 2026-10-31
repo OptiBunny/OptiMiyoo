@@ -439,7 +439,7 @@ function Get-ApplicationSdResultModel {
     # Without an initialized viewport, retain the conservative minimum panel.
     $textWidth=44;$pageSize=11
     if($script:UiColumns -ge 44 -and $script:UiHeight -gt 0) {
-        $whole=Get-MenuLayout -Rows $sourceLines
+        $whole=Get-MenuLayout -Rows $sourceLines -Prompt $prompt
         if($whole.Fits) {
             return [pscustomobject]@{Title=$title;Lines=@($whole.Rows);Prompt=$prompt;Page=0;Pages=1;Anchor=0L;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
         }
@@ -555,7 +555,7 @@ function Read-ApplicationSdConsolePath {
     if ($ErrorMessage) {$prompt=$ErrorMessage;$promptColor='255;190;96'}
     $rows=@(Get-OnionSetupPathRows);$text=$InitialText;$dirty=$true
     [void](Update-DisplaySize)
-    $layout=Get-MenuLayout -Rows $rows
+    $layout=Get-MenuLayout -Rows $rows -Prompt $prompt
     $sparseIdle=(-not $NoAnimation -and $script:UiVT)
     $idleWatch=$null;$script:UiIdlePoseOverride=$null
     Reset-MioSparseCrt
@@ -563,12 +563,11 @@ function Read-ApplicationSdConsolePath {
     $fallbackTextLength=0
     if(-not $script:UiVT){
         $visibleText=ConvertTo-SafeExternalLine $text;$fallbackTextLength=$visibleText.Length
-        $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
-        $plainPrompt=(Format-MenuPrompt $prompt $width -HasFooter:($layout.ControlRows.Count -gt 0)).TrimEnd()
-        [Console]::WriteLine($title);foreach($line in @(Get-PlainMenuRows $rows)){[Console]::WriteLine($line)};[Console]::Write($plainPrompt+': '+$visibleText)
+        $plainPrompt='INPUT >'
+        [Console]::WriteLine($title);foreach($line in @(Get-PlainMenuRows $rows -Prompt $prompt)){[Console]::WriteLine($line)};[Console]::Write($plainPrompt+' '+$visibleText)
     }
     try {while($true) {
-        if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows;$dirty=$true}
+        if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows -Prompt $prompt;$dirty=$true}
         $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
         if($sparseIdle) {
             $pose=Get-MioIdlePose $idleWatch.Elapsed.TotalMilliseconds ($text.Length -gt 0 -or -not $bunnyVisible)
@@ -590,7 +589,7 @@ function Read-ApplicationSdConsolePath {
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return $null}
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
-                $layout=Get-MenuLayout -Rows $rows;$dirty=$true;continue
+                $layout=Get-MenuLayout -Rows $rows -Prompt $prompt;$dirty=$true;continue
             }
             if($script:UiVT -and -not $layout.Fits){
                 $command=[char]::ToUpperInvariant($key.KeyChar)
@@ -607,7 +606,7 @@ function Read-ApplicationSdConsolePath {
             $dirty=$true
             if(-not $script:UiVT){
                 $visibleText=ConvertTo-SafeExternalLine $text
-                [Console]::Write("`r"+$plainPrompt+': '+$visibleText+(' '*[Math]::Max(1,$fallbackTextLength-$visibleText.Length)))
+                [Console]::Write("`r"+$plainPrompt+' '+$visibleText+(' '*[Math]::Max(1,$fallbackTextLength-$visibleText.Length)))
                 $fallbackTextLength=$visibleText.Length
             }
         }else{Wait-DisplayFrame 30}

@@ -117,20 +117,19 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
     $initialResize=Update-DisplaySize
-    $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows
+    $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt
     if(-not $script:UiVT) {
         [Console]::WriteLine($Model.Title)
-        foreach($line in @(Get-PlainMenuRows $Model.Lines)){[Console]::WriteLine($line)}
-        $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
-        $plainPrompt=(Format-MenuPrompt $Model.Prompt $width -HasFooter:($layout.ControlRows.Count -gt 0)).TrimEnd()
-        [Console]::Write($plainPrompt+': ')
+        foreach($line in @(Get-PlainMenuRows $Model.Lines -Prompt $Model.Prompt)){[Console]::WriteLine($line)}
+        $plainPrompt='INPUT >'
+        [Console]::Write($plainPrompt+' ')
     }
     try {
     if($ReturnOnResize -and $script:UiVT -and $initialResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
     while($true) {
         if(Update-DisplaySize -Throttled){
             if($ReturnOnResize -and $script:UiVT){return [pscustomobject]@{Resized=$true;InputText=$text}}
-            $layout=Get-MenuLayout -Rows $rows;$dirty=$true
+            $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt;$dirty=$true
         }
         $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
         if($sparseIdle) {
@@ -153,7 +152,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
             if($key.Key -eq [ConsoleKey]::Escape){return $EscapeValue}
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
                 if($ReturnOnResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
-                $layout=Get-MenuLayout -Rows $rows;$dirty=$true;continue
+                $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt;$dirty=$true;continue
             }
             if(-not $fits) {
                 if([char]::ToUpperInvariant($key.KeyChar) -eq 'Q'){return 'Q'}
@@ -164,7 +163,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
             if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
             elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
             $caret=$text.Length;$dirty=$true
-            if(-not $script:UiVT){[Console]::Write("`r"+$plainPrompt+': '+$text+' ')}
+            if(-not $script:UiVT){[Console]::Write("`r"+$plainPrompt+' '+$text+' ')}
         } else {Wait-DisplayFrame 30}
     }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }

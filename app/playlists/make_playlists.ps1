@@ -1627,7 +1627,9 @@ function Read-MenuChoice([string]$Prompt) {
     }
     Clear-DisplayPanel
     try {[Console]::CursorVisible=$true} catch {}
-    return Read-PlainMenuInput $Prompt
+    $controls=@();if($script:UiPlainMenuControls){$controls=$script:UiPlainMenuControls.ToArray();$script:UiPlainMenuControls.Clear()}
+    foreach($line in @(Get-PlainMenuRows $controls -Prompt $Prompt)){Write-Host ('  '+$line)}
+    return Read-PlainMenuInput $Prompt -PromptShown
 }
 
 function Show-MenuTitle([string]$Path) {
@@ -1635,6 +1637,7 @@ function Show-MenuTitle([string]$Path) {
     $script:UiMenuActive=$script:UiVT
     $script:UiMenuTitle=$Path; $script:UiMenuMood='idle'
     $script:UiMenuLines=New-Object 'System.Collections.Generic.List[string]'
+    $script:UiPlainMenuControls=New-Object 'System.Collections.Generic.List[string]'
     if ($script:UiMenuActive) {return}
     Write-Host ''
     Write-RetroStripe
@@ -1649,7 +1652,7 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
         $script:UiMenuLines.Add($Text)
     } else {
         $parts=Get-MenuControlParts @($Text)
-        if($parts.ControlRows.Count){foreach($line in @(Get-PlainMenuRows @($Text))){Write-Host ('  '+$line)}}
+        if($parts.ControlRows.Count -and $null -ne $script:UiPlainMenuControls){$script:UiPlainMenuControls.Add($Text)}
         else {Write-Host (ConvertTo-SafeExternalText $Text)}
     }
 }

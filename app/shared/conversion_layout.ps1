@@ -352,6 +352,7 @@ function Get-ConversionCueDependencies([string]$Path,[string]$Root,$DescriptorCa
         $track=$Matches[1];if(-not $track){$track=$Matches[2]}
         if(++$count -gt 1024){throw 'Existing CUE exceeds the supported reference limit.'}
         $track=$track.Replace('/','\')
+        if($track.StartsWith('\\?\',[StringComparison]::Ordinal) -or $track.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing CUE has an unsupported device path; output kept.'}
         # A leading slash belongs to the descriptor's volume, not the process drive.
         if($track.StartsWith('\') -and -not $track.StartsWith('\\')){$track=[IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$track.TrimStart('\'))}
         elseif(-not [IO.Path]::IsPathRooted($track)){$track=Join-Path ([IO.Path]::GetDirectoryName($Path)) $track}
@@ -430,6 +431,7 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
             $line=$line.Trim();if (-not $line -or $line.StartsWith('#')) {continue}
             foreach($candidate in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
                 $reference=$candidate.Replace('/','\')
+                if($reference.StartsWith('\\?\',[StringComparison]::Ordinal) -or $reference.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 if($reference.StartsWith('\') -and -not $reference.StartsWith('\\')){$reference=[IO.Path]::Combine([IO.Path]::GetPathRoot($entry.DirectoryName),$reference.TrimStart('\'))}
                 elseif(-not [IO.Path]::IsPathRooted($reference)){$reference=Join-Path $entry.DirectoryName $reference}
                 $reference=[IO.Path]::GetFullPath($reference)

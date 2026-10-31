@@ -1269,6 +1269,7 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
             if(-not $reference -or $reference.StartsWith('#')){continue}
             foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
+                if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 try {
                     if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$candidate.TrimStart('\')))}
                     elseif([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
@@ -1427,6 +1428,7 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 if (-not $reference -or $reference.StartsWith('#')) {continue}
                 foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
+                    if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                     try {
                         if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($file.DirectoryName),$candidate.TrimStart('\')))}
                         elseif ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}

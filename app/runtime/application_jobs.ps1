@@ -46,7 +46,14 @@ function Close-ApplicationJobBroker {
 }
 
 function Invoke-ApplicationNativeRequest {
-    param($State,$BrokerSession,[ValidateSet('Native.Start','Native.Read','Native.Stop')][string]$Operation,$Payload)
+    [CmdletBinding()]
+    param($State,$BrokerSession,[ValidateSet('Native.Start','Native.Read','Native.Stop')][string]$Operation,$Payload,[scriptblock]$CancellationCheck)
+    $nativeRequestCommand=$PSCmdlet
+    $checkCancellation={
+        if($CancellationCheck){$null=& $CancellationCheck}
+        if($nativeRequestCommand.Stopping){throw [OperationCanceledException]::new('Application cancelled.')}
+    }.GetNewClosure()
+    $hashProgress=[Action[long,long]]({param($done,$total) $null=& $checkCancellation}.GetNewClosure())
     $brokerState=Get-ApplicationBrokerState $BrokerSession
     $batch=$brokerState.Batch
     if (-not $batch -or $batch.Completed -or [string]$Payload.BatchId -cne [string]$batch.BatchId) {throw 'Native request has no active batch.'}
@@ -58,6 +65,7 @@ function Invoke-ApplicationNativeRequest {
         $job=$State.Jobs[$id]
         if ($job.BatchId -cne [string]$batch.BatchId) {throw 'Native task belongs to another batch.'}
         if ($Operation -eq 'Native.Stop') {Close-ApplicationNativeJob $State $job;return @{Stopped=$true}}
+        $null=& $checkCancellation
         if (-not $job.Done) {
             $job.TimedOut=($job.Timer.Elapsed.TotalSeconds -gt $job.Timeout)
             $job.LimitExceeded=($job.Out.LimitExceeded -or $job.Err.LimitExceeded)
@@ -91,8 +99,10 @@ function Invoke-ApplicationNativeRequest {
                             if (-not $valid) {throw 'Native converter did not produce a valid DSK image.'}
                         }
                         $length=$outputLease.Stream.Length
-                        $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($outputLease.Stream,$null)
+                        $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($outputLease.Stream,$hashProgress)
+                        $null=& $checkCancellation
                         $job.Native.Export($job.Destination)
+                        $null=& $checkCancellation
                         [void]$State.ReceiptStore.NativeReceipts.Add([pscustomobject]@{
                             BatchId=$job.BatchId;Kind=$job.ReceiptKind;InputHash=$job.InputHash;
                             OutputHash=$hash;Length=$length;Success=$true
@@ -101,6 +111,13 @@ function Invoke-ApplicationNativeRequest {
                         # A failed import stays failed on every subsequent poll.
                         # In particular, native exit 0 is not verified success.
                         $job.Failure='Native output verification or import failed.'
+                        # Preserve cancellation through native callback wrappers.
+                        # A simultaneous Stop must not hide a genuine I/O error.
+                        $cause=$_.Exception
+                        while($cause){
+                            if($cause -is [OperationCanceledException]){throw}
+                            $cause=$cause.InnerException
+                        }
                     } finally {if ($outputLease) {$outputLease.Dispose()}}
                 }
             }
@@ -117,6 +134,7 @@ function Invoke-ApplicationNativeRequest {
         return @{TaskId=$job.Id;Done=$job.Done;Drained=($job.Done -and $size -eq 0);ExitCode=$job.ExitCode;
             Lines=$lines.ToArray();TimedOut=$job.TimedOut;LimitExceeded=$job.LimitExceeded;CaptureFailed=$job.CaptureFailed;Failure=$job.Failure}
     }
+    $null=& $checkCancellation
     if ($State.Jobs.Count -ge 1) {throw 'Finish the active native task before starting another.'}
     $kind=[string]$Payload.Kind;$mode=[string]$Payload.Mode
     if ($kind -notin @('Nib','HxcX64','HxcX86') -or $mode -notin @('Convert','Modules','Info') -or
@@ -133,7 +151,7 @@ function Invoke-ApplicationNativeRequest {
             $inputFile=Resolve-ApplicationJobPath $work ([string]$Payload.Input)
             $job.InputLease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($inputFile)
             if ($job.InputLease.Stream.Length -gt 512MB) {throw 'Native input exceeds 512 MiB.'}
-            $job.InputHash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($job.InputLease.Stream,$null)
+            $job.InputHash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($job.InputLease.Stream,$hashProgress)
         }
         if ($mode -eq 'Convert') {
             $job.Destination=Resolve-ApplicationJobPath $work ([string]$Payload.Output)
@@ -152,7 +170,9 @@ function Invoke-ApplicationNativeRequest {
                 $file=Join-Path $directory $name;if ([IO.File]::Exists($file)) {$runtime.Add($file)}
             }
         }
+        $null=& $checkCancellation
         $job.Native=[OptiMiyoo.NativeSandboxJob]::Create($exe,$runtime.ToArray(),$inputFile,$outputName,$lpac)
+        $null=& $checkCancellation
         switch ($mode) {
             'Modules' {$arguments='-modulelist';$job.Timeout=20}
             'Info' {$arguments='-verbose -finput:"'+$job.Native.InputRelativePath+'" -infos';$job.Timeout=30}
@@ -163,8 +183,10 @@ function Invoke-ApplicationNativeRequest {
         }
         $job.Native.WallTimeLimitSeconds=$job.Timeout
         $job.Native.Start($arguments)
+        $null=& $checkCancellation
         $job.Out=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardOutput,1048576)
         $job.Err=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardError,1048576)
+        $null=& $checkCancellation
         $State.Jobs.Add($job.Id,$job)
         $registered=$true
         return @{TaskId=$job.Id}

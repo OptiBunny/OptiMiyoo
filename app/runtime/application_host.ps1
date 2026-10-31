@@ -128,7 +128,21 @@ function Invoke-ApplicationHostRequest {
             return @{Accepted=$true}
         }
         {$_ -in 'Native.Start','Native.Read','Native.Stop'} {
-            return (Invoke-ApplicationNativeRequest -State $State.Native -BrokerSession $State.Broker -Operation $Request.Operation -Payload $payload)
+            $nativeSession=$State.Session
+            $cancellationCheck={
+                if($nativeSession.Failure){throw $nativeSession.Failure}
+                if($nativeSession.CancellationRequested){throw [OperationCanceledException]::new('Application cancelled.')}
+            }.GetNewClosure()
+            try {return (Invoke-ApplicationNativeRequest -State $State.Native -BrokerSession $State.Broker -Operation $Request.Operation -Payload $payload -CancellationCheck $cancellationCheck)}
+            catch {
+                if($nativeSession.Failure){throw $nativeSession.Failure}
+                $cause=$_.Exception
+                while($cause){
+                    if($nativeSession.CancellationRequested -and $cause -is [OperationCanceledException]){throw [OperationCanceledException]::new('Application cancelled.')}
+                    $cause=$cause.InnerException
+                }
+                throw
+            }
         }
         {$_ -in 'Archive.Start','Archive.Read','Archive.Stop'} {
             return (Invoke-ApplicationArchiveRequest -BrokerSession $State.Broker -Operation $Request.Operation -Payload $payload -ReceiptStore $State.Receipts)

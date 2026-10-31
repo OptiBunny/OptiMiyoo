@@ -280,8 +280,8 @@ function Complete-ApplicationSdSession {
                 $writeLease=[OptiMiyoo.OnionPathLease]::Open($file.Path,$state.OriginalRoot,$false,$true,$false)
                 $current=Read-ApplicationSdBytes $writeLease.Stream 1048576
                 if([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($file.Bytes)){throw 'Original SD config changed during setup.'}
-                if(-not $state.BackupRoot){$state.BackupRoot=Join-Path $state.OriginalRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))}
-                $backup=Join-Path $state.BackupRoot $file.Folder
+                if(-not $state.BackupRoot){$state.BackupRoot=Join-Path (Join-Path $state.OriginalRoot 'Backups') ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))}
+                $backup=Join-Path (Join-Path $state.BackupRoot 'Emu') $file.Folder
                 Assert-PlainOnionPath $backup $state.OriginalRoot
                 $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$state.OriginalRoot)
                 $backupPath=Join-Path $backup 'config.json'

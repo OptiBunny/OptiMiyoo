@@ -28,7 +28,7 @@ in Onion's game list: playlists, C64 tape files, and Atari Lynx `.lyx` files.
 It updates file-type settings without installing or switching cores. Unsupported
 or unverified cores are skipped. **Esc** goes back.
 
-To undo setup, copy each saved `config.json` from `OptiMiyoo_Backup_<ID>` on the
+To undo setup, copy each saved `config.json` from `Backups/OptiMiyoo_Backup_<ID>/Emu` on the
 SD card to its matching folder under `Emu`.
 
 ## Convert disk images

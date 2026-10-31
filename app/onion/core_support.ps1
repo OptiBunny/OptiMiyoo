@@ -471,7 +471,7 @@ function Get-OnionSetupMenuRows {
     @(
         'Enables supported files in Onion''s game list.',
         'Only edits config.json''s file-type list.',
-        'SD config backups: OptiMiyoo_Backup_<ID>/',
+        'SD config backups: Backups/OptiMiyoo_Backup_<ID>/Emu/',
         'Does not install or switch emulator cores.',
         'Refresh Onion''s game list after setup.',
         '',

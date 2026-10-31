@@ -188,7 +188,7 @@ try {
     Initialize-OnionPathLease
     $rootLease=[OptiMiyoo.OnionPathLease]::Open($OnionRoot,$OnionRoot,$true,$false,$false)
     $script:OnionTotal=$profiles.Count
-    $backupRoot=Join-Path $OnionRoot ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
+    $backupRoot=Join-Path (Join-Path $OnionRoot 'Backups') ('OptiMiyoo_Backup_'+[Guid]::NewGuid().ToString('N'))
     $changed=0; $unverified=0
     Write-OnionText 'Checking installed system configs. Setup only changes managed file-list extensions in config.json.'
     for ($profileIndex=0;$profileIndex -lt $profiles.Count;$profileIndex++) {
@@ -237,7 +237,7 @@ try {
             $memory=New-Object IO.MemoryStream
             try {$stream.CopyTo($memory); $current=$memory.ToArray()} finally {$memory.Dispose()}
             if ([Convert]::ToBase64String($current) -cne [Convert]::ToBase64String($original)) {throw 'Config changed during setup. Run the check again.'}
-            $backup=Join-Path $backupRoot $emuFolder
+            $backup=Join-Path (Join-Path $backupRoot 'Emu') $emuFolder
             Assert-PlainOnionPath $backup $OnionRoot
             $backupDirectoryLease=[OptiMiyoo.OnionPathLease]::CreateDirectory($backup,$OnionRoot)
             $backupLease=[OptiMiyoo.OnionPathLease]::Open((Join-Path $backup 'config.json'),$OnionRoot,$false,$true,$true)

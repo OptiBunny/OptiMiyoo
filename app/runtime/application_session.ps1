@@ -388,7 +388,17 @@ namespace OptiMiyoo {
    if(value!=null&&alt)value="\x1b"+value;return value;
   }
   private void WriteTerminal(string text){if(!Interactive){Console.Write(text);return;}uint written;Check(WriteConsole(GetStdHandle(-11),text,(uint)text.Length,out written,IntPtr.Zero)&&written==text.Length,"Write host terminal");}
-  private void InputLoop(){try{InputRecord[] records=new InputRecord[1];while(!stopping&&!HasExited){lock(consoleGate){if(!paused){uint available;Check(GetNumberOfConsoleInputEvents(GetStdHandle(-10),out available),"Inspect host input");if(available>0){uint count;Check(ReadConsoleInput(GetStdHandle(-10),records,1,out count),"Read host input");InputRecord record=records[0];if(count==1&&record.EventType==1&&record.KeyDown!=0){ConsoleKeyInfo key=new ConsoleKeyInfo(record.Character,(ConsoleKey)record.VirtualKey,(record.Control&0x10)!=0,(record.Control&3)!=0,(record.Control&12)!=0);if(key.Key==ConsoleKey.C&&(key.Modifiers&ConsoleModifiers.Control)!=0){Stop();break;}string text=KeyText(key);for(int repeat=0;repeat<Math.Max(1,Math.Min(32,(int)record.Repeat));repeat++)SendKeys(text);}}short w=(short)Math.Max(20,Math.Min(300,Console.WindowWidth)),h=(short)Math.Max(6,Math.Min(120,Console.WindowHeight));if(w!=columns||h!=rows){int hr=ResizePseudoConsole(pseudo,new COORD{X=w,Y=h});if(hr<0)Marshal.ThrowExceptionForHR(hr);columns=w;rows=h;}}}Thread.Sleep(8);}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard/resize channel failed.");}}
+  private void InputLoop(){try{InputRecord[] records=new InputRecord[1];while(!stopping&&!HasExited){lock(consoleGate){if(!paused){
+   // Leave unread records in the native queue for trusted prompts and publication.
+   for(int batch=0;batch<32;batch++){
+    if(stopping||HasExited)return;
+    uint available;Check(GetNumberOfConsoleInputEvents(GetStdHandle(-10),out available),"Inspect host input");if(available==0)break;
+    uint count;Check(ReadConsoleInput(GetStdHandle(-10),records,1,out count),"Read host input");InputRecord record=records[0];
+    if(count==1&&record.EventType==1&&record.KeyDown!=0){ConsoleKeyInfo key=new ConsoleKeyInfo(record.Character,(ConsoleKey)record.VirtualKey,(record.Control&0x10)!=0,(record.Control&3)!=0,(record.Control&12)!=0);if(key.Key==ConsoleKey.C&&(key.Modifiers&ConsoleModifiers.Control)!=0){Stop();return;}string text=KeyText(key);for(int repeat=0;repeat<Math.Max(1,Math.Min(32,(int)record.Repeat));repeat++)SendKeys(text);}
+   }
+   if(stopping||HasExited)return;
+   short w=(short)Math.Max(20,Math.Min(300,Console.WindowWidth)),h=(short)Math.Max(6,Math.Min(120,Console.WindowHeight));if(w!=columns||h!=rows){int hr=ResizePseudoConsole(pseudo,new COORD{X=w,Y=h});if(hr<0)Marshal.ThrowExceptionForHR(hr);columns=w;rows=h;}
+  }}Thread.Sleep(8);}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard/resize channel failed.");}}
   public void PauseRelay(){PauseRelayCore(false);}
   public void PauseRelayForPublication(){PauseRelayCore(true);}
   private void PauseRelayCore(bool publication){

@@ -18,8 +18,8 @@ To create playlists or convert files, [prepare your games](#prepare-a-batch) fir
 | **Z** | [ZX Spectrum converter](#zx-converter-z). |
 | **1–9** | [Create playlists](#create-playlists) without converting disk images. |
 | **D** | [Demo](#demo). |
-| **E** | [Turn the CRT effect on or off](#crt-effect-and-exit). |
-| **Q** | [Exit](#crt-effect-and-exit). |
+| **E** | [Turn the CRT effect on or off](#crt-effect). |
+| **Q** | [Exit](#exit). |
 
 ## SD setup
 
@@ -121,29 +121,6 @@ The default Onion cores for **8: Amstrad CPC** (CrocoDS) and **9: ZX Spectrum**
 a compatible core. [SD setup](#sd-setup) does not add playlist support to a core.
 ZX conversion remains available through **Z**.
 
-## Demo
-
-Choose **D**, then **1** for a walkthrough of the menus, animations, and main
-features. To see one topic, choose **2** for C64, **3** for ZX, **4** for playlists,
-**5** for results and overwrite choices, **6** for the bunny animations, or
-**7** for core support and SD setup. All progress and results are examples;
-the demo does not change game or SD files.
-
-During playback, keys work without Enter:
-
-- **Space:** pause/resume.
-- **Left / P:** previous screen. **Right / N / Enter:** next screen.
-- **R:** restart the selected demo section.
-- **E:** turn the CRT effect on or off.
-- **B / Q / Esc:** return to demo selection.
-
-## CRT effect and exit
-
-At the main menu, choose **E** to turn the CRT effect on or off, or **Q** to exit.
-
-To turn off decorative animations as well, start the app from a terminal in its
-folder with `.\OptiMiyoo.bat -NoAnimation`.
-
 ## Prepare a batch
 
 Copy one system's games into the app's `SRC` folder, using ZIPs, a folder per game,
@@ -236,3 +213,30 @@ another disc, open
 Eject the current disc, select the next image, and insert it.
 C64 tapes may also need keyboard/load commands. DOSBox Pure also provides
 [image selection in its start menu](https://docs.libretro.com/library/dosbox_pure/#mount-disc-images-from-inside-zip-files).
+
+## Demo
+
+Choose **D**, then **1** for a walkthrough of the menus, animations, and main
+features. To see one topic, choose **2** for C64, **3** for ZX, **4** for playlists,
+**5** for results and overwrite choices, **6** for the bunny animations, or
+**7** for core support and SD setup. All progress and results are examples;
+the demo does not change game or SD files.
+
+During playback, keys work without Enter:
+
+- **Space:** pause/resume.
+- **Left / P:** previous screen. **Right / N / Enter:** next screen.
+- **R:** restart the selected demo section.
+- **E:** turn the CRT effect on or off.
+- **B / Q / Esc:** return to demo selection.
+
+## CRT effect
+
+At the main menu, choose **E** to turn the CRT effect on or off.
+
+To turn off decorative animations as well, start the app from a terminal in its
+folder with `.\OptiMiyoo.bat -NoAnimation`.
+
+## Exit
+
+At the main menu, choose **Q** to exit.

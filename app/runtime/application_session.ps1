@@ -217,7 +217,7 @@ namespace OptiMiyoo {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetConsoleMode(IntPtr handle,uint mode);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool FlushConsoleInputBuffer(IntPtr handle);
 
-  [StructLayout(LayoutKind.Explicit,Size=20)] struct InputRecord {
+  [StructLayout(LayoutKind.Explicit,CharSet=CharSet.Unicode,Size=20)] struct InputRecord {
    [FieldOffset(0)] public ushort EventType;[FieldOffset(4)] public int KeyDown;[FieldOffset(8)] public ushort Repeat;[FieldOffset(10)] public ushort VirtualKey;[FieldOffset(12)] public ushort ScanCode;[FieldOffset(14)] public char Character;[FieldOffset(16)] public uint Control;
   }
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetNumberOfConsoleInputEvents(IntPtr handle,out uint count);
@@ -234,6 +234,7 @@ namespace OptiMiyoo {
   private bool eventDisposalRequested,eventHandlesClosed;
   private readonly Queue<string> inputQueue=new Queue<string>();
   private int queuedInputCharacters;
+  private char pendingInputHighSurrogate;
   private readonly TerminalSequenceFilter filter=new TerminalSequenceFilter();
   private readonly object outcomeGate=new object();
   private readonly List<SafeFileHandle> pins=new List<SafeFileHandle>();
@@ -353,15 +354,32 @@ namespace OptiMiyoo {
   private void Fail(string reason){lock(outcomeGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   private void FailResponse(string reason){lock(outcomeGate){if(!CancellationRequested)Fail(reason);}}
   public void Stop(){lock(outcomeGate){CancellationRequested=true;stopping=true;paused=true;}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
+  // A decoder can carry bytes from a previous read, producing more UTF-16
+  // units than the next byte chunk alone (a split supplementary character).
   private void OutputLoop(){
-   try{byte[] bytes=new byte[8192];char[] chars=new char[8192];Decoder decoder=Utf8.GetDecoder();int count;Stopwatch rate=Stopwatch.StartNew();long received=0;
+   try{byte[] bytes=new byte[8192];char[] chars=new char[Utf8.GetMaxCharCount(bytes.Length)];Decoder decoder=Utf8.GetDecoder();int count;Stopwatch rate=Stopwatch.StartNew();long received=0;
     while(true){uint available;if(!PeekNamedPipe(terminalReadHandle,IntPtr.Zero,0,IntPtr.Zero,out available,IntPtr.Zero))break;if(available==0){lock(consoleGate){lastDrained=Stopwatch.GetTimestamp();}Thread.Sleep(5);continue;}count=terminalOutput.Read(bytes,0,(int)Math.Min((uint)bytes.Length,available));if(count==0)break;Interlocked.Exchange(ref outputInFlight,1);int length=decoder.GetChars(bytes,0,count,chars,0);received+=count;if(rate.ElapsedMilliseconds>=1000){received=0;rate.Restart();}if(received>16777216)throw new IOException("Application terminal output limit exceeded.");lock(consoleGate){lastOutput=Stopwatch.GetTimestamp();if(!paused&&!stopping){string safe=filter.Feed(new string(chars,0,length));if(safe.Length!=0)WriteTerminal(safe);}else filter.Reset();Interlocked.Exchange(ref outputInFlight,0);}}
    }catch(Exception){if(!stopping&&!HasExited)Fail("Application terminal channel failed.");try{byte[] drain=new byte[8192];while(terminalOutput.Read(drain,0,drain.Length)>0){}}catch{}}finally{Interlocked.Exchange(ref outputInFlight,0);}
   }
   // Never write the ConPTY pipe while holding the trusted prompt/display gate.
   // A stalled consumer gets bounded buffering, then termination, not a frozen UI.
-  private void SendKeys(string text){if(text==null||text.Length==0)return;bool overflow=false;lock(inputGate){if(stopping||paused)return;if(text.Length>8192-queuedInputCharacters)overflow=true;else{inputQueue.Enqueue(text);queuedInputCharacters+=text.Length;}}if(overflow){Fail("Application stopped consuming keyboard input.");return;}SignalEvent(inputReady);}
-  private void ClearQueuedInput(){lock(inputGate){inputQueue.Clear();queuedInputCharacters=0;}}
+  private void SendKeys(string text){
+   if(text==null||text.Length==0)return;bool overflow=false;
+   lock(inputGate){
+    if(stopping||paused)return;
+    // Native console records carry one UTF-16 unit at a time. Keep a high
+    // surrogate until the next unit so per-item flushing cannot corrupt it.
+    if(pendingInputHighSurrogate!='\0')text=pendingInputHighSurrogate+text;
+    if(text.Length>8192-queuedInputCharacters)overflow=true;
+    else{
+     pendingInputHighSurrogate='\0';
+     if(Char.IsHighSurrogate(text[text.Length-1])){pendingInputHighSurrogate=text[text.Length-1];text=text.Substring(0,text.Length-1);}
+     if(text.Length!=0){inputQueue.Enqueue(text);queuedInputCharacters+=text.Length;}
+    }
+   }
+   if(overflow){Fail("Application stopped consuming keyboard input.");return;}SignalEvent(inputReady);
+  }
+  private void ClearQueuedInput(){lock(inputGate){inputQueue.Clear();queuedInputCharacters=0;pendingInputHighSurrogate='\0';}}
   private void InputWriterLoop(){try{while(!stopping&&!HasExited){string text=null;lock(inputGate){if(!paused&&inputQueue.Count>0){text=inputQueue.Dequeue();queuedInputCharacters-=text.Length;}}if(text==null){WaitForEvent(inputReady,50);continue;}keyWriter.Write(text);keyWriter.Flush();}}catch(Exception){if(!stopping&&!HasExited)Fail("Application keyboard channel failed.");}}
   private static string KeyText(ConsoleKeyInfo key){
    bool control=(key.Modifiers&ConsoleModifiers.Control)!=0,alt=(key.Modifiers&ConsoleModifiers.Alt)!=0;string value=null;

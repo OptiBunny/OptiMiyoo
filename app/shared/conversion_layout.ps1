@@ -105,9 +105,9 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
     $title=[IO.Path]::GetFileNameWithoutExtension($relative);$tag='';$errorText='';$usedFolderTitle=$false
     if (-not $Archive) {
         $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
-        $found=[regex]::Matches($title,$pattern)
+        $found=[regex]::Matches($title,$pattern,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
         if ($found.Count -eq 1) {
-            $tag=$found[0].Groups[1].Value.ToLowerInvariant();$title=[regex]::Replace([regex]::Replace($title,$pattern,''),'\s{2,}',' ').Trim()
+            $tag=$found[0].Groups[1].Value.ToLowerInvariant();$title=[regex]::Replace([regex]::Replace($title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant),'\s{2,}',' ').Trim()
             if (-not $title -and $parent) {
                 # A label-only filename uses its game folder, just like Disc 1.
                 $usedFolderTitle=$true

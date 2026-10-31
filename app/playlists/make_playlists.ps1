@@ -430,7 +430,7 @@ function New-Playlist([string[]]$DiskNames,[string]$RelativeStem,[string]$Destin
 
 function Get-TapeGrouping([string]$Title) {
     $pattern='(?i)\s*[\(\[]\s*(?:(?:tape|cassette)\s*(?<tape>\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?(?:\s+side\s*(?<side>\d+|[a-z])(?:\s*(?:of|/)\s*\d+)?)?|side\s*(?<side>\d+|[a-z])(?:\s*(?:of|/)\s*\d+)?)\s*[\)\]]'
-    $found=[regex]::Matches($Title,$pattern)
+    $found=[regex]::Matches($Title,$pattern,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
     $tapes=@($found | Where-Object {$_.Groups['tape'].Success})
     $sides=@($found | Where-Object {$_.Groups['side'].Success})
     if ($found.Count -eq 0) {return $null}
@@ -438,7 +438,7 @@ function Get-TapeGrouping([string]$Title) {
     if ($tapes.Count -gt 1 -or $sides.Count -gt 1) {$errorText='Ambiguous tape/side tags. Keep one release per set or put it in a game ZIP.'}
     $tag=''; if ($tapes.Count) {$tag=$tapes[0].Groups['tape'].Value}
     if ($sides.Count) {if($tag){$tag+='.'};$tag+=$sides[0].Groups['side'].Value}
-    $name=[regex]::Replace([regex]::Replace($Title,$pattern,''),'\s{2,}',' ').Trim()
+    $name=[regex]::Replace([regex]::Replace($Title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant),'\s{2,}',' ').Trim()
     [pscustomobject]@{Title=$name; Tag=$tag; Error=$errorText}
 }
 
@@ -460,12 +460,12 @@ function Get-PlaylistMediaIdentity([string]$Relative) {
         }
     }
     $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
-    $found=[regex]::Matches($title,$pattern)
+    $found=[regex]::Matches($title,$pattern,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
     if ($null -ne $tapeGrouping) {
         $tag=$tapeGrouping.Tag;$tagged=$true;$title=$tapeGrouping.Title;$errorText=$tapeGrouping.Error
     } elseif ($found.Count -eq 1) {
         $tag=$found[0].Groups[1].Value.ToLowerInvariant();$tagged=$true
-        $title=[regex]::Replace($title,$pattern,'').Trim()
+        $title=[regex]::Replace($title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant).Trim()
         $title=[regex]::Replace($title,'\s{2,}',' ')
     } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
         $tag=$Matches[1].ToLowerInvariant();$tagged=$true

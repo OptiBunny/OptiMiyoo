@@ -244,5 +244,6 @@ folder with `.\OptiMiyoo.bat -NoAnimation`.
 
 ## Exit
 
-Use **Q** to quit from any screen. In selection menus, press **Enter** after it.
-During processing, the app stops at a safe point before closing.
+In selection menus, press **Q**, then **Enter**, to quit. During a demo or while
+processing files, press **Q** on its own. The app may finish a file operation
+already in progress before closing.

@@ -872,7 +872,7 @@ function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$Inv
     }
 }
 
-function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Progress=$null,$InventoryGuard=$null,$CleanupContext=$null) {
+function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Progress=$null,$InventoryGuard=$null,$CleanupContext=$null,[scriptblock]$CancellationCheck=$null) {
     if ($Plan.Policy -ne 'Remove') {return}
     if ($Plan.BlockReason) {
         foreach ($file in $Plan.Files.Values) {
@@ -891,7 +891,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
         }
         return
     }
-    $referenceLeases=@{}; $ownsCleanupContext=$false
+    $referenceLeases=@{}; $ownsCleanupContext=$false; $cleanupCancelled=$false
     try {
         try {
             # The host holds the complete context across its final snapshot.
@@ -910,6 +910,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
             foreach ($start in @($Plan.Files.Keys | Sort-Object)) {
                 if ($Plan.BlockReason) {break}
                 if ($visited.ContainsKey($start)) {continue}
+                if ($CancellationCheck -and (& $CancellationCheck)) {$cleanupCancelled=$true;break}
                 $pending=New-Object 'System.Collections.Generic.Queue[string]'
                 $component=New-Object 'System.Collections.Generic.List[object]'
                 $pending.Enqueue($start); $visited[$start]=$true
@@ -960,6 +961,9 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                         continue
                     }
                     Assert-SourcePolicyInventoryGuard $Plan $inventoryGuard
+                    # Cancellation retains the whole verified component. Once
+                    # deletion starts, finish its CUE-first dependency ordering.
+                    if ($CancellationCheck -and (& $CancellationCheck)) {$cleanupCancelled=$true;break}
                     $descriptorFailed=$false
                     # Remove CUE descriptors first. If one must remain, retain all
                     # its tracks even when deletion (not verification) is denied.
@@ -982,6 +986,9 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                     if ($locks) {foreach ($lock in $locks) {$lock.Dispose()}}
                 }
             }
+        }
+        if ($cleanupCancelled) {
+            foreach ($file in $Plan.Files.Values) {if ($file.State -eq 'Ready') {$file.State='Kept'; $file.Reason='Cancelled before source removal; original kept.'}}
         }
         if ($Plan.BlockReason) {
             foreach ($file in $Plan.Files.Values) {if ($file.State -eq 'Ready') {$file.State='Failed'; $file.Reason=$Plan.BlockReason}}

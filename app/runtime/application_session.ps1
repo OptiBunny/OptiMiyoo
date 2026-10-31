@@ -354,6 +354,9 @@ namespace OptiMiyoo {
   private void Fail(string reason){lock(outcomeGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   private void FailResponse(string reason){lock(outcomeGate){if(!CancellationRequested)Fail(reason);}}
   public void Stop(){lock(outcomeGate){CancellationRequested=true;stopping=true;paused=true;}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
+  // Finish an accepted broker handoff without manufacturing user cancellation.
+  // Synchronize with the last native input batch; unread keys belong to the host.
+  public void StopForHandoff(){lock(consoleGate){lock(outcomeGate){stopping=true;paused=true;}}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   // A decoder can carry bytes from a previous read, producing more UTF-16
   // units than the next byte chunk alone (a split supplementary character).
   private void OutputLoop(){

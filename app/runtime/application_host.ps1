@@ -180,14 +180,38 @@ function Invoke-ApplicationHostLoop($State) {
         if ($State.StopRequested) {
             # No app thread survives the final handoff. Files remain staged until
             # publication has finished; Dispose removes only this session's files.
-            $session.Stop()
-            if (-not $session.WaitForExit(5000)) {throw 'The isolated application did not stop; originals kept.'}
+            $session.StopForHandoff()
+            if ($session.Failure) {throw $session.Failure}
+            if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
+            $workerExited=$session.WaitForExit(5000)
+            if ($session.Failure) {throw $session.Failure}
+            if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
+            if (-not $workerExited) {throw 'The isolated application did not stop; originals kept.'}
             return 0
         }
     }
     if ($session.Failure) {throw $session.Failure}
     if ($session.CancellationRequested) {throw [OperationCanceledException]::new('Application cancelled.')}
     return $session.ExitCode
+}
+
+function Test-ApplicationBatchCancellation($ApplicationSession) {
+    if(-not $ApplicationSession){return $false}
+    if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
+    if($ApplicationSession.CancellationRequested){return $true}
+    if(-not $ApplicationSession.Interactive){return $false}
+    if(-not $ApplicationSession.HasExited -or -not $ApplicationSession.IsRelayPaused){throw 'Batch publication requires the finished application relay to be paused.'}
+    # Only the trusted parent reads keys after accepted handoff, at boundaries
+    # outside output transactions and connected source-removal sets.
+    while([Console]::KeyAvailable){
+        $key=[Console]::ReadKey($true)
+        if([int]$key.KeyChar -eq 3 -or ($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control))){
+            $ApplicationSession.Stop()
+            if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
+            return $true
+        }
+    }
+    return $false
 }
 
 function Write-ApplicationBootstrap {
@@ -404,8 +428,15 @@ function Invoke-ApplicationHost {
                 }
                 if ($state.Pending) {
                     $pending=$state.Pending
-                    $state.Result=Complete-ApplicationBrokerBatch -Session $broker @pending -ReceiptStore $receipts
+                    $completionOptions=@{}
+                    if($state.StopRequested){
+                        $publicationSession=$session
+                        $cancellationTest=(Get-Command Test-ApplicationBatchCancellation).ScriptBlock
+                        $completionOptions.CancellationCheck={& $cancellationTest $publicationSession}.GetNewClosure()
+                    }
+                    $state.Result=Complete-ApplicationBrokerBatch -Session $broker @pending -ReceiptStore $receipts @completionOptions
                     $state.Completed=$true
+                    if($session.Failure){throw $session.Failure}
                 }
                 if ($Entry -eq 'SD' -and $exitCode -eq 0) {
                     # Drain no more worker output over the parent's verified update panel.
@@ -457,6 +488,9 @@ function Invoke-ApplicationHost {
             if ($cancelled) {break}
             if ($state) {$displayEffect=$state.DisplayEffect}
             if ($state -and $state.Result) {
+                $resultCancelled=$false
+                if($null -ne $state.Result.PSObject.Properties['Cancelled']){$resultCancelled=[bool]$state.Result.Cancelled}
+                if($resultCancelled){Write-Host 'Cancelled. Completed outputs were kept; remaining originals were kept.'}
                 $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
                 Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
                 foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalLine ($result.Source+': '+$result.Result+' / '+$result.Detail))}
@@ -468,8 +502,9 @@ function Invoke-ApplicationHost {
                 }
                 Write-Host ''
                 Write-ApplicationVerifiedReport $originalRoot $state.Result
+                if($resultCancelled){$again=$false;if($exitCode -ne 1){$exitCode=137}}
                 if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
-                if ($menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
+                if (-not $resultCancelled -and $menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
                     Write-Host ''
                     Write-Host 'Press Enter for the main menu, or Q to exit.'
                     do {$key=[Console]::ReadKey($true)} while ($key.Key -ne [ConsoleKey]::Enter -and $key.Key -ne [ConsoleKey]::Q)

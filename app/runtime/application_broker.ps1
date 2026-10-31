@@ -954,7 +954,7 @@ function Open-ApplicationBrokerBackup($State,[string]$Destination,[string]$Backu
 
 function Complete-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[Parameter(Mandatory=$true)][string]$BatchId,
-          [string[]]$CompletedJobIds=@(),[Parameter(Mandatory=$true)]$ReceiptStore)
+          [string[]]$CompletedJobIds=@(),[Parameter(Mandatory=$true)]$ReceiptStore,[scriptblock]$CancellationCheck=$null)
     $state=Get-ApplicationBrokerState $Session;$batch=Get-ApplicationBrokerBatch $Session $BatchId
     $ids=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach($id in $CompletedJobIds){if(-not $ids.Add($id) -or -not $batch.Jobs.ContainsKey($id)){throw 'Unknown, duplicate, or forged completed job capability.'}}
@@ -964,18 +964,29 @@ function Complete-ApplicationBrokerBatch {
     $batch.Completed=$true
     $src=Join-Path $state.OriginalRoot 'SRC';$dst=Join-Path $state.OriginalRoot 'DST'
     $results=New-Object 'System.Collections.Generic.List[object]'
+    $processedIds=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $cancellation=[pscustomobject]@{Requested=$false}
+    $checkCancellation={
+        if($CancellationCheck -and (& $CancellationCheck)){$cancellation.Requested=$true}
+        return $cancellation.Requested
+    }.GetNewClosure()
     $referenceIndex=$null;$sourceInventoryGuard=$null;$sourceCleanupContext=$null
     try {
+        if(& $checkCancellation){throw [OperationCanceledException]::new('Application cancelled before publication; originals kept.')}
         Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
         Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
         $receiptIndex=New-ApplicationBrokerReceiptIndex $batch $ReceiptStore
         if($batch.Operation -eq 'Playlist'){$referenceIndex=& $batch.Module {param($root)New-PlaylistReferenceIndex $root} $dst}
         else {$referenceIndex=& $batch.Module {param($root)New-ConversionDescriptorCache $root} $dst}
         foreach($id in $CompletedJobIds){
+            if(& $checkCancellation){break}
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
             try {
                 $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex
                 Assert-ApplicationBrokerOwnership $batch $job $dst $referenceIndex
+                # Cancellation is safe before installation, while every old output
+                # remains untouched. Never interrupt installation or its rollback.
+                if(& $checkCancellation){break}
                 # Reuse the verified publication and rollback logic for all output layouts.
                 $backupFactory=(Get-Command Open-ApplicationBrokerBackup).ScriptBlock
                 $folderManifest=(Get-Command Get-ApplicationBrokerBackupManifest).ScriptBlock
@@ -1001,6 +1012,7 @@ function Complete-ApplicationBrokerBatch {
                 $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})
             } catch {$results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result='Failed';Detail=$_.Exception.Message})}
             finally {
+                if($results.Count -and $results[$results.Count-1].JobId -ceq $id){[void]$processedIds.Add($id)}
                 if($commit){foreach($lock in $commit.Locks){$lock.Dispose()}}
                 if($sealed){
                     foreach($path in $sealed.Owned){
@@ -1015,25 +1027,36 @@ function Complete-ApplicationBrokerBatch {
         # Hold every frozen descriptor before the final inventory. Notifications
         # cover namespace changes; verified leases prevent delayed CUE writes.
         # Cleanup borrows this context without reopening tracked deletion leases.
-        if($batch.SourcePolicy -eq 'Remove' -and -not $batch.SourcePlan.BlockReason){
+        [void](& $checkCancellation)
+        if(-not $cancellation.Requested -and $batch.SourcePolicy -eq 'Remove' -and -not $batch.SourcePlan.BlockReason){
             try {
                 $sourceInventoryGuard=Open-SourcePolicyInventoryGuard $src
                 $sourceCleanupContext=& $batch.SourceModule {param($plan,$guard)Open-SourcePolicyCleanupContext $plan -InventoryGuard $guard} $batch.SourcePlan $sourceInventoryGuard
             } catch {$batch.SourcePlan.BlockReason='Source inventory or CUE descriptors could not be protected; all originals kept. '+$_.Exception.Message}
         }
-        if(-not $batch.SourcePlan.BlockReason){
+        if(-not $cancellation.Requested -and -not $batch.SourcePlan.BlockReason){
             try {
                 $descriptorLeases=$null;if($sourceCleanupContext){$descriptorLeases=$sourceCleanupContext.ReferenceLeases}
                 Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src -BorrowedSourceLeases $descriptorLeases) 'Original source tree'
             }
             catch {$batch.SourcePlan.BlockReason='Original source inventory changed; all originals kept.'}
         }
-        & $batch.SourceModule {param($plan,$context)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalText $message)}} -CleanupContext $context} $batch.SourcePlan $sourceCleanupContext
+        if($batch.SourcePlan.BlockReason -or -not (& $checkCancellation)){
+            & $batch.SourceModule {param($plan,$context,$cancel)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalText $message)}} -CleanupContext $context -CancellationCheck $cancel} $batch.SourcePlan $sourceCleanupContext $checkCancellation
+        }
+        # A cancellation deferred during the last connected deletion still
+        # cancels the remaining UI flow, without undoing that completed set.
+        [void](& $checkCancellation)
+        if($cancellation.Requested){
+            foreach($file in $batch.SourcePlan.Files.Values){
+                if($file.State -notin 'Removed','Failed'){$file.State='Kept';$file.Reason='Application cancelled; remaining originals kept.'}
+            }
+        }
         foreach($job in $batch.Jobs.Values){
-            if(-not $ids.Contains($job.JobId)){
+            if(-not $processedIds.Contains($job.JobId)){
                 $detail='The worker did not complete this input; original kept.'
                 $uncompletedResult='Failed'
-                if($job.BlockedReason){$detail=$job.BlockedReason;$uncompletedResult=$job.BlockedResult}elseif($job.Decision -eq 'Skip'){$detail='Overwrite declined; original kept.';$uncompletedResult='Skipped'}
+                if($job.BlockedReason){$detail=$job.BlockedReason;$uncompletedResult=$job.BlockedResult}elseif($job.Decision -eq 'Skip'){$detail='Overwrite declined; original kept.';$uncompletedResult='Skipped'}elseif($cancellation.Requested -and $ids.Contains($job.JobId)){$detail='Application cancelled before publication; original kept.';$uncompletedResult='Skipped'}
                 $results.Add([pscustomobject]@{JobId=$job.JobId;SourceKey=$job.SourceKey;Result=$uncompletedResult;Detail=$detail})
             }
         }
@@ -1062,7 +1085,7 @@ function Complete-ApplicationBrokerBatch {
             $reason=$_.Reason;if($batch.SourcePolicy -eq 'Keep'){$reason='Keep policy selected.'}
             [pscustomobject]@{State=$_.State;Reason=$reason}
         })
-        return [pscustomobject]@{BatchId=$BatchId;Operation=$batch.Operation;SourcePolicy=$batch.SourcePolicy;Results=$results.ToArray();Sources=$sourceStates;Written=@($results | Where-Object {$_.Result -in 'Written','Overwritten'}).Count;Failed=@($results | Where-Object {$_.Result -eq 'Failed'}).Count;Removed=@($sourceStates | Where-Object {$_.State -eq 'Removed'}).Count;Kept=@($sourceStates | Where-Object {$_.State -ne 'Removed'}).Count;RemovalFailures=@($sourceStates | Where-Object {$_.State -eq 'Failed'}).Count}
+        return [pscustomobject]@{BatchId=$BatchId;Operation=$batch.Operation;SourcePolicy=$batch.SourcePolicy;Cancelled=$cancellation.Requested;Results=$results.ToArray();Sources=$sourceStates;Written=@($results | Where-Object {$_.Result -in 'Written','Overwritten'}).Count;Failed=@($results | Where-Object {$_.Result -eq 'Failed'}).Count;Removed=@($sourceStates | Where-Object {$_.State -eq 'Removed'}).Count;Kept=@($sourceStates | Where-Object {$_.State -ne 'Removed'}).Count;RemovalFailures=@($sourceStates | Where-Object {$_.State -eq 'Failed'}).Count}
     } finally {
         try {if($sourceCleanupContext){$sourceCleanupContext.Dispose()}}
         finally {

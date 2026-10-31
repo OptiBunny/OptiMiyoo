@@ -138,7 +138,15 @@ function Set-ApplicationSdSelection {
     param([Parameter(Mandatory=$true)]$Session,[Parameter(Mandatory=$true)][object[]]$Items)
     $state=Get-ApplicationSdState $Session
     if($state.Completed -or $state.SelectionFinalized){throw 'SD selection has already been finalized.'}
-    $known=@(Get-ApplicationSdSelection $Session);$profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
+    $profiles=@(Get-OnionSetupProfiles $script:ApplicationSdCodeRoot)
+    # Startup already validated the pinned original bytes. Selection needs only
+    # trusted IDs and availability, not the display-only extension state.
+    $known=@(foreach($profile in $profiles) {
+        $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
+        $relative='Emu/'+$folder+'/config.json'
+        $available=$state.Files.ContainsKey($relative) -and $null -ne $state.Files[$relative].Expected
+        [pscustomobject]@{Id=[string]$profile.Folder;Available=$available}
+    })
     if($Items.Count -ne $known.Count){throw 'SD selection must include each installed system profile exactly once.'}
     $seen=@{};$expected=@{};$enable=New-Object 'Collections.Generic.List[string]';$disable=New-Object 'Collections.Generic.List[string]'
     foreach($item in $Items) {

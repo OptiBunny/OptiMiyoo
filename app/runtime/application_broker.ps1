@@ -317,15 +317,27 @@ function New-ApplicationBrokerSession {
 
 function Get-ApplicationBrokerFile([string]$Path,[string]$Root,[string]$CopyTo,[switch]$SingleLink,[long[]]$AllowedLengths,[switch]$ArchiveBudget) {
     Initialize-ApplicationBrokerNative
-    $lease=Open-SourcePolicyReadLease $Path $Root;$output=$null
+    $lease=Open-SourcePolicyReadLease $Path $Root;$output=$null;$sha=$null
     try {
         if($SingleLink -and [OptiMiyoo.ApplicationBrokerLease]::LinkCount($lease.Stream.SafeFileHandle) -ne 1){throw 'Sandbox output is a hard link; originals kept.'}
         if($null -ne $AllowedLengths -and $AllowedLengths.Count -gt 0 -and $lease.Stream.Length -notin $AllowedLengths){throw 'Sandbox output length does not match the independently verified content.'}
         if($ArchiveBudget){Assert-ArchiveBudget -Stream $lease.Stream -Profile Media}
-        if($CopyTo){$output=[IO.File]::Open($CopyTo,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$lease.Stream.CopyTo($output);$output.Flush($true);$output.Dispose();$output=$null;$lease.Stream.Position=0}
-        $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($lease.Stream,$null)
+        if($CopyTo){
+            $output=[IO.File]::Open($CopyTo,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $sha=[Security.Cryptography.SHA256]::Create();$buffer=New-Object byte[] 1048576;$length=0L
+            # Hash the exact bytes copied while the same native read lease is held.
+            while(($count=$lease.Stream.Read($buffer,0,$buffer.Length)) -gt 0){
+                $output.Write($buffer,0,$count);[void]$sha.TransformBlock($buffer,0,$count,$buffer,0);$length+=$count
+            }
+            [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
+            if($length -ne $lease.Stream.Length){throw 'Sandbox output verification read was incomplete; originals kept.'}
+            $hash=[BitConverter]::ToString($sha.Hash).Replace('-','')
+            $output.Flush($true);$output.Dispose();$output=$null
+        }else{$hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($lease.Stream,$null)}
         return [pscustomobject]@{Hash=$hash;Length=$lease.Stream.Length}
-    } finally {if($output){$output.Dispose()};$lease.Dispose()}
+    } finally {
+        try{if($output){$output.Dispose()}}finally{try{if($sha){$sha.Dispose()}}finally{$lease.Dispose()}}
+    }
 }
 
 function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64','ZX')][string]$InspectMedia='',$RenamedNames=$null) {

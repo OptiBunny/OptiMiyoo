@@ -250,8 +250,18 @@ try {
                 Write-OnionText ('UNVERIFIED: '+$folder+' - '+$_.Exception.Message)
                 continue
             }
-            if ($disable) {$newBytes=Get-OnionConfigPatch -Original $original -Extensions @() -RemoveExtensions $extensions}
-            else {$newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions}
+            try {
+                if ($disable) {$newBytes=Get-OnionConfigPatch -Original $original -Extensions @() -RemoveExtensions $extensions}
+                else {$newBytes=Get-OnionConfigPatch -Original $original -Extensions $extensions}
+            } catch [IO.InvalidDataException] {
+                # Only the helper's bounded-output rejection is an unverified
+                # skip. Other patch failures still fail the preparation.
+                $outputLimit=$_.Exception.Data['OptiMiyoo.SdConfigOutputLimit']
+                if($outputLimit -isnot [bool] -or -not $outputLimit){throw}
+                $unverified++
+                Write-OnionText ('UNVERIFIED: '+$folder+' - '+$_.Exception.Message)
+                continue
+            }
             if ([Convert]::ToBase64String($newBytes) -ceq [Convert]::ToBase64String($original)) {Write-OnionText ('READY: '+$folder+' / '+($extensions -join ', ')+' already '+$action+'d'); continue}
             # An already prepared config only needs read access. Upgrade to a
             # writable handle only for a real edit, then recheck the bytes from

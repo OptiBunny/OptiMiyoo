@@ -396,9 +396,15 @@ function Get-OnionConfigPatch([byte[]]$Original,[string[]]$Extensions,[string[]]
     $addition=$missing -join '|'
     if($addition.Length -gt 0 -and $decoded.Length -gt 0){$addition='|'+$addition}
     $updated=$raw.Remove($value.Start,$value.End-$value.Start).Insert($value.Start,$retained+$addition)
+    $patched=$utf8.GetBytes($updated)
+    if($patched.Length -gt 1048576){
+        $sizeFailure=[IO.InvalidDataException]::new('Updated config.json exceeds the supported 1 MiB text limit.')
+        $sizeFailure.Data['OptiMiyoo.SdConfigOutputLimit']=$true
+        throw $sizeFailure
+    }
     $checked=$updated.TrimStart([char]0xFEFF) | ConvertFrom-Json
     if($checked.extlist -cne ($decoded+$addition)){throw 'SD extension-list patch did not change the intended top-level value.'}
-    return ,$utf8.GetBytes($updated)
+    return ,$patched
 }
 
 function Get-OnionSetupExtensionState([byte[]]$Original,[string[]]$Extensions) {

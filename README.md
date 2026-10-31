@@ -12,7 +12,8 @@ Create multi-disc playlists or convert C64 and ZX Spectrum disk images for
 
 **Windows 10 (1809+) / 11 · 64-bit (x64) · Windows PowerShell 5.1**
 
-1. Download and extract the ZIP to a writable folder with a short path.
+1. Download and extract the ZIP to a writable folder with a short path on a
+   local NTFS drive, such as `C:`.
 2. Copy one system's games into the app's `SRC` folder. See
    [how to prepare your games](docs/USAGE.md#prepare-a-batch).
 3. Run **`OptiMiyoo.bat`**. Choose **C** for [C64 conversion](docs/USAGE.md#c64-converter-c),

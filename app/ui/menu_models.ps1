@@ -5,13 +5,14 @@ if (-not (Get-Command Get-PlaylistSupport -ErrorAction SilentlyContinue)) {
 }
 
 function Get-OnionSetupPathRows {
-    @('Choose your Onion SD drive or folder.',
-      'Next: review which file types are enabled for each system.','',
-      'Turn systems on or off, then choose Apply to save.',
-      'Only the listed extensions in config.json are changed.',
-      'Other file types and your game files stay intact.','',
-      'Changed configs are backed up on the SD card.',
-      'Does not install or switch emulator cores.','',
+    @('Choose your Onion SD card''s drive or folder below.',
+      'Next, review the file types enabled for each system.','',
+      'On: show files of the listed types in Onion''s game list.',
+      'Off: hide those files from the list without deleting them.','',
+      'Choose Apply to save your changes.',
+      'Original config files are backed up on your SD card first.',
+      'Other file types stay as they are.',
+      'Emulator cores are not installed or changed.','',
       'Esc. Back to main menu')
 }
 

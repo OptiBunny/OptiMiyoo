@@ -1275,6 +1275,7 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
             foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                 if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
+                $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
                 try {
                     if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$candidate.TrimStart('\')))}
                     elseif([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
@@ -1434,6 +1435,7 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                     if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
+                    $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
                     try {
                         if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($file.DirectoryName),$candidate.TrimStart('\')))}
                         elseif ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}
@@ -1620,7 +1622,8 @@ function Assert-NoMediaNesting($Job,[string]$DestinationRoot,[bool]$ZipMode) {
 
 # The launcher owns navigation; workers run in a fresh script scope for each batch.
 # Back never starts a worker or touches SRC/DST.
-function Read-MenuChoice([string]$Prompt) {
+function Read-MenuChoice([string]$Prompt,[string]$Notice='') {
+    if ($Notice) {Write-MenuLine $Notice}
     if ($script:UiMenuActive) {
         try {return Read-DisplayInput $Prompt $script:UiMenuTitle $script:UiMenuLines.ToArray() $script:UiMenuMood}
         finally {$script:UiMenuActive=$false}
@@ -1658,7 +1661,7 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
 }
 
 function Invoke-OptiMenu([object[]]$Profiles) {
-    $page=$StartPage; $profile=$null; $lastCode=0
+    $page=$StartPage; $profile=$null; $lastCode=0; $notice=''
     $storageChoices=@{Auto='1';Zip='2';Folders='3';Loose='4'}
     $converterOutputs=@{C64='2';ZX='2'}
     if ($page -in 'C64','ZX' -and $Storage) {$converterOutputs[$page]=$storageChoices[$Storage]}
@@ -1675,7 +1678,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $model=Get-OptiMenuModel -Page Main -Profiles $Profiles -DisplayEffect $script:DisplayEffect
             Show-MenuTitle $model.Title
             for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
-            $answer=Read-MenuChoice $model.Prompt
+            $answer=Read-MenuChoice $model.Prompt $notice; $notice=''
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq 'B') {continue}
             if ($answer -eq 'C') {$page='C64'; continue}
@@ -1695,19 +1698,19 @@ function Invoke-OptiMenu([object[]]$Profiles) {
                 $singleOutput=$defaults.Single; $hiddenOutput=$defaults.Hidden
                 $page='SingleStorage'; continue
             }
-            Write-MenuLine '  Choose one of the numbers or letters shown.'
+            $notice='Choose one of the numbers or letters shown.'
             continue
         }
         if ($page -eq 'Demo') {
             $model=Get-OptiMenuModel -Page Demo
             Show-MenuTitle $model.Title
             for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
-            $answer=Read-MenuChoice $model.Prompt
+            $answer=Read-MenuChoice $model.Prompt $notice; $notice=''
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer='1'}
             $sections=@{'1'='Tour';'2'='C64';'3'='ZX';'4'='Playlists';'5'='Results';'6'='Bunny';'7'='Setup'}
-            if (-not $sections.ContainsKey($answer)) {Write-MenuLine '  Choose 1 to 7, B or Q.'; continue}
+            if (-not $sections.ContainsKey($answer)) {$notice='Choose 1 to 7, B or Q.'; continue}
             $navigation=Show-MioPreview $sections[$answer]
             if ($navigation -eq 'Exit') {return $lastCode}
             $common.DisplayEffect=$script:DisplayEffect
@@ -1718,11 +1721,11 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Show-MenuTitle $model.Title
             for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
             $defaultOutput=$model.Default
-            $answer=Read-MenuChoice $model.Prompt
+            $answer=Read-MenuChoice $model.Prompt $notice; $notice=''
             if ($answer -eq 'B') {$page='Main'; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
-            if ($answer -notin '1','2','3','4') {Write-MenuLine '  Choose 1, 2, 3, 4, B or Q.'; continue}
+            if ($answer -notin '1','2','3','4') {$notice='Choose 1, 2, 3, 4, B or Q.'; continue}
             $converterOutputs[$page]=$answer
             $workerArgs=$common.Clone()
             $workerArgs.Storage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$answer]
@@ -1737,11 +1740,11 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             Show-MenuTitle $model.Title
             for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
             $defaultOutput=$model.Default
-            $answer=Read-MenuChoice $model.Prompt
+            $answer=Read-MenuChoice $model.Prompt $notice; $notice=''
             if ($answer -eq 'B') {$page=if ($singlePage) {'Main'} else {'SingleStorage'}; continue}
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
-            if ($answer -notin '1','2','3','4') {Write-MenuLine '  Choose 1, 2, 3, 4, B or Q.'; continue}
+            if ($answer -notin '1','2','3','4') {$notice='Choose 1, 2, 3, 4, B or Q.'; continue}
             if ($singlePage) {$singleOutput=$answer; $page='Storage'; continue}
             $hiddenOutput=$answer
             $worker=Join-Path $ScriptDir 'playlists/make_playlists.ps1'

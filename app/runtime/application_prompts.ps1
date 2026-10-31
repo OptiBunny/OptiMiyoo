@@ -33,9 +33,7 @@ function ConvertTo-ApplicationPromptPath([string]$Path) {
     if([string]::IsNullOrWhiteSpace($Path) -or $Path.Length -gt 32767){throw 'Invalid parent conflict path.'}
     # Preserve the identity of unusual characters without emitting terminal or
     # bidirectional controls. This spelling is for display, never filesystem use.
-    return [regex]::Replace($Path,'[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',{
-        param($match) '\u{0:X4}' -f [int][char]$match.Value
-    })
+    return ConvertTo-SafeExternalLine $Path
 }
 
 function New-ApplicationPromptPreparation {

@@ -970,11 +970,16 @@ function Complete-ApplicationBrokerBatch {
         if($CancellationCheck -and (& $CancellationCheck)){$cancellation.Requested=$true}
         return $cancellation.Requested
     }.GetNewClosure()
+    # Initial verification is read-only and may span large collections. Poll
+    # between reads; installation and rollback keep their existing boundaries.
+    $throwIfCancelled={
+        if(& $checkCancellation){throw [OperationCanceledException]::new('Application cancelled before publication; originals kept.')}
+    }.GetNewClosure()
     $referenceIndex=$null;$sourceInventoryGuard=$null;$sourceCleanupContext=$null
     try {
-        if(& $checkCancellation){throw [OperationCanceledException]::new('Application cancelled before publication; originals kept.')}
-        Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
-        Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
+        & $throwIfCancelled
+        Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src -CancellationCheck $throwIfCancelled) 'Original source tree'
+        Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst -CancellationCheck $throwIfCancelled) 'Original output tree'
         $receiptIndex=New-ApplicationBrokerReceiptIndex $batch $ReceiptStore
         if($batch.Operation -eq 'Playlist'){$referenceIndex=& $batch.Module {param($root)New-PlaylistReferenceIndex $root} $dst}
         else {$referenceIndex=& $batch.Module {param($root)New-ConversionDescriptorCache $root} $dst}

@@ -2174,11 +2174,10 @@ function Show-MioPreview([string]$Section='Tour') {
                     else {$timer.Start();$script:Clock.Start()}
                     $dirty=($wasResizePaused -ne $resizePaused)
                 }
-                if (-not $paused -and -not $resizePaused -and $timer.ElapsedMilliseconds -ge $duration) {
-                    if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1}
-                    break
-                }
-                if ([Console]::KeyAvailable) {
+                # A key queued for the displayed scene takes precedence over
+                # automatic advancement, including on the final scene.
+                $keyAvailable=[Console]::KeyAvailable
+                if ($keyAvailable) {
                     $key=[Console]::ReadKey($true)
                     if ($key.Key -eq [ConsoleKey]::Q) {return 'Exit'}
                     if ($key.Key -in [ConsoleKey]::B,[ConsoleKey]::Escape) {return}
@@ -2198,9 +2197,14 @@ function Show-MioPreview([string]$Section='Tour') {
                     }
                     elseif ($key.Key -eq [ConsoleKey]::R) {$next=0; $script:Clock.Restart();if ($paused) {$script:Clock.Stop()};break}
                     elseif ($key.Key -eq [ConsoleKey]::E) {Switch-DisplayEffect; $dirty=$true}
-                } else {
-                    Wait-DisplayFrame 30
                 }
+                # Ignored keys and effect toggles must not postpone expiry
+                # while a held key keeps the input queue nonempty.
+                if (-not $paused -and -not $resizePaused -and $timer.ElapsedMilliseconds -ge $duration) {
+                    if ($pageIndex+1 -lt $pageCount) {$next=$index; $requestedPage=$pageIndex+1}
+                    break
+                }
+                if (-not $keyAvailable) {Wait-DisplayFrame 30}
             }
             Clear-DisplayPanel; $index=$next
         }

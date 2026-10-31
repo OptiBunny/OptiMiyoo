@@ -472,6 +472,11 @@ function Get-PlaylistMediaIdentity([string]$Relative) {
         $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
         $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
     }
+    if ($tagged -and -not $title -and $parent) {
+        # Label-only names such as (Disc 1) inherit their immediate game folder.
+        $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
+        $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+    }
     if ($null -eq $tapeGrouping -and $found.Count -gt 1) {$errorText='Multiple disk tags in a loose filename. Put the complete game in one ZIP to specify its grouping.'}
     if(-not $usedFolderTitle -and $parent -and [IO.Path]::GetFileName($parent).Equals($title,[StringComparison]::OrdinalIgnoreCase)){
         $title=[IO.Path]::GetFileName($parent)

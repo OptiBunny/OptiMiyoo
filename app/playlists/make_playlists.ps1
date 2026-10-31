@@ -561,6 +561,11 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
             $groups[$stem]=[pscustomobject]@{System=$Profile.Folder; Source=$stem; SourceKey=('files:'+$stem); Stem=$stem; Zip=$null; Disks=(New-Object 'System.Collections.Generic.List[object]'); Error=$null}
         }
         $group=$groups[$stem]
+        # Linguistic dictionary keys can merge distinct Unicode title spellings.
+        # Keep every disk in the refused group so all original dependencies remain.
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals($group.Stem,$stem)) {
+            $group.Error='Ambiguous game names: rename inputs that differ only in Unicode spelling.'
+        }
         $group.Disks.Add([pscustomobject]@{Path=$file.FullName; Name=($file.BaseName+$file.Extension.ToLowerInvariant()); Tag=$identity.Tag; Tagged=$identity.Tagged})
         if ($identity.Error) {$group.Error=$identity.Error}
         $grouped++; Show-PreparationProgress 'Grouping loose media' $file.Name $grouped $looseFiles.Count 'files'

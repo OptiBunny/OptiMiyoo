@@ -78,7 +78,7 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
         else{$lease.Stream.CopyTo($output)}
         $output.Flush($true);$output.Dispose();$output=$null
         $State.TotalBytes+=$lease.Stream.Length
-        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;Expected=$null;Changed=$false;Folder='';Extensions=@()}
+        $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;OriginalValid=$false;Expected=$null;Changed=$false;Folder='';Extensions=@()}
         $lease=$null
     }finally{if($output){$output.Dispose()};if($lease){$lease.Dispose()}}
 }
@@ -115,6 +115,15 @@ function New-ApplicationSdSession {
             try {
                 $file.Extensions=[string[]]@(Get-OnionSetupExtensions $profile)
                 $file.Expected=Get-OnionConfigPatch -Original $file.Bytes -Extensions $file.Extensions
+                $file.OriginalValid=$true
+            }
+            catch [IO.InvalidDataException] {
+                # A valid original can exceed the output cap only when enabling
+                # more extensions. Keep and shrinking Off edits remain usable;
+                # the oversized On edit still has no replacement authority.
+                $limit=$_.Exception.Data['OptiMiyoo.SdConfigOutputLimit']
+                $file.OriginalValid=($limit -is [bool] -and $limit)
+                $file.Expected=$null
             }
             catch{$file.Expected=$null}
         }
@@ -143,7 +152,7 @@ function Get-ApplicationSdSelection {
         $relative='Emu/'+$folder+'/config.json';$status='Unavailable';$reason='No config found';$available=$false
         if($state.Files.ContainsKey($relative)) {
             $file=$state.Files[$relative];$reason='Invalid config'
-            if($null -ne $file.Expected) {
+            if($file.OriginalValid) {
                 $status=Get-OnionSetupExtensionState -Original $file.Bytes -Extensions @(Get-OnionSetupExtensions $profile)
                 $available=$true;$reason=''
             }
@@ -165,7 +174,7 @@ function Set-ApplicationSdSelection {
     $known=@(foreach($profile in $profiles) {
         $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
         $relative='Emu/'+$folder+'/config.json'
-        $available=$state.Files.ContainsKey($relative) -and $null -ne $state.Files[$relative].Expected
+        $available=$state.Files.ContainsKey($relative) -and $state.Files[$relative].OriginalValid
         [pscustomobject]@{Id=[string]$profile.Folder;Available=$available}
     })
     if($Items.Count -ne $known.Count){throw 'SD selection must include each installed system profile exactly once.'}

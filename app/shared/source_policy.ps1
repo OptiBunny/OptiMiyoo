@@ -526,7 +526,10 @@ function Remove-SourcePolicyFile([string]$Path,$Lease) {
     if (Test-Path -LiteralPath $Path) {throw 'An original is still present at this path; it was not deleted by pathname.'}
 }
 
-function Open-SourcePolicyOutputs([object[]]$Outputs,[scriptblock]$Progress=$null) {
+function Open-SourcePolicyOutputs {
+    [CmdletBinding()]
+    param([object[]]$Outputs,[scriptblock]$Progress=$null)
+    $outputCommand=$PSCmdlet
     $locks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
     $transferred=$false
     try {
@@ -569,7 +572,14 @@ function Open-SourcePolicyOutputs([object[]]$Outputs,[scriptblock]$Progress=$nul
                     $lock=[IO.File]::Open($file.Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read); $stream=$lock
                 }
                 $locks.Add($lock)
-                $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($stream,(Get-SourcePolicyProgressAction $Progress 'Checking installed outputs' $file.Path))
+                $progressAction=Get-SourcePolicyProgressAction $Progress 'Checking installed outputs' $file.Path
+                # Observe engine Stop inside native hashing before handing off
+                # the complete lock set. Renderer errors remain best effort.
+                $hashCallback={param([long]$done,[long]$total)
+                    if($outputCommand.Stopping){throw [Management.Automation.PipelineStoppedException]::new()}
+                    if($progressAction){$progressAction.Invoke($done,$total)}
+                }.GetNewClosure()
+                $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($stream,[Action[long,long]]$hashCallback)
                 if ($hash -ne $file.Hash) {throw ('Output changed after verification; original kept: '+$file.Path)}
             }
         }

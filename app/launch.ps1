@@ -2,6 +2,7 @@
 param([string]$Root,[switch]$CurrentTerminal,[switch]$NoAnimation)
 $ErrorActionPreference='Stop'
 $env:PSModuleAnalysisCachePath='NUL'
+. (Join-Path $PSScriptRoot 'runtime/application_entry.ps1')
 
 function New-OptiTerminalCommand([string]$EntryPoint,[string]$Root,[switch]$NoAnimation) {
     # Keep paths out of Windows Terminal's semicolon-delimited command syntax.
@@ -68,10 +69,12 @@ function Start-OptiTerminalWindow([string]$EntryPoint,[string]$Root,[switch]$NoA
     if (-not $terminal) {return $false}
     try {
         if ($Root) {
+            $requestedRoot=$Root
             $rootProvider=$null;$rootDrive=$null
             $Root=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
                 $Root,[ref]$rootProvider,[ref]$rootDrive)
             if ($rootProvider.Name -ne 'FileSystem') {throw 'The collection root must be a filesystem path.'}
+            Assert-ApplicationRootIdentity -Path $requestedRoot -ResolvedPath $Root
         }
         $powerShell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
         $prefix='"'+$powerShell+'" -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '

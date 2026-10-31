@@ -1,4 +1,29 @@
 ﻿# Shared entry routing. A caller-controlled variable cannot bypass the boundary.
+function Assert-ApplicationRootIdentity {
+    param([Parameter(Mandatory=$true)][string]$Path,[string]$ResolvedPath)
+    if(-not $PSBoundParameters.ContainsKey('ResolvedPath')){$ResolvedPath=[IO.Path]::GetFullPath($Path)}
+    $message='Windows cannot preserve this folder path exactly. Choose another path; originals were not changed.'
+    # Provider resolution can already discard final Unicode whitespace. Keep
+    # caller spelling until this check, including relative and PSDrive paths.
+    $ending=[regex]::Match($Path.TrimEnd('\','/'),'\s+$').Value
+    if($ending -and -not $ResolvedPath.TrimEnd('\','/').EndsWith($ending,[StringComparison]::Ordinal)){throw $message}
+    $full=[IO.Path]::GetFullPath($ResolvedPath)
+    $resolvedEnding=[regex]::Match($ResolvedPath.TrimEnd('\','/'),'\s+$').Value
+    if($resolvedEnding -and -not $full.TrimEnd('\','/').EndsWith($resolvedEnding,[StringComparison]::Ordinal)){throw $message}
+    # Native directory leases reopen bare ancestors. A final separator can
+    # preserve the first GetFullPath result while an ancestor loses its suffix.
+    # Walk lexical prefixes, not DirectoryInfo, which can normalize them first.
+    $root=[IO.Path]::GetPathRoot($full)
+    $current=$full.TrimEnd('\','/')
+    if($current.Length -lt $root.Length){$current=$root}
+    while($current){
+        if(-not [IO.Path]::GetFullPath($current).Equals($current,[StringComparison]::OrdinalIgnoreCase)){throw $message}
+        if($current.Length -le $root.Length){break}
+        $separator=$current.LastIndexOf([IO.Path]::DirectorySeparatorChar)
+        $current=if($separator -lt $root.Length){$root}else{$current.Substring(0,$separator)}
+    }
+}
+
 function Test-ApplicationWorker {
     $client='OptiMiyoo.ApplicationRpcClient' -as [type]
     return ($null -ne $client -and $client::IsIsolated)
@@ -19,6 +44,7 @@ function Enter-ApplicationHost {
     $ErrorActionPreference='Stop'
     $temporary=$null
     try {
+        Assert-ApplicationRootIdentity -Path $ApplicationRoot
         . (Join-Path $ApplicationRoot 'app/shared/portable_storage.ps1')
         $temporary=Open-OptiPortableTempScope $ApplicationRoot
         . (Join-Path $ApplicationRoot 'app/runtime/application_host.ps1')

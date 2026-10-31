@@ -1,6 +1,7 @@
 ﻿# The host keeps publication authority. No function in this file is an RPC verb
 # accepting an arbitrary host pathname, script, command, or deletion request.
 # Installed planning/ownership helpers remain trusted, bounded parsing code.
+. (Join-Path $PSScriptRoot 'application_entry.ps1')
 . (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
 . (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 . (Join-Path $PSScriptRoot '../shared/archive_limits.ps1')
@@ -281,6 +282,7 @@ function Get-ApplicationBrokerModule([ValidateSet('Playlist','C64','ZX')][string
 
 function New-ApplicationBrokerSession {
     param([Parameter(Mandatory=$true)][string]$OriginalRoot,[Parameter(Mandatory=$true)][string]$WorkRoot)
+    Assert-ApplicationRootIdentity -Path $OriginalRoot
     $original=[IO.Path]::GetFullPath($OriginalRoot).TrimEnd('\','/');$work=[IO.Path]::GetFullPath($WorkRoot).TrimEnd('\','/')
     if(-not [IO.Directory]::Exists($original)){throw 'Application input root must exist.'}
     foreach($name in 'SRC','DST') {

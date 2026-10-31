@@ -1,6 +1,7 @@
 ﻿# The SD root comes from the original command line or the parent's own console.
 # Child output can only request the exact extension patch computed here from
 # frozen original bytes; it cannot supply a host path, replacement, or backup.
+. (Join-Path $PSScriptRoot 'application_entry.ps1')
 . (Join-Path $PSScriptRoot '../shared/compile_support.ps1')
 . (Join-Path $PSScriptRoot '../onion/core_support.ps1')
 . (Join-Path $PSScriptRoot 'application_prompts.ps1')
@@ -85,6 +86,7 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
 
 function New-ApplicationSdSession {
     param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[scriptblock]$Progress,[scriptblock]$CancellationCheck)
+    Assert-ApplicationRootIdentity -Path $OnionRoot
     Initialize-ApplicationSdSupport
     $original=[IO.Path]::GetFullPath($OnionRoot);$work=[IO.Path]::GetFullPath($WorkRoot)
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'

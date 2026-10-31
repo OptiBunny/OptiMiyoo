@@ -335,6 +335,7 @@ function Initialize-ApplicationVersion([string]$ApplicationRoot) {
 function Invoke-ApplicationHost {
     param([Parameter(Mandatory=$true)][string]$ApplicationRoot,[string]$Entry,[hashtable]$Arguments)
     $ErrorActionPreference='Stop'
+    Assert-ApplicationRootIdentity -Path $ApplicationRoot
     $application=[IO.Path]::GetFullPath($ApplicationRoot)
     Initialize-ApplicationVersion $application
     $originalRoot=$application
@@ -343,6 +344,7 @@ function Invoke-ApplicationHost {
         $originalRoot=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
             [string]$Arguments.Root,[ref]$rootProvider,[ref]$rootDrive)
         if ($rootProvider.Name -ne 'FileSystem') {throw 'The collection root must be a filesystem path.'}
+        Assert-ApplicationRootIdentity -Path ([string]$Arguments.Root) -ResolvedPath $originalRoot
     }
     $originalArguments=$Arguments.Clone()
     $menu=($Entry -eq 'Playlist' -and -not $Arguments.System -and -not $Arguments.C64Convert -and -not $Arguments.ZXConvert -and -not $Arguments.PrepareOnion -and -not $Arguments.Preview)
@@ -358,6 +360,7 @@ function Invoke-ApplicationHost {
             $onionPath=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
                 [string]$Arguments.OnionRoot,[ref]$onionProvider,[ref]$onionDrive)
             if ($onionProvider.Name -ne 'FileSystem') {throw 'The SD root must be a filesystem path.'}
+            Assert-ApplicationRootIdentity -Path ([string]$Arguments.OnionRoot) -ResolvedPath $onionPath
             $originalArguments.OnionRoot=$onionPath
         }
     }

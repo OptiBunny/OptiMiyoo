@@ -351,7 +351,10 @@ function Get-ConversionCueDependencies([string]$Path,[string]$Root,$DescriptorCa
         if($line -notmatch '^\s*FILE\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$'){throw 'An existing CUE has an unreadable FILE reference; output kept.'}
         $track=$Matches[1];if(-not $track){$track=$Matches[2]}
         if(++$count -gt 1024){throw 'Existing CUE exceeds the supported reference limit.'}
-        if(-not [IO.Path]::IsPathRooted($track)){$track=Join-Path ([IO.Path]::GetDirectoryName($Path)) $track}
+        $track=$track.Replace('/','\')
+        # A leading slash belongs to the descriptor's volume, not the process drive.
+        if($track.StartsWith('\') -and -not $track.StartsWith('\\')){$track=[IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$track.TrimStart('\'))}
+        elseif(-not [IO.Path]::IsPathRooted($track)){$track=Join-Path ([IO.Path]::GetDirectoryName($Path)) $track}
         [IO.Path]::GetFullPath($track)
     }
     if(-not $count){throw 'Existing CUE contains no FILE references; output kept.'}
@@ -427,7 +430,9 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
             $line=$line.Trim();if (-not $line -or $line.StartsWith('#')) {continue}
             foreach($candidate in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
                 $reference=$candidate.Replace('/','\')
-                if (-not [IO.Path]::IsPathRooted($reference)) {$reference=Join-Path $entry.DirectoryName $reference};$reference=[IO.Path]::GetFullPath($reference)
+                if($reference.StartsWith('\') -and -not $reference.StartsWith('\\')){$reference=[IO.Path]::Combine([IO.Path]::GetPathRoot($entry.DirectoryName),$reference.TrimStart('\'))}
+                elseif(-not [IO.Path]::IsPathRooted($reference)){$reference=Join-Path $entry.DirectoryName $reference}
+                $reference=[IO.Path]::GetFullPath($reference)
                 $references=New-Object 'System.Collections.Generic.List[string]';$references.Add($reference)
                 if ([IO.Path]::GetExtension($reference) -ieq '.cue') {
                     if(-not $reference.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'An existing playlist references a CUE outside DST. Output left alone; use a separate DST.'}

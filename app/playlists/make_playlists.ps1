@@ -1270,7 +1270,8 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
             foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                 try {
-                    if([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
+                    if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$candidate.TrimStart('\')))}
+                    elseif([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
                     else{$full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $candidate))}
                 } catch {throw ('Cannot verify an existing playlist reference: '+$Path)}
                 Add-PlaylistReferenceKey $Index $entry Exact $full
@@ -1427,7 +1428,8 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                     try {
-                        if ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}
+                        if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($file.DirectoryName),$candidate.TrimStart('\')))}
+                        elseif ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}
                         else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $candidate))}
                     } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
                     $references=@($full)

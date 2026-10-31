@@ -84,7 +84,7 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
 }
 
 function New-ApplicationSdSession {
-    param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[scriptblock]$Progress)
+    param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[scriptblock]$Progress,[scriptblock]$CancellationCheck)
     Initialize-ApplicationSdSupport
     $original=[IO.Path]::GetFullPath($OnionRoot);$work=[IO.Path]::GetFullPath($WorkRoot)
     $originalPrefix=$original.TrimEnd('\','/')+'\';$workPrefix=$work.TrimEnd('\','/')+'\'
@@ -93,6 +93,7 @@ function New-ApplicationSdSession {
     $state=[pscustomobject]@{Handle=$null;OriginalRoot=$original;StagedRoot=(Join-Path $work 'Onion');RootLease=$null;Files=@{};UnavailableConfigs=@{};TotalBytes=0L;Closed=$false;Completed=$false;SelectionFinalized=$false;BackupRoot=$null;VerifiedBackups=(New-Object 'Collections.Generic.List[object]');UnverifiedBackups=(New-Object 'Collections.Generic.List[object]')}
     $workLease=$null;$registered=$false
     try {
+        if($CancellationCheck -and (& $CancellationCheck)){throw [OperationCanceledException]::new('SD setup cancelled.')}
         $state.RootLease=[OptiMiyoo.OnionPathLease]::Open($original,$original,$true,$false,$false)
         $emu=Join-Path $original 'Emu'
         $emuLease=[OptiMiyoo.OnionPathLease]::Open($emu,$original,$true,$false,$false);$emuLease.Dispose()
@@ -105,6 +106,7 @@ function New-ApplicationSdSession {
             $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
             if($folder -notmatch '^[A-Z0-9]+$'){throw 'Invalid installed SD profile.'}
             if($Progress){$null=& $Progress 'Reading config files' $folder $index $profiles.Count 'systems'}
+            if($CancellationCheck -and (& $CancellationCheck)){throw [OperationCanceledException]::new('SD setup cancelled.')}
             $relative='Emu/'+$folder+'/config.json'
             Add-ApplicationSdSnapshotFile $state $relative 1048576 -Config
             if(-not $state.Files.ContainsKey($relative)){continue}
@@ -127,6 +129,7 @@ function New-ApplicationSdSession {
             }
             catch{$file.Expected=$null}
         }
+        if($CancellationCheck -and (& $CancellationCheck)){throw [OperationCanceledException]::new('SD setup cancelled.')}
         if($Progress){$null=& $Progress 'Reading config files' 'Config files read and checked.' $profiles.Count $profiles.Count 'systems'}
         $handle=[pscustomobject]@{Id=([Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'));StagedRoot=$state.StagedRoot}
         $state.Handle=$handle;$script:ApplicationSdStates[$handle.Id]=$state
@@ -234,10 +237,11 @@ function Invoke-ApplicationSdChecklist {
         $model=Get-OnionSetupChecklistModel -Items $items -Message $message
         $answer=Read-ApplicationConsoleChoice -Model $model -Session $ApplicationSession -EscapeValue ([string][char]27)
         $message=''
-        if([string]::Equals($answer,([string][char]27),[StringComparison]::Ordinal)){return $null}
+        if($answer -eq 'B' -or [string]::Equals($answer,([string][char]27),[StringComparison]::Ordinal)){return $null}
+        if($answer -eq 'Q'){return [pscustomobject]@{Choice='Exit'}}
         if($answer -in '','A'){return (Set-ApplicationSdSelection -Session $SdSession -Items $items)}
         $number=0
-        if(-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $items.Count+1){$message='Choose a system number, A to apply, or Esc to cancel.';continue}
+        if(-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $items.Count+1){$message='Choose a number / A: Apply / B/Esc: Back / Q: Exit';continue}
         if($number -eq 1) {
             $available=@($items | Where-Object {$_.Available})
             if(-not $available.Count){$message='No valid installed configs are available to change.';continue}
@@ -265,6 +269,16 @@ function Test-ApplicationSdCancellation($ApplicationSession) {
         $key=[Console]::ReadKey($true)
         if([int]$key.KeyChar -eq 3 -or ($key.Key -eq [ConsoleKey]::C -and ($key.Modifiers -band [ConsoleModifiers]::Control))){
             $ApplicationSession.Stop()
+            if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
+            return $true
+        }
+        if(($key.Modifiers -band ([ConsoleModifiers]::Control -bor [ConsoleModifiers]::Alt)) -ne 0){continue}
+        $navigation=''
+        if($key.Key -eq [ConsoleKey]::Escape){$navigation='Back'}
+        elseif([char]::ToUpperInvariant($key.KeyChar) -eq 'Q'){$navigation='Exit'}
+        elseif([char]::ToUpperInvariant($key.KeyChar) -eq 'B'){$navigation='Back'}
+        if($navigation){
+            $ApplicationSession.RequestNavigation($navigation)
             if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
             return $true
         }
@@ -420,7 +434,7 @@ function Get-ApplicationSdResultLines {
 function Get-ApplicationSdResultModel {
     param([Parameter(Mandatory=$true)]$Result,[int]$Page=0,[long]$Anchor=-1)
     $sourceLines=@(Get-ApplicationSdResultLines -Result $Result)
-    $title='Onion SD setup / results';$prompt='Enter / Esc: Main menu | Q: Exit'
+    $title='Onion SD setup / results';$prompt='Enter / B / Esc: Main menu | Q: Exit'
     # Let the shared renderer reclaim artwork or paragraph gaps before paging.
     # Without an initialized viewport, retain the conservative minimum panel.
     $textWidth=44;$pageSize=11
@@ -480,7 +494,7 @@ function Read-ApplicationSdResult {
         while ($true) {
             [void](Update-DisplaySize)
             $model=Get-ApplicationSdResultModel -Result $Result -Page $page -Anchor $anchor
-            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText
+            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText -EscapeValue 'B'
             if($answer -isnot [string] -and $answer.Resized) {$page=$model.Page;if($anchor -lt 0){$anchor=$model.Anchor};$inputText=$answer.InputText;continue}
             $inputText='';$anchor=-1L
             if ($answer -in '', 'B') {return $true}
@@ -511,7 +525,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
     # be part of a real folder name and must not select a different sibling.
     $candidate=$Text.Trim(' ').Trim('"')
     if ([string]::IsNullOrWhiteSpace($candidate)) {
-        $choice.Error='Enter your SD path, e.g. E:\, or press Esc to go back.';return $choice
+        $choice.Error='Enter your SD path, e.g. E:\ / B/Esc: Back / Q: Exit';return $choice
     }
     # IsPathRooted also accepts drive-relative B: and current-drive \folder.
     # The SD prompt must never resolve those against the app's working folder.
@@ -519,16 +533,16 @@ function Resolve-ApplicationSdInput([string]$Text) {
     $unc=($candidate -match '^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)')
     if ((-not $drive -and -not $unc) -or $candidate.StartsWith('\\?\') -or $candidate.StartsWith('\\.\') -or
         $candidate -match '[\x00-\x1f<>|"*?]' -or ($drive -and $candidate.Substring(2).Contains(':')) -or ($unc -and $candidate.Contains(':'))) {
-        $choice.Error='Use a full SD path, e.g. E:\, or press Esc to go back.';return $choice
+        $choice.Error='Use a full SD path, e.g. E:\ / B/Esc: Back / Q: Exit';return $choice
     }
     try {$choice.Path=[IO.Path]::GetFullPath($candidate)}
-    catch {$choice.Error='Check the SD path, or press Esc to go back.'}
+    catch {$choice.Error='Check the SD path / B/Esc: Back / Q: Exit'}
     # Some Windows PowerShell runtimes trim Unicode whitespace in GetFullPath.
     # Refuse that normalization rather than silently selecting a sibling folder.
     $trailingWhitespace=[regex]::Match($candidate,'\s+$').Value
     if($choice.Path -and $trailingWhitespace -and -not $choice.Path.EndsWith($trailingWhitespace,[StringComparison]::Ordinal)){
         $choice.Path=$null
-        $choice.Error='Windows cannot preserve the end of this SD path. Use another path, or press Esc to go back.'
+        $choice.Error='Windows cannot preserve this path ending. Use another path / B/Esc: Back / Q: Exit'
     }
     return $choice
 }
@@ -536,7 +550,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
 function Read-ApplicationSdConsolePath {
     param([string]$InitialText='', [string]$ErrorMessage='', $Session=$null)
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
-    $title='Onion SD setup';$prompt='SD drive or folder (for example E:\) / Esc: Back'
+    $title='Onion SD setup';$prompt='SD drive or folder (e.g. E:\) / B/Esc: Back / Q: Exit'
     if ($ErrorMessage) {$prompt=$ErrorMessage}
     $rows=@(Get-OnionSetupPathRows);$text=$InitialText;$dirty=$true
     [void](Update-DisplaySize)
@@ -575,7 +589,11 @@ function Read-ApplicationSdConsolePath {
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
                 $layout=Get-MenuLayout -Rows $rows;$dirty=$true;continue
             }
-            if($script:UiVT -and -not $layout.Fits){continue}
+            if($script:UiVT -and -not $layout.Fits){
+                $command=[char]::ToUpperInvariant($key.KeyChar)
+                if($command -eq 'Q' -or $command -eq 'B'){return [string]$command}
+                continue
+            }
             if($key.Key -eq [ConsoleKey]::Enter){
                 if(-not $script:UiVT){[Console]::WriteLine()}
                 $selected=$text.Trim(' ').Trim('"')
@@ -595,23 +613,31 @@ function Read-ApplicationSdConsolePath {
 
 function Invoke-ApplicationSdFolderPrompt {
     param([Parameter(Mandatory=$true)]$Session,[switch]$NoAnimation,[switch]$NoColor,
-          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT',[switch]$OwnConsole,[string]$InitialText='')
     $paused=$false;$display=$false;$selected=$null;$previousEffect=$script:DisplayEffect
     try {
-        [void]$Session.PauseRelay();if(-not $Session.IsRelayPaused){throw 'The application relay did not surrender the parent console.'};$paused=$true
+        if($OwnConsole){
+            if($Session.Failure){throw $Session.Failure}
+            if($Session.CancellationRequested){throw [OperationCanceledException]::new('Application cancelled.')}
+            if(-not $Session.CanPromptBeforeStart -and -not $Session.HasExited -and -not $Session.IsRelayPaused){throw 'SD selection requires the parent to own the console.'}
+        }else{
+            [void]$Session.PauseRelay();if(-not $Session.IsRelayPaused){throw 'The application relay did not surrender the parent console.'};$paused=$true
+        }
         $script:DisplayEffect=$DisplayEffect
-        Initialize-Display;$display=$true;$text='';$message=''
+        Initialize-Display;$display=$true;$text=$InitialText;$message=''
         while ($true) {
             $selected=Read-ApplicationSdConsolePath -InitialText $text -ErrorMessage $message -Session $Session
             if ($null -eq $selected) {break}
+            if([string]::Equals($selected,'B',[StringComparison]::OrdinalIgnoreCase)){$selected=$null;break}
+            if([string]::Equals($selected,'Q',[StringComparison]::OrdinalIgnoreCase)){$selected=[pscustomobject]@{Choice='Exit'};break}
             $choice=Resolve-ApplicationSdInput $selected
             $text=$selected
             if ($choice.Error) {$message=$choice.Error;continue}
             if (-not [IO.Directory]::Exists($choice.Path)) {
-                $message='Folder not found. Check your SD path, or press Esc to go back.';continue
+                $message='Folder not found. Check your SD path / B/Esc: Back / Q: Exit';continue
             }
             if (-not [IO.Directory]::Exists((Join-Path $choice.Path 'Emu'))) {
-                $message='No Emu folder here. Choose your SD root, or press Esc to go back.';continue
+                $message='No Emu folder here. Choose your SD root / B/Esc: Back / Q: Exit';continue
             }
             $selected=$choice.Path;break
         }

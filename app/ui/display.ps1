@@ -1118,6 +1118,32 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
     }
 }
 
+function Read-PlainMenuInput([string]$Prompt) {
+    Write-Host ($Prompt+': ') -NoNewline
+    if ([Console]::IsInputRedirected) {
+        $line=[Console]::ReadLine()
+        if ($null -eq $line) {return 'Q'}
+        if ([string]::Equals($line,([string][char]27),[StringComparison]::Ordinal)) {return 'B'}
+        return $line.Trim()
+    }
+    # Choice menus still submit letters with Enter. Escape must also work when
+    # ANSI rendering is unavailable, where Read-Host cannot report that key.
+    $text=''
+    while ($true) {
+        $key=[Console]::ReadKey($true)
+        if ($key.Key -eq [ConsoleKey]::Escape) {[Console]::WriteLine();return 'B'}
+        if ($key.Key -eq [ConsoleKey]::Enter) {[Console]::WriteLine();return $text.Trim()}
+        if ($key.Key -eq [ConsoleKey]::Backspace -and $text.Length) {
+            $previous=Get-InputCaretOffset $text $text.Length -1
+            $width=Get-TextWidth $text.Substring($previous)
+            $text=$text.Substring(0,$previous)
+            [Console]::Write(("`b"*$width)+(' '*$width)+("`b"*$width))
+        } elseif (-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 4096) {
+            $text+=[string]$key.KeyChar;[Console]::Write($key.KeyChar)
+        }
+    }
+}
+
 function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                            [string[]]$Lines=@(),[string]$Mood='idle') {
     $Prompt=ConvertTo-SafeExternalText $Prompt
@@ -1133,14 +1159,8 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
     if (-not $canDraw) {
         Clear-DisplayPanel
         foreach ($line in $Lines) {Write-Host ('  '+(ConvertTo-SafeExternalText $line).TrimStart())}
-        if ([Console]::IsInputRedirected) {
-            Write-Host ($Prompt+': ') -NoNewline
-            $line=[Console]::ReadLine()
-            if ($null -eq $line) {return 'Q'}
-            return $line.Trim()
-        }
         if ($script:UiInteractive) {try {[Console]::CursorVisible=$true} catch {}}
-        return ([string](Read-Host $Prompt)).Trim()
+        return Read-PlainMenuInput $Prompt
     }
     $text=''; $caret=0; $dirty=$true
     $idleWatch=[Diagnostics.Stopwatch]::StartNew()
@@ -1294,6 +1314,7 @@ function Draw-DisplayPanel([switch]$Force) {
     }
     $resultsLine=('Ready '+$script:Ok+'   Skipped '+$script:Skipped+'   Failed '+$script:Failed)
     if ($script:UiDemo) {$resultsLine='Sample: '+$resultsLine}
+    $navigation='B/Esc: Back | Q: Exit';if ($script:UiDemo) {$navigation=''}
     $title='Progress'; $channel='SRC -> DST / LOCAL DISK LINK'
     if ($script:UiDemo) {
         $title='DEMO / '+$script:UiStage
@@ -1302,7 +1323,7 @@ function Draw-DisplayPanel([switch]$Force) {
     $data=@(
         $script:UiSystem,
         $setLine,
-        '',
+        $navigation,
         $script:UiStage,
         $script:UiDetail,
         $bar,
@@ -1332,7 +1353,7 @@ function Draw-DisplayPanel([switch]$Force) {
         $data=@($script:UiSystem)+@(Get-ProgressTextRows $setLine $left 2)+@('')+
               @(Get-ProgressTextRows $script:UiStage $left 2)+
               @(Get-ProgressTextRows $script:UiDetail $left 3)+
-              @($bar,$basis,'',$queue,$queueBar,$remaining,'',$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock),$eta)
+              @($bar,$basis,'',$queue,$queueBar,$remaining,$navigation,$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock),$eta)
         $stageIndex=4;$barIndex=9;$queueBarIndex=13
     }
     if ($compact) {
@@ -1574,7 +1595,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'No game files or SD cards are read or changed.','',
             'Space: pause / resume','N / Right / Enter: next',
             'P / Left: previous','R: restart this section',
-            'E: turn the CRT effect on or off','B / Q / Esc: return to demo selection');Detail='Use the controls below at any time.';Duration=13000},
+            'E: turn the CRT effect on or off','B / Esc: return to demo selection','Q: exit OptiMiyoo');Detail='Use the controls below at any time.';Duration=13000},
         @{Group='Tour';Mood='idle';Stage='Main menu';System='MENU';MenuPage='Main';Lesson='S prepares an SD card. C/Z convert. Numbers create playlists.';Duration=12000},
         @{Group='Tour';Mood='idle';Stage='Choose a demo';System='MENU';MenuPage='Demo';Lesson='Each section can also be watched on its own.';Duration=10000},
         @{Group='Tour';Mood='idle';Stage='Start with SRC and DST';System='MENU';Menu=@(
@@ -1600,7 +1621,8 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         @{Group='Setup';Mood='idle';Stage='Review SD changes';System='MENU';SdItems=$sdSelected;Menu=@((Get-OnionSetupChecklistModel -Items $sdSelected).Lines);Detail='C64 and PlayStation are now On; MSX is Off. Nothing is saved yet.';Duration=14000},
         @{Group='Setup';Mood='idle';Stage='Apply or cancel SD changes';System='MENU';Menu=@(
             'A / Enter: apply your selection.',
-            'Esc: leave without saving any of these choices.','',
+            'B / Esc: back without saving these choices.',
+            'Q: exit without saving.','',
             'This example applies three changes:',
             'C64: add the missing playlist and tape extensions.',
             'MSX: remove the playlist extension.',
@@ -1618,7 +1640,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'LYNX: Already off','MSX: Disabled','PSX: Enabled',
             'SEGACD: Already on','VIC20: Already on','ZXS: Already off','',
             'Verified original config backups:')+@($sdResult.VerifiedBackups | ForEach-Object {$_.System+': '+$_.Path})+@('',
-            'Enter / Esc: Main menu | Q: Exit');Detail='Three configs changed. Six already matched; DOS had no config.';Duration=14000},
+            'Enter / B / Esc: Main menu | Q: Exit');Detail='Three configs changed. Six already matched; DOS had no config.';Duration=14000},
         @{Group='Setup';Mood='idle';Stage='Read the SD results';System='MENU';Menu=@(
             'Enabled / Disabled: the listed file types were changed.',
             'Already on / Already off: no edit was needed.',
@@ -1630,8 +1652,10 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'The results stay open until you leave them.',
             'Refresh Onion''s game list on the Miyoo afterwards.');Detail='Enabling an extension does not add new emulator features.';Duration=12000},
         @{Group='Setup';Mood='wait';Stage='Stopping SD setup';System='MENU';Menu=@(
-            'Before Apply: Esc cancels without saving.',
-            'After Apply: Ctrl+C asks setup to stop.','',
+            'Before Apply: B / Esc goes back without saving.',
+            'Q exits without saving.',
+            'After Apply: B / Esc stops and returns to SD selection.',
+            'Q exits. Ctrl+C also asks setup to stop.','',
             'Completed config updates and their verified backups remain.',
             'Configs not yet changed keep their original settings.',
             'Read the results to see which changes finished.');Detail='Cancellation does not undo changes already saved.';Duration=10000}
@@ -1744,13 +1768,14 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'Fix the missing CUE track before trying that set again.','',
             'Report and Log paths point to saved batch details.','',
             'The results screen waits for you.','',
-            'Enter: main menu',
+            'Enter / B / Esc: main menu',
             'Q: exit');Detail='These are sample results, not an actual batch.';Duration=10000},
         @{Group='Results';Mood='check';Stage='Retrying a corrected disk set';System='RESULT';Game='Demo Disc 2.cue';Detail='New batch: check the restored track, then verify and save.';Total=1;Progress=$true;CompleteSet=$true},
         @{Group='Results';Mood='happy';Stage='Corrected set complete';System='RESULT';Game='Demo Disc 2.cue';Detail='The new batch has one verified output.';Progress=$true;Complete=$true;Total=1;Ok=1},
         @{Group='Results';Mood='wait';Stage='No matching inputs';System='EMPTY BATCH';Game='Demo empty SRC';Detail='Add matching files to SRC, then start a new batch.';Status='No matching inputs';Total=0},
         @{Group='Results';Mood='wait';Stage='Stopping a batch';System='MENU';Menu=@(
-            'Ctrl+C asks the current batch to stop.','',
+            'B / Esc stops the batch and returns to output settings.',
+            'Q stops the batch and exits. Ctrl+C also stops.','',
             'Outputs already saved and verified stay in DST.',
             'The current output set may finish saving before stopping.',
             'Later sets are not published.',
@@ -1759,7 +1784,7 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
             'may finish removal before stopping.',
             'Completed removals are not undone.','',
             'If results are shown, review the output and original counts.',
-            'Cancellation exits the run instead of starting another batch.',
+            'Going back does not start another batch automatically.',
             'Stopping does not hide errors already found.');Detail='Real errors are still reported if a batch is cancelled.';Duration=12000}
     )
     $poseNames=@{idle='At rest';blink='Blink';scanleft='Look left';scanright='Look right';work='Working';check='Checking';happy='Happy';happyturn='Happy turn';oops='Oops';wait='Waiting'}
@@ -1777,8 +1802,8 @@ function Get-MioPreviewScenes([string]$Section='Tour') {
         'C / Z convert disk images.',
         '1-9 create playlists for the chosen system.',
         'D opens this demo. E turns CRT on or off.',
-        'Q exits from the main menu.','',
-        'B / Q / Esc here returns to demo selection.',
+        'Q exits OptiMiyoo from any screen.','',
+        'B / Esc here returns to demo selection.',
         'R restarts the full walkthrough.');Detail='No game files or SD cards were changed.';Duration=12000}
     foreach ($scene in $scenes) {
         if ($scene.MenuPage) {
@@ -1887,12 +1912,13 @@ function Get-MioPreviewControls([bool]$Paused,[bool]$NeedsSpace=$false) {
     $state='On';if ($script:DisplayEffect -eq 'Smooth') {$state='Off'}
     $width=[Math]::Max(1,$script:UiWidth-10)
     $options=@(
-        ($prefix+' | Space '+$action+' | N/P step | R restart | E CRT '+$state+' | B back'),
-        ($prefix+' | Space '+$action+' | N/P | R | E CRT | B back'),
-        ('Space '+$action+' | N/P | B back')
+        ($prefix+' | Space '+$action+' | N/P step | R restart | E CRT '+$state+' | B back / Esc | Q quit'),
+        ($prefix+' | Space '+$action+' | N/P | R | E CRT | B back / Esc | Q quit'),
+        ('Space '+$action+' | N/P | B back / Esc | Q quit'),
+        ('Space '+$action+' | B back / Esc | Q quit')
     )
     foreach ($option in $options) {if ($option.Length -le $width) {return $option}}
-    return 'Space pause | B back'
+    return 'B/Esc back Q quit'
 }
 function Set-MioPreviewProgress([hashtable]$Scene,[double]$ElapsedMilliseconds,[double]$Duration) {
     # Progress has its own scene clock: low-CPU mode freezes decorative effects,
@@ -1989,7 +2015,8 @@ function Show-MioPreview([string]$Section='Tour') {
                 }
                 if ([Console]::KeyAvailable) {
                     $key=[Console]::ReadKey($true)
-                    if ($key.Key -in [ConsoleKey]::B,[ConsoleKey]::Q,[ConsoleKey]::Escape) {return}
+                    if ($key.Key -eq [ConsoleKey]::Q) {return 'Exit'}
+                    if ($key.Key -in [ConsoleKey]::B,[ConsoleKey]::Escape) {return}
                     if ($key.Key -eq [ConsoleKey]::Spacebar) {
                         $paused=-not $paused
                         if ($paused -or $resizePaused) {$timer.Stop();$script:Clock.Stop()} else {$timer.Start();$script:Clock.Start()}

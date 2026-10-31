@@ -17,7 +17,7 @@ param(
     [ValidateSet('Tour','C64','ZX','Playlists','Results','Bunny','Setup')][string]$PreviewSection='Tour',
     [switch]$ZXConvert,
     [switch]$C64Convert,
-    [ValidateSet('Main','C64','ZX')][string]$StartPage='Main'
+    [ValidatePattern('^(Main|C64|ZX|SD|Storage:[A-Za-z0-9]+)$')][string]$StartPage='Main'
 )
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../runtime/application_entry.ps1')
@@ -1627,13 +1627,7 @@ function Read-MenuChoice([string]$Prompt) {
     }
     Clear-DisplayPanel
     try {[Console]::CursorVisible=$true} catch {}
-    if ([Console]::IsInputRedirected) {
-        Write-Host ($Prompt+': ') -NoNewline
-        $line=[Console]::ReadLine()
-        if ($null -eq $line) {return 'Q'}
-        return $line.Trim()
-    }
-    return ([string](Read-Host $Prompt)).Trim()
+    return Read-PlainMenuInput $Prompt
 }
 
 function Show-MenuTitle([string]$Path) {
@@ -1658,6 +1652,15 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
 
 function Invoke-OptiMenu([object[]]$Profiles) {
     $page=$StartPage; $profile=$null; $lastCode=0
+    $storageChoices=@{Auto='1';Zip='2';Folders='3';Loose='4'}
+    $converterOutputs=@{C64='2';ZX='2'}
+    if ($page -in 'C64','ZX' -and $Storage) {$converterOutputs[$page]=$storageChoices[$Storage]}
+    if ($page -like 'Storage:*') {
+        $selected=@($Profiles | Where-Object {$_.Folder -eq $page.Substring(8)})
+        if ($selected.Count -ne 1) {throw 'Unknown system for the storage menu.'}
+        $profile=$selected[0];$page='Storage'
+        $singleOutput=$storageChoices[$SingleStorage];$hiddenOutput=$storageChoices[$Storage]
+    }
     $common=@{Root=$Root; Existing=$Existing; NoAnimation=$NoAnimation; NoColor=$NoColor; DisplayEffect=$DisplayEffect}
     while ($true) {
         $worker=$null; $workerArgs=$null
@@ -1667,6 +1670,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
             $answer=Read-MenuChoice $model.Prompt
             if ($answer -eq 'Q') {return $lastCode}
+            if ($answer -eq 'B') {continue}
             if ($answer -eq 'C') {$page='C64'; continue}
             if ($answer -eq 'Z') {$page='ZX'; continue}
             if ($answer -eq 'S') {$page='SD'; continue}
@@ -1697,12 +1701,13 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq '') {$answer='1'}
             $sections=@{'1'='Tour';'2'='C64';'3'='ZX';'4'='Playlists';'5'='Results';'6'='Bunny';'7'='Setup'}
             if (-not $sections.ContainsKey($answer)) {Write-MenuLine '  Choose 1 to 7, B or Q.'; continue}
-            Show-MioPreview $sections[$answer]
+            $navigation=Show-MioPreview $sections[$answer]
+            if ($navigation -eq 'Exit') {return $lastCode}
             $common.DisplayEffect=$script:DisplayEffect
             continue
         }
         if ($page -in 'C64','ZX') {
-            $model=Get-OptiMenuModel -Page $page -Profiles $Profiles
+            $model=Get-OptiMenuModel -Page $page -Profiles $Profiles -Output $converterOutputs[$page]
             Show-MenuTitle $model.Title
             for ($row=0;$row -lt $model.Rows.Count;$row++) {Write-MenuLine $model.TextRows[$row] $model.Rows[$row]}
             $defaultOutput=$model.Default
@@ -1711,6 +1716,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             if ($answer -eq 'Q') {return $lastCode}
             if ($answer -eq '') {$answer=$defaultOutput}
             if ($answer -notin '1','2','3','4') {Write-MenuLine '  Choose 1, 2, 3, 4, B or Q.'; continue}
+            $converterOutputs[$page]=$answer
             $workerArgs=$common.Clone()
             $workerArgs.Storage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$answer]
             if ($page -eq 'C64') {
@@ -1737,6 +1743,7 @@ function Invoke-OptiMenu([object[]]$Profiles) {
             $workerArgs.Storage=@{'1'='Auto';'2'='Zip';'3'='Folders';'4'='Loose'}[$hiddenOutput]
         } elseif ($page -eq 'SD') {
             $selected=Invoke-ApplicationRpc -Operation SD.Select -Payload @{}
+            if ($selected.Choice -eq 'Exit') {return $lastCode}
             if ($selected.Cancelled) {$page='Main';continue}
             return 0
         }
@@ -1769,7 +1776,7 @@ try {
     $profileData=Get-Content -LiteralPath (Join-Path $ScriptDir 'systems.json') -Raw | ConvertFrom-Json
     $profiles=@($profileData)
     Show-Header
-    if ($Preview) {Show-MioPreview $PreviewSection; Restore-Display; exit 0}
+    if ($Preview) {$null=Show-MioPreview $PreviewSection; Restore-Display; exit 0}
     if (-not $System) {
         $exitCode=Invoke-OptiMenu $profiles
         exit $exitCode

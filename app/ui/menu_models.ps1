@@ -11,7 +11,7 @@ function Get-OnionSetupPathRows {
       'OptiMiyoo reads its config files to see what is enabled.','',
       'Next, review the settings and choose what to enable or disable.',
       'Nothing is saved until you choose Apply.','',
-      'Esc. Back to main menu')
+      'B / Esc. Back to main menu     Q. Exit')
 }
 
 function Get-OnionSetupChecklistModel {
@@ -37,8 +37,8 @@ function Get-OnionSetupChecklistModel {
     $rows.Add('')
     $rows.Add('Apply saves changes and backs up changed configs.')
     $rows.Add('Refresh Onion''s game list afterwards.')
-    $rows.Add('A. Apply (default)     Esc. Cancel without saving')
-    $prompt='Type a number to toggle / Enter: Apply / Esc: Cancel'
+    $rows.Add('A. Apply (default)     B / Esc. Back without saving     Q. Exit')
+    $prompt='Number: toggle / Enter: Apply / B or Esc: Back / Q: Exit'
     if($Message){$prompt=$Message}
     [pscustomobject]@{Title='Onion SD setup / file types';Lines=[string[]]$rows.ToArray();Prompt=$prompt}
 }
@@ -53,7 +53,7 @@ function Get-OptiOriginalsRows {
         '   Check saved output before source removal.',
         'Skipped or failed items keep their originals.','',
         'Choosing 1 or 2 starts the batch.',
-        'B. Back to output settings     Q. Exit')
+        'B / Esc. Back to output settings     Q. Exit')
 }
 
 function Get-OptiStorageDefaults {
@@ -68,6 +68,7 @@ function Get-OptiMenuModel {
           [object[]]$Profiles=@(),$Profile,
           [ValidateSet('','1','2','3','4')][string]$SingleOutput='',
           [ValidateSet('','1','2','3','4')][string]$HiddenOutput='',
+          [ValidateSet('','1','2','3','4')][string]$Output='',
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     $rows=New-Object 'System.Collections.Generic.List[string]'
     $textRows=New-Object 'System.Collections.Generic.List[string]'
@@ -112,7 +113,7 @@ function Get-OptiMenuModel {
         & $addRow '  6. Bunny animation gallery'
         & $addRow '  7. Core support and Onion SD setup'
         & $addRow ''
-        & $addRow '  B. Back to main menu     Q. Exit'
+        & $addRow '  B / Esc. Back to main menu     Q. Exit'
         $prompt='Choose demo [Enter = 1]'
     } elseif ($Page -in 'C64','ZX') {
         $title='Commodore 64';$outputName='G64';$converterSystem='COMMODORE'
@@ -126,18 +127,23 @@ function Get-OptiMenuModel {
         & $addRow '  Build playlists separately with a numbered main-menu choice.'
         & $addRow ''
         $converterProfile=@($Profiles | Where-Object {$_.Folder -eq $converterSystem})[0]
-        $default='2';$zipNotice=Get-ZipOutputNotice $converterProfile -GameOutput
+        $default='2';if ($Output) {$default=$Output}
+        $zipNotice=Get-ZipOutputNotice $converterProfile -GameOutput
         $zipLabel=''; if ($zipNotice.Label) {$zipLabel=' '+$zipNotice.Label}
-        & $addRow '  1. Auto / keep input layout'
+        $autoDefault=if ($default -eq '1') {' (default)'} else {''}
+        $zipDefault=if ($default -eq '2') {' (default)'} else {''}
+        $folderDefault=if ($default -eq '3') {' (default)'} else {''}
+        $looseDefault=if ($default -eq '4') {' (default)'} else {''}
+        & $addRow ('  1. Auto'+$autoDefault+' / keep input layout')
         & $addRow '     ZIPs stay zipped; folders and loose paths are preserved.'
-        & $addRow ('  2. ZIPs (default) / one archive per game'+$zipLabel)
-        & $addRow '  3. Folders / unpack into one folder per game'
-        & $addRow ('  4. Loose '+$outputName+' files / no added game folder')
+        & $addRow ('  2. ZIPs'+$zipDefault+' / one archive per game'+$zipLabel)
+        & $addRow ('  3. Folders'+$folderDefault+' / unpack into one folder per game')
+        & $addRow ('  4. Loose '+$outputName+' files'+$looseDefault+' / no added game folder')
         if ($zipNotice.Hint) {& $addRow ''; & $addRow ('  '+$zipNotice.Hint)}
         & $addRow ''
         & $addRow '  Next: choose Keep or Remove originals in SRC.'
-        & $addRow '  B. Back to main menu     Q. Exit'
-        $prompt='Choose output [Enter = 2]'
+        & $addRow '  B / Esc. Back to main menu     Q. Exit'
+        $prompt='Choose output [Enter = '+$default+']'
     } else {
         if ($null -eq $Profile) {throw 'A profile is required for storage menu descriptions.'}
         $defaults=Get-OptiStorageDefaults $Profile
@@ -188,14 +194,14 @@ function Get-OptiMenuModel {
         if ($singlePage) {
             & $addRow ''
             & $addRow '  Next: storage for playlist media in .hidden.'
-            & $addRow '  B. Back to main menu     Q. Exit'
+            & $addRow '  B / Esc. Back to main menu     Q. Exit'
             $prompt='Choose single-game storage'
         } else {
             if ($support.Status -eq 'UNSUPPORTED') {& $addRow ('  '+$coreName+' cannot load playlists.')}
             elseif ($zipNotice.Label -and $support.CanBuild) {& $addRow '  Choose Folders or Loose files for playlists.'}
             & $addRow ''
             & $addRow '  Next: choose Keep or Remove originals.'
-            & $addRow '  B. Back to single games     Q. Exit'
+            & $addRow '  B / Esc. Back to single games     Q. Exit'
             $prompt='Choose storage in .hidden'
         }
         $prompt+=' [Enter = '+$default+']'

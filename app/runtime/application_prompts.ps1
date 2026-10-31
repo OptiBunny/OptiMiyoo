@@ -155,6 +155,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
             }
             if(-not $fits) {
                 if([char]::ToUpperInvariant($key.KeyChar) -eq 'Q'){return 'Q'}
+                if([char]::ToUpperInvariant($key.KeyChar) -eq 'B'){return 'B'}
                 continue
             }
             if($key.Key -eq [ConsoleKey]::Enter){if(-not $script:UiVT){[Console]::WriteLine()};return $text.Trim().ToUpperInvariant()}
@@ -200,6 +201,7 @@ function Invoke-ApplicationPolicyPrompt {
                 switch($answer){''{$choice='Keep';$policy='Keep'}'1'{$choice='Keep';$policy='Keep'}'2'{$choice='Remove';$policy='Remove'}'B'{$choice='Back';$navigation='Back'}'Q'{$choice='Exit';$navigation='Exit'}}
             } else {
                 $choice=ConvertFrom-OverwriteAnswer $answer
+                if($choice -in 'Back','Exit'){$navigation=$choice}
             }
             if($choice) {
                 $result=[pscustomobject]@{Kind=$Kind;Answer=$answer;Choice=$choice;SourcePolicy=$policy;Storage=$selectedStorage;SingleStorage=$SingleStorage;Navigation=$navigation}

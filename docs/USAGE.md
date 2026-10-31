@@ -5,9 +5,9 @@
 Open **`OptiMiyoo.bat`**. Type a number or letter, then press **Enter**.
 Press **Enter** on its own to use the default shown at the prompt.
 
-In selection menus, **B** goes back and **Q** exits. While choosing SD settings
-(**S**), use **Esc** to go back without saving. Demo playback and overwrite
-prompts have their own controls below.
+**Q** quits the app. **B** or **Esc** goes back to the previous screen;
+at the main menu, they keep you there. Letters need **Enter** in selection
+menus; during demo playback or processing, these keys work immediately.
 
 To create playlists or convert files, [prepare your games](#prepare-a-batch) first.
 
@@ -34,7 +34,8 @@ of the listed file types are **On**, **Off**, or **Partly enabled**. A system is
 - Type **1**, then **Enter**, to turn all available systems on, or off if they are
   already all on.
 - Type a system's number, then **Enter**, to toggle that system.
-- Choose **A / Enter** to **Apply**, or **Esc** to leave without saving.
+- Choose **A / Enter** to **Apply**, **B / Esc** to return to the SD path without
+  saving, or **Q** to quit.
 
 **On** adds the listed file types; **Off** removes them from the game list.
 Other file types and the game files themselves stay unchanged. Setup does not
@@ -43,7 +44,7 @@ cores can use the enabled files.
 
 After Apply, the results show what was enabled or disabled. **Already on/off**
 means no change was needed. A partly enabled system stays as it was unless you
-toggle it. **Enter / Esc** returns to the main menu; **Q** exits.
+toggle it. **Enter / B / Esc** returns to the main menu; **Q** exits.
 [Refresh Onion's game list](#copy-to-your-miyoo) after making changes.
 
 Changed configs are backed up on the card before they are replaced, in a dated
@@ -183,17 +184,20 @@ If a file or folder with the same name already exists in `DST`:
 | **S** | Skip this and all later matches in the batch |
 
 Overwriting a folder replaces all of its contents.
-Use **> / <** to see more of the file list. Here, **B / Q** also skips this output.
+Use **> / <** to see more of the file list. **B / Esc** stops the batch and returns
+to its output settings; **Q** stops the batch and quits. Neither choice overwrites
+the displayed files.
 
 ### Results and stopping a batch
 
 When processing finishes, review the saved, skipped, and failed outputs, along
 with the counts of originals removed or kept. The CSV report and log are saved
-beside `SRC` and `DST`; their paths appear in the results. **Enter** returns to
-the main menu and **Q** exits.
+beside `SRC` and `DST`; their paths appear in the results. **Enter / B / Esc**
+returns to the main menu and **Q** exits.
 
-Press **Ctrl+C** during processing to request a stop. The current operation may
-finish before the app closes. Stopping does not undo completed work: saved
+During processing, **B / Esc** stops and returns to settings; **Q** stops and
+quits. **Ctrl+C** also requests a stop and closes the app. An update already
+being saved may finish first. Stopping does not undo completed work: saved
 outputs stay saved, and originals already removed are not restored.
 
 ## Copy to your Miyoo
@@ -228,7 +232,8 @@ During playback, keys work without Enter:
 - **Left / P:** previous screen. **Right / N / Enter:** next screen.
 - **R:** restart the selected demo section.
 - **E:** turn the CRT effect on or off.
-- **B / Q / Esc:** return to demo selection.
+- **B / Esc:** return to demo selection.
+- **Q:** quit the app.
 
 ## CRT effect
 
@@ -239,4 +244,5 @@ folder with `.\OptiMiyoo.bat -NoAnimation`.
 
 ## Exit
 
-At the main menu, choose **Q** to exit.
+Use **Q** to quit from any screen. In selection menus, press **Enter** after it.
+During processing, the app stops at a safe point before closing.

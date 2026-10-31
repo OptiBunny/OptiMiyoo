@@ -264,7 +264,12 @@ namespace OptiMiyoo {
   public uint ProcessId {get;private set;}
   public bool IsAppContainer {get;private set;}
   public bool IsRelayPaused {get{return paused;}}
+  public bool CanPromptBeforeStart {get{return !started&&!disposed&&!CancellationRequested;}}
   public bool CancellationRequested {get;private set;}
+  private volatile bool navigationEnabled;
+  private volatile string navigationRequested;
+  public bool NavigationEnabled {get{return navigationEnabled;}set{navigationEnabled=value;}}
+  public string NavigationRequested {get{return navigationRequested;}}
   public bool Interactive {get;set;}
   public int StagedEntryCount {get;private set;}
   public int CleanupEntryLimit {get{return cleanupEntryLimit;}}
@@ -354,6 +359,10 @@ namespace OptiMiyoo {
   private void Fail(string reason){lock(outcomeGate){if(Failure==null)Failure=reason;}stopping=true;paused=true;if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
   private void FailResponse(string reason){lock(outcomeGate){if(!CancellationRequested)Fail(reason);}}
   public void Stop(){lock(outcomeGate){CancellationRequested=true;stopping=true;paused=true;}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
+  public void RequestNavigation(string choice){
+   if(choice!="Back"&&choice!="Exit")throw new ArgumentException("Unknown navigation request.");
+   lock(outcomeGate){if(!CancellationRequested)navigationRequested=choice;Stop();}
+  }
   // Finish an accepted broker handoff without manufacturing user cancellation.
   // Synchronize with the last native input batch; unread keys belong to the host.
   public void StopForHandoff(){lock(consoleGate){lock(outcomeGate){stopping=true;paused=true;}}if(job!=IntPtr.Zero)TerminateJobObject(job,137);SignalEvent(requestReady);}
@@ -397,7 +406,7 @@ namespace OptiMiyoo {
     if(stopping||HasExited)return;
     uint available;Check(GetNumberOfConsoleInputEvents(GetStdHandle(-10),out available),"Inspect host input");if(available==0)break;
     uint count;Check(ReadConsoleInput(GetStdHandle(-10),records,1,out count),"Read host input");InputRecord record=records[0];
-    if(count==1&&record.EventType==1&&record.KeyDown!=0){ConsoleKeyInfo key=new ConsoleKeyInfo(record.Character,(ConsoleKey)record.VirtualKey,(record.Control&0x10)!=0,(record.Control&3)!=0,(record.Control&12)!=0);if(key.Key==ConsoleKey.C&&(key.Modifiers&ConsoleModifiers.Control)!=0){Stop();return;}string text=KeyText(key);for(int repeat=0;repeat<Math.Max(1,Math.Min(32,(int)record.Repeat));repeat++)SendKeys(text);}
+    if(count==1&&record.EventType==1&&record.KeyDown!=0){ConsoleKeyInfo key=new ConsoleKeyInfo(record.Character,(ConsoleKey)record.VirtualKey,(record.Control&0x10)!=0,(record.Control&3)!=0,(record.Control&12)!=0);if(key.Key==ConsoleKey.C&&(key.Modifiers&ConsoleModifiers.Control)!=0){Stop();return;}if(navigationEnabled&&(key.Modifiers&(ConsoleModifiers.Control|ConsoleModifiers.Alt))==0&&(key.Key==ConsoleKey.Q||key.Key==ConsoleKey.B||key.Key==ConsoleKey.Escape)){RequestNavigation(key.Key==ConsoleKey.Q?"Exit":"Back");return;}string text=KeyText(key);for(int repeat=0;repeat<Math.Max(1,Math.Min(32,(int)record.Repeat));repeat++)SendKeys(text);}
    }
    if(stopping||HasExited)return;
    short w=(short)Math.Max(20,Math.Min(300,Console.WindowWidth)),h=(short)Math.Max(6,Math.Min(120,Console.WindowHeight));if(w!=columns||h!=rows){int hr=ResizePseudoConsole(pseudo,new COORD{X=w,Y=h});if(hr<0)Marshal.ThrowExceptionForHR(hr);columns=w;rows=h;}

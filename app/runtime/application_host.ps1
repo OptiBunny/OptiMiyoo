@@ -57,7 +57,23 @@ function Invoke-ApplicationHostRequest {
             $selection=Get-ApplicationSelection $payload
             foreach ($key in 'Operation','System','Storage','SingleStorage') {if ($selection[$key] -cne $State.Grant[$key]) {throw 'Batch does not match the approved selection.'}}
             $selection.SourcePolicy=$State.Grant.SourcePolicy;$State.Grant=$null
-            $State.BatchView=Start-ApplicationBrokerBatch -Session $State.Broker @selection -Existing $State.Existing
+            $nativeSession=$State.Session
+            $cancellationCheck={
+                if($nativeSession.Failure){throw $nativeSession.Failure}
+                if($nativeSession.CancellationRequested){throw [OperationCanceledException]::new('Application cancelled.')}
+            }.GetNewClosure()
+            try {$State.BatchView=Start-ApplicationBrokerBatch -Session $State.Broker @selection -Existing $State.Existing -CancellationCheck $cancellationCheck}
+            catch {
+                if($nativeSession.Failure){throw $nativeSession.Failure}
+                # Native hash callbacks can wrap the cancellation exception.
+                # A concurrent Stop must not disguise a genuine planning error.
+                $cause=$_.Exception
+                while($cause){
+                    if($nativeSession.CancellationRequested -and $cause -is [OperationCanceledException]){throw [OperationCanceledException]::new('Application cancelled.')}
+                    $cause=$cause.InnerException
+                }
+                throw
+            }
             return @{BatchId=$State.BatchView.BatchId;WorkRoot=$State.BatchView.WorkRoot;Operation=$State.BatchView.Operation;JobCount=$State.BatchView.Jobs.Count}
         }
         'Batch.Jobs' {

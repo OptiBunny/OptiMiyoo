@@ -167,7 +167,8 @@ function Get-ApplicationBrokerRelative([string]$Path,[string]$Root) {
     return $relative
 }
 
-function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$RequireSingleLink,[int]$MaximumEntries=100000,[switch]$MetadataOnly,[hashtable]$ExpectedFiles,[hashtable]$BorrowedSourceLeases) {
+function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$RequireSingleLink,[int]$MaximumEntries=100000,[switch]$MetadataOnly,[hashtable]$ExpectedFiles,[hashtable]$BorrowedSourceLeases,[scriptblock]$CancellationCheck=$null) {
+    if($CancellationCheck){& $CancellationCheck}
     Initialize-ApplicationBrokerNative
     $files=@{};$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0;$buffer=$null
     if($MaximumEntries -lt 1 -or $MaximumEntries -gt 1000000){throw 'Invalid broker snapshot entry limit.'}
@@ -183,10 +184,12 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
     try {
         if($CopyTo){[void][IO.Directory]::CreateDirectory($CopyTo)}
         while($pending.Count -gt 0) {
+            if($CancellationCheck){& $CancellationCheck}
             $directory=$pending.Dequeue();$directoryLease=[OptiMiyoo.ApplicationBrokerLease]::Directory($directory)
             try {
                 Assert-OptiPathBudget -Path $directory -Directory
                 foreach($entryPath in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
+                    if($CancellationCheck){& $CancellationCheck}
                     $entryCount++;if($entryCount -gt $MaximumEntries){throw 'Broker snapshot entry limit exceeded; originals kept.'}
                     Assert-OptiPathBudget -Path $entryPath
                     $entry=Get-Item -LiteralPath $entryPath -Force -ErrorAction Stop
@@ -207,7 +210,11 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
                         if($MetadataOnly){$files[$relative]=[pscustomobject]@{Hash='';Length=$lease.Stream.Length;Links=$links;LastWriteTimeUtc=$entry.LastWriteTimeUtc};$bytes+=$lease.Stream.Length;continue}
                         if($CopyTo){$target=Join-Path $CopyTo $relative.Replace('/',[IO.Path]::DirectorySeparatorChar);$output=[IO.File]::Open($target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)}
                         $sha=[Security.Cryptography.SHA256]::Create();if($null -eq $buffer){$buffer=New-Object byte[] 1048576};$length=0L
-                        while(($count=$lease.Stream.Read($buffer,0,$buffer.Length)) -gt 0){if($output){$output.Write($buffer,0,$count)};[void]$sha.TransformBlock($buffer,0,$count,$null,0);$length+=$count}
+                        while($true){
+                            if($CancellationCheck){& $CancellationCheck}
+                            $count=$lease.Stream.Read($buffer,0,$buffer.Length);if($count -le 0){break}
+                            if($output){$output.Write($buffer,0,$count)};[void]$sha.TransformBlock($buffer,0,$count,$null,0);$length+=$count
+                        }
                         [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
                         if($length -ne $lease.Stream.Length){throw 'Broker snapshot changed while being copied.'}
                         $hash=[BitConverter]::ToString($sha.Hash).Replace('-','')
@@ -557,17 +564,18 @@ function Start-ApplicationBrokerBatch {
     param([Parameter(Mandatory=$true)]$Session,[ValidateSet('Playlist','C64','ZX','SD')][string]$Operation,
           [string]$System,[ValidateSet('Auto','Zip','Loose','Folders')][string]$Storage='Zip',
           [ValidateSet('Keep','Remove')][string]$SourcePolicy='Keep',[ValidateSet('Ask','Overwrite','Skip')][string]$Existing='Ask',
-          [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto')
+          [ValidateSet('Auto','Zip','Loose','Folders')][string]$SingleStorage='Auto',[scriptblock]$CancellationCheck=$null)
+    if($CancellationCheck){& $CancellationCheck}
     $state=Get-ApplicationBrokerState $Session
     if($state.Batch){throw 'The previous application batch is still active.'}
     if($Operation -eq 'SD'){throw 'SD operations require the dedicated configuration broker.'}
     $src=Join-Path $state.OriginalRoot 'SRC';$dst=Join-Path $state.OriginalRoot 'DST'
     # Check names and lengths here; each original is hash-verified again through
     # its retained read lease below, before any trusted planning reads begin.
-    Assert-ApplicationBrokerInventory $state.SourceSnapshot (Get-ApplicationBrokerTree $src -MetadataOnly) 'Original source tree'
-    Assert-ApplicationBrokerInventory $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst -MetadataOnly) 'Original output tree'
-    Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'SRC') -MaximumEntries ([Math]::Max(1,$state.SourceSnapshot.Files.Count+$state.SourceSnapshot.Directories.Count)) -ExpectedFiles $state.SourceSnapshot.Files) 'Staged source tree'
-    Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'DST') -MaximumEntries ([Math]::Max(1,$state.DestinationSnapshot.Files.Count+$state.DestinationSnapshot.Directories.Count)) -ExpectedFiles $state.DestinationSnapshot.Files) 'Staged output tree'
+    Assert-ApplicationBrokerInventory $state.SourceSnapshot (Get-ApplicationBrokerTree $src -MetadataOnly -CancellationCheck $CancellationCheck) 'Original source tree'
+    Assert-ApplicationBrokerInventory $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst -MetadataOnly -CancellationCheck $CancellationCheck) 'Original output tree'
+    Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'SRC') -MaximumEntries ([Math]::Max(1,$state.SourceSnapshot.Files.Count+$state.SourceSnapshot.Directories.Count)) -ExpectedFiles $state.SourceSnapshot.Files -CancellationCheck $CancellationCheck) 'Staged source tree'
+    Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree (Join-Path $state.WorkRoot 'DST') -MaximumEntries ([Math]::Max(1,$state.DestinationSnapshot.Files.Count+$state.DestinationSnapshot.Directories.Count)) -ExpectedFiles $state.DestinationSnapshot.Files -CancellationCheck $CancellationCheck) 'Staged output tree'
     $sourcePins=New-Object 'System.Collections.Generic.Dictionary[string,IDisposable]' ([StringComparer]::OrdinalIgnoreCase)
     try {
     # Bind all trusted parsing to the initial copied bytes. Rehashing before and
@@ -575,12 +583,13 @@ function Start-ApplicationBrokerBatch {
     # CUE read, producing a plan unrelated to the source-removal baseline.
     foreach($relative in $state.SourceSnapshot.Files.Keys){
         $path=Join-Path $src $relative
-        $sourcePins.Add([IO.Path]::GetFullPath($path),(Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.SourceSnapshot.Files[$relative].Hash -Root $src -ReadOnly))
+        $sourcePins.Add([IO.Path]::GetFullPath($path),(Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.SourceSnapshot.Files[$relative].Hash -Root $src -ReadOnly -CancellationCheck $CancellationCheck))
     }
     foreach($relative in $state.DestinationSnapshot.Files.Keys){
         $path=Join-Path $dst $relative
-        $sourcePins.Add([IO.Path]::GetFullPath($path),(Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.DestinationSnapshot.Files[$relative].Hash -Root $dst -ReadOnly))
+        $sourcePins.Add([IO.Path]::GetFullPath($path),(Open-VerifiedSourcePolicyFile -Path $path -ExpectedHash $state.DestinationSnapshot.Files[$relative].Hash -Root $dst -ReadOnly -CancellationCheck $CancellationCheck))
     }
+    if($CancellationCheck){& $CancellationCheck}
     $module=Get-ApplicationBrokerModule $Operation;$sourceModule=Get-ApplicationBrokerModule 'Playlist'
     $jobs=New-Object 'System.Collections.Generic.List[object]';$profile=$null;$archives=@{}
     if($Operation -eq 'Playlist'){
@@ -590,6 +599,7 @@ function Start-ApplicationBrokerBatch {
         $raw=@(& $module {param($src,$profile) $script:DiskExtensions=@($profile.Extensions);Get-Jobs $src $profile} $src $profile)
         if($raw.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
         foreach($sourceJob in $raw){
+            if($CancellationCheck){& $CancellationCheck}
             $sourceJob | Add-Member NoteProperty Profile $profile
             $sourceJob | Add-Member NoteProperty OutputPlan $null
             $job=New-ApplicationBrokerJob $sourceJob.SourceKey $sourceJob $null
@@ -617,6 +627,7 @@ function Start-ApplicationBrokerBatch {
         $raw=@(& $module {param($src,$dst,$storage,$operation)Get-ConversionSourceGroups $src $dst $storage $operation} $src $dst $Storage $Operation)
         if($raw.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
         foreach($group in $raw){
+            if($CancellationCheck){& $CancellationCheck}
             $plan=$group.Plan;$job=New-ApplicationBrokerJob $group.SourceKey $group $plan
             $job.Paths=@($group.Paths);$job.SourceBlockReason=$group.SourceBlockReason;$job.BlockedReason=$group.Error
             try {
@@ -647,6 +658,7 @@ function Start-ApplicationBrokerBatch {
             $jobs.Add($job)
         }
     }
+    if($CancellationCheck){& $CancellationCheck}
     if($jobs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
     $descriptorSnapshot=$null
     if($SourcePolicy -eq 'Remove') {
@@ -657,19 +669,22 @@ function Start-ApplicationBrokerBatch {
     }
     $sourcePlan=& $sourceModule {param($src,$policy,$descriptors)New-SourcePolicyPlan $src $policy -DescriptorSnapshot $descriptors} $src $SourcePolicy $descriptorSnapshot
     foreach($job in $jobs){
+        if($CancellationCheck){& $CancellationCheck}
         if(-not $job.BlockedReason){try{Assert-ApplicationBrokerFileNames $job.Files $job.DataKind;Assert-ApplicationBrokerJobPaths $state $Operation $job $archives}catch{$job.BlockedReason=$_.Exception.Message}}
     }
     Set-ApplicationBrokerParentCaseConflicts $state $jobs.ToArray()
     $jobMap=@{};$conflicts=@{}
     foreach($job in $jobs){
+        if($CancellationCheck){& $CancellationCheck}
         $jobMap[$job.JobId]=$job
         foreach($path in $job.Paths){$key=Get-ApplicationBrokerRelative $path $src;if($state.SourceSnapshot.Files.ContainsKey($key)){$job.SourceHashes[[IO.Path]::GetFullPath($path)]=$state.SourceSnapshot.Files[$key].Hash}}
         & $sourceModule {param($plan,$job)Add-SourcePolicyJob $plan $job.JobId $job.Paths $job.SourceBlockReason} $sourcePlan $job
         if($Operation -eq 'Playlist' -and $job.SourceBlockReason){$sourcePlan.BlockReason=$job.SourceBlockReason}
         if($job.Conflicts.Count){$job.ConflictId=[Guid]::NewGuid().ToString('N');$conflicts[$job.ConflictId]=$job;$job.Decision=@{Ask='Pending';Overwrite='Overwrite';Skip='Skip'}[$Existing]}
     }
-    Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src) 'Original source tree'
-    Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst) 'Original output tree'
+    Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src -CancellationCheck $CancellationCheck) 'Original source tree'
+    Assert-ApplicationBrokerSnapshot $state.DestinationSnapshot (Get-ApplicationBrokerTree $dst -CancellationCheck $CancellationCheck) 'Original output tree'
+    if($CancellationCheck){& $CancellationCheck}
     $batch=[pscustomobject]@{BatchId=[Guid]::NewGuid().ToString('N');WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;SourcePolicy=$SourcePolicy;Existing=$Existing;Module=$module;SourceModule=$sourceModule;SourcePlan=$sourcePlan;Profile=$profile;Jobs=$jobMap;Conflicts=$conflicts;Completed=$false;OverwriteAll=''}
     $state.Batch=$batch
     $view=[pscustomobject]@{BatchId=$batch.BatchId;WorkRoot=$state.WorkRoot;Operation=$Operation;System=$System;Storage=$Storage;SingleStorage=$SingleStorage;SourcePolicy=$SourcePolicy;Existing=$Existing;Jobs=@($jobs | ForEach-Object {[pscustomobject]@{JobId=$_.JobId;SourceKey=$_.SourceKey;ConflictId=$_.ConflictId;BlockedReason=$_.BlockedReason}})}

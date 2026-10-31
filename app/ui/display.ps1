@@ -62,8 +62,47 @@ function Initialize-Display {
     $script:UiWidth=78; $script:UiColumns=0; $script:UiHeight=0
     try {
         if (-not $restore.ContainsKey('Encoding')) {$restore.Encoding=[Console]::OutputEncoding}
-        [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
         $script:UiInteractive=($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
+        if ($script:UiInteractive -and $env:OS -eq 'Windows_NT') {
+            if (-not ('OptiMiyoo.Terminal' -as [type])) {
+                Add-OptiMiyooType -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace OptiMiyoo {
+    public static class Terminal {
+        [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int n);
+        [DllImport("kernel32.dll")] static extern uint GetConsoleOutputCP();
+        [DllImport("kernel32.dll")] static extern bool SetConsoleOutputCP(uint codePage);
+        [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr h, out uint m);
+        [DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr h, uint m);
+        public static uint ReadOutputCodePage() { return GetConsoleOutputCP(); }
+        public static bool RestoreOutputCodePage(uint codePage) { return SetConsoleOutputCP(codePage); }
+        public static bool ReadMode(out uint mode) { return GetConsoleMode(GetStdHandle(-11),out mode); }
+        public static bool RestoreMode(uint mode) { return SetConsoleMode(GetStdHandle(-11),mode); }
+        public static bool Enable() {
+            var h=GetStdHandle(-11); uint m;
+            return GetConsoleMode(h,out m) && SetConsoleMode(h,m|4);
+        }
+    }
+}
+'@
+            }
+            $encodingBefore=[Console]::OutputEncoding
+            [uint32]$outputCodePageBefore=[OptiMiyoo.Terminal]::ReadOutputCodePage()
+            if ($outputCodePageBefore -eq 0) {throw 'Could not read the console output code page.'}
+            if (-not $restore.ContainsKey('NativeOutputCodePage')) {$restore.NativeOutputCodePage=$outputCodePageBefore}
+            try {
+                # Wide console output avoids the UTF-8 console mode that loses
+                # some Unicode key events; ConPTY transport remains UTF-8.
+                [Console]::OutputEncoding=[Text.Encoding]::GetEncoding(437)
+                [Console]::OutputEncoding=[Text.Encoding]::Unicode
+            } catch {
+                # A repeated initialization rolls back only its own attempt.
+                try {[Console]::OutputEncoding=$encodingBefore} catch {}
+                try {$null=[OptiMiyoo.Terminal]::RestoreOutputCodePage($outputCodePageBefore)} catch {}
+                throw
+            }
+        } else {[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)}
         if ($script:UiInteractive) {
             $script:UiWidth=[Math]::Min(296,[Math]::Max(16,[Console]::WindowWidth-4))
             if (-not $restore.ContainsKey('Foreground')) {
@@ -81,25 +120,6 @@ function Initialize-Display {
             } catch {}
             if ($script:UiInteractive) {
                 if ($env:OS -eq 'Windows_NT') {
-                    if (-not ('OptiMiyoo.Terminal' -as [type])) {
-                        Add-OptiMiyooType -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-namespace OptiMiyoo {
-    public static class Terminal {
-        [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int n);
-        [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr h, out uint m);
-        [DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr h, uint m);
-        public static bool ReadMode(out uint mode) { return GetConsoleMode(GetStdHandle(-11),out mode); }
-        public static bool RestoreMode(uint mode) { return SetConsoleMode(GetStdHandle(-11),mode); }
-        public static bool Enable() {
-            var h=GetStdHandle(-11); uint m;
-            return GetConsoleMode(h,out m) && SetConsoleMode(h,m|4);
-        }
-    }
-}
-'@
-                    }
                     if (-not $restore.ContainsKey('OutputMode')) {
                         [uint32]$mode=0
                         if ([OptiMiyoo.Terminal]::ReadMode([ref]$mode)) {$restore.OutputMode=$mode}
@@ -421,6 +441,7 @@ function Restore-Display {
         if ($restore.ContainsKey('Foreground')) {try {$Host.UI.RawUI.BackgroundColor=$restore.Background;$Host.UI.RawUI.ForegroundColor=$restore.Foreground} catch {}}
         if ($restore.ContainsKey('Title')) {try {$Host.UI.RawUI.WindowTitle=$restore.Title} catch {}}
         if ($restore.ContainsKey('Encoding')) {try {[Console]::OutputEncoding=$restore.Encoding} catch {}}
+        if ($restore.ContainsKey('NativeOutputCodePage')) {try {$null=[OptiMiyoo.Terminal]::RestoreOutputCodePage($restore.NativeOutputCodePage)} catch {}}
         if ($restore.ContainsKey('OutputMode')) {try {$null=[OptiMiyoo.Terminal]::RestoreMode($restore.OutputMode)} catch {}}
         if ($restore.ContainsKey('Rendering')) {try {$PSStyle.OutputRendering=$restore.Rendering} catch {}}
         $script:UiInteractive=$false; $script:UiAnsi=$false; $script:UiVT=$false

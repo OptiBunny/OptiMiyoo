@@ -101,8 +101,10 @@ internal static class ArchivePayloadWorker {
         if(-not [IO.File]::Exists($compiler)) {throw 'The Windows C# compiler is unavailable; archive sandbox cannot start.'}
         $start=New-Object Diagnostics.ProcessStartInfo
         $start.FileName=$compiler;$start.WorkingDirectory=$folder
-        $start.Arguments='/nologo /noconfig /optimize+ /target:exe /out:worker.exe /reference:System.dll /reference:System.Core.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll worker.cs'
+        $start.Arguments='/nologo /noconfig /utf8output /optimize+ /target:exe /out:worker.exe /reference:System.dll /reference:System.Core.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll worker.cs'
         $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+        $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
+        $start.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
         $process=New-Object Diagnostics.Process;$process.StartInfo=$start
         $started=$process.Start();if(-not $started) {throw 'Could not compile archive sandbox helper.'}
         $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()

@@ -108,6 +108,8 @@ function New-ApplicationStagedCode {
         $start.Arguments='/nologo /noconfig /utf8output /optimize+ /warnaserror+ /target:library /out:a.dll /reference:System.dll /reference:System.Core.dll '+($names -join ' ')
         $start.EnvironmentVariables['TEMP']='.';$start.EnvironmentVariables['TMP']='.';
         $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+        $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
+        $start.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
         $process=New-Object Diagnostics.Process;$process.StartInfo=$start;$started=$process.Start()
         if (-not $started) {throw 'The application helper compiler did not start.'}
         $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()

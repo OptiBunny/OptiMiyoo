@@ -551,7 +551,8 @@ function Read-ApplicationSdConsolePath {
     param([string]$InitialText='', [string]$ErrorMessage='', $Session=$null)
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){throw 'SD selection requires the parent console.'}
     $title='Onion SD setup';$prompt='SD drive or folder (e.g. E:\) / B/Esc: Back / Q: Exit'
-    if ($ErrorMessage) {$prompt=$ErrorMessage}
+    $promptColor='249;202;226'
+    if ($ErrorMessage) {$prompt=$ErrorMessage;$promptColor='255;190;96'}
     $rows=@(Get-OnionSetupPathRows);$text=$InitialText;$dirty=$true
     [void](Update-DisplaySize)
     $layout=Get-MenuLayout -Rows $rows
@@ -576,7 +577,7 @@ function Read-ApplicationSdConsolePath {
             # Escape only the displayed copy; edits and path resolution use the
             # original characters, including valid Unicode filename controls.
             $visibleText=ConvertTo-SafeExternalLine $text
-            Draw-MenuPanel $title $rows $prompt $visibleText $visibleText.Length 'wait';$dirty=$false
+            Draw-MenuPanel $title $rows $prompt $visibleText $visibleText.Length 'wait' -PromptColor $promptColor;$dirty=$false
         }
         if([Console]::KeyAvailable) {
             $key=[Console]::ReadKey($true)

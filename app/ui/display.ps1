@@ -889,7 +889,8 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
 
 function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
                         [string]$InputText,[int]$Caret,[string]$Mood='idle',
-                        [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK',[bool[]]$DefaultRows) {
+                        [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK',[bool[]]$DefaultRows,
+                        [string]$PromptColor='249;202;226') {
     $menuLayout=Get-MenuLayout $Rows -NoInput:$NoInput -DefaultRows $DefaultRows
     if (-not $menuLayout.Fits) {
         Draw-ResizePanel $Title $Prompt $InputText $Caret $menuLayout.RequiredHeight 44
@@ -922,6 +923,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $cached.Columns -eq $script:UiColumns -and $cached.BannerRows -eq $script:UiBannerRows -and
         $cached.PanelRows -eq $script:UiRows -and $cached.FrameRows -eq $script:UiLastFrameRows -and
         $cached.Title -ceq $Title -and $cached.RowsKey -ceq $rowsKey -and $cached.Prompt -ceq $Prompt -and
+        $cached.PromptColor -ceq $PromptColor -and
         $cached.InputText -ceq $InputText -and $cached.Caret -eq $Caret -and $cached.Mood -ceq $Mood -and
         $cached.Ansi -eq $script:UiAnsi -and $cached.VT -eq $script:UiVT -and $cached.Version -ceq $script:AppVersion -and
         $cached.Effect -ceq $script:DisplayEffect -and $cached.MenuActive -eq $script:UiMenuActive -and
@@ -997,7 +999,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $rowOffset+=$text.Length+1
     }
     $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($borderHeight-1) $border $true))
-    $lines.Add('  '+(Color-Text (Fit-Text $Prompt $w) '249;202;226'))
+    $lines.Add('  '+(Color-Text (Fit-Text $Prompt $w) $PromptColor))
     if ($NoInput) {Write-TerminalPanel $lines.ToArray();return}
     $fieldWidth=$w-8
     $inputView=Get-InputViewport $InputText $Caret $fieldWidth
@@ -1008,6 +1010,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $script:UiIdleMenuCache=[pscustomobject]@{
             Width=$w;Height=$script:UiHeight;Columns=$script:UiColumns;BannerRows=$script:UiBannerRows
             PanelRows=$script:UiRows;FrameRows=$script:UiLastFrameRows;Title=$Title;RowsKey=$rowsKey;Prompt=$Prompt
+            PromptColor=$PromptColor
             InputText=$InputText;Caret=$Caret;Mood=$Mood;Ansi=$script:UiAnsi;VT=$script:UiVT;Version=$script:AppVersion
             Effect=$script:DisplayEffect;MenuActive=$script:UiMenuActive;EventCount=$script:UiEventRows.Count
             Mio=$mio;SparseCrt=($script:UiSparseCrtPhase -ge 0);Logo=$script:UiLastLogoRows

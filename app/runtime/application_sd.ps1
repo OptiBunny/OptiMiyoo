@@ -563,7 +563,9 @@ function Read-ApplicationSdConsolePath {
     $fallbackTextLength=0
     if(-not $script:UiVT){
         $visibleText=ConvertTo-SafeExternalLine $text;$fallbackTextLength=$visibleText.Length
-        [Console]::WriteLine($title);foreach($line in $rows){[Console]::WriteLine($line)};[Console]::Write($prompt+': '+$visibleText)
+        $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+        $plainPrompt=(Format-MenuPrompt $prompt $width -HasFooter:($layout.ControlRows.Count -gt 0)).TrimEnd()
+        [Console]::WriteLine($title);foreach($line in @(Get-PlainMenuRows $rows)){[Console]::WriteLine($line)};[Console]::Write($plainPrompt+': '+$visibleText)
     }
     try {while($true) {
         if(Update-DisplaySize -Throttled){$layout=Get-MenuLayout -Rows $rows;$dirty=$true}
@@ -605,7 +607,7 @@ function Read-ApplicationSdConsolePath {
             $dirty=$true
             if(-not $script:UiVT){
                 $visibleText=ConvertTo-SafeExternalLine $text
-                [Console]::Write("`r"+$prompt+': '+$visibleText+(' '*[Math]::Max(1,$fallbackTextLength-$visibleText.Length)))
+                [Console]::Write("`r"+$plainPrompt+': '+$visibleText+(' '*[Math]::Max(1,$fallbackTextLength-$visibleText.Length)))
                 $fallbackTextLength=$visibleText.Length
             }
         }else{Wait-DisplayFrame 30}

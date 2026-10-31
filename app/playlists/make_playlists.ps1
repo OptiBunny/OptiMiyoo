@@ -1647,7 +1647,11 @@ function Write-MenuLine([string]$Text='', [string]$Compact='') {
     if ($script:UiMenuActive) {
         if ($Compact) {$Text=$Compact}
         $script:UiMenuLines.Add($Text)
-    } else {Write-Host (ConvertTo-SafeExternalText $Text)}
+    } else {
+        $parts=Get-MenuControlParts @($Text)
+        if($parts.ControlRows.Count){foreach($line in @(Get-PlainMenuRows @($Text))){Write-Host ('  '+$line)}}
+        else {Write-Host (ConvertTo-SafeExternalText $Text)}
+    }
 }
 
 function Invoke-OptiMenu([object[]]$Profiles) {

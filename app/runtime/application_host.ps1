@@ -550,7 +550,8 @@ function Invoke-ApplicationHost {
                 if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
                 if (-not $resultCancelled -and -not $navigation -and $menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
                     Write-Host ''
-                    Write-Host 'Enter / B / Esc: Main menu | Q: Exit'
+                    $controlWidth=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+                    Write-Host ('  '+(Format-RightAlignedText 'Enter / B / Esc: Main menu | Q: Exit' $controlWidth))
                     do {$key=[Console]::ReadKey($true)} while ($key.Key -notin [ConsoleKey]::Enter,[ConsoleKey]::B,[ConsoleKey]::Escape,[ConsoleKey]::Q)
                     $again=($key.Key -ne [ConsoleKey]::Q)
                     if ($again) {$startPage='Main'}

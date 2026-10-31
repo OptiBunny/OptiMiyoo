@@ -120,8 +120,10 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
     $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows
     if(-not $script:UiVT) {
         [Console]::WriteLine($Model.Title)
-        foreach($line in $Model.Lines){[Console]::WriteLine($line)}
-        [Console]::Write($Model.Prompt+': ')
+        foreach($line in @(Get-PlainMenuRows $Model.Lines)){[Console]::WriteLine($line)}
+        $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+        $plainPrompt=(Format-MenuPrompt $Model.Prompt $width -HasFooter:($layout.ControlRows.Count -gt 0)).TrimEnd()
+        [Console]::Write($plainPrompt+': ')
     }
     try {
     if($ReturnOnResize -and $script:UiVT -and $initialResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
@@ -162,7 +164,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
             if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
             elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
             $caret=$text.Length;$dirty=$true
-            if(-not $script:UiVT){[Console]::Write("`r"+$Model.Prompt+': '+$text+' ')}
+            if(-not $script:UiVT){[Console]::Write("`r"+$plainPrompt+': '+$text+' ')}
         } else {Wait-DisplayFrame 30}
     }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }

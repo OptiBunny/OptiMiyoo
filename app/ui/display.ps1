@@ -849,6 +849,51 @@ function Get-MenuSpacing([string[]]$Rows,[bool[]]$DefaultRows,[int]$MaximumRows)
     return [pscustomobject]@{Rows=$kept.ToArray();DefaultRows=$defaults.ToArray()}
 }
 
+function Get-MenuControlParts([string[]]$Rows,[bool[]]$DefaultRows) {
+    $body=New-Object 'Collections.Generic.List[string]'
+    $defaults=New-Object 'Collections.Generic.List[bool]'
+    $controls=New-Object 'Collections.Generic.List[string]'
+    $controlDefaults=New-Object 'Collections.Generic.List[bool]'
+    for($i=0;$i -lt $Rows.Count;$i++) {
+        $line=$Rows[$i].Trim()
+        $isDefault=($line -match '^(?:\d+|[A-Z])\..*\(default\)')
+        if($DefaultRows -and $i -lt $DefaultRows.Count){$isDefault=$DefaultRows[$i]}
+        # Match control legends, not explanations or numbered choices.
+        $isControl=$line -match '^(?:B\s*/\s*Esc(?:[.:]|\s+Back\b)|Q[.:]\s*(?:Exit|Quit)\b|A(?:\.|\s*/\s*Enter:)\s*Apply\b|Y Overwrite\s*\||A Overwrite all\s*\||Page \d+/\d+\s*\||Enter\s*/\s*B\s*/\s*Esc:|Space:\s*pause\b|N\s*/\s*Right\s*/\s*Enter:|P\s*/\s*Left:|R:\s*restart\b|E:\s*turn the CRT effect\b)'
+        if($isControl){$controls.Add($line);$controlDefaults.Add($isDefault)}
+        else {$body.Add($Rows[$i]);$defaults.Add($isDefault)}
+    }
+    if($controls.Count){while($body.Count -and [string]::IsNullOrWhiteSpace($body[$body.Count-1])){$body.RemoveAt($body.Count-1);$defaults.RemoveAt($defaults.Count-1)}}
+    return [pscustomobject]@{Rows=$body.ToArray();DefaultRows=$defaults.ToArray();ControlRows=$controls.ToArray();ControlDefaults=$controlDefaults.ToArray()}
+}
+
+function Format-RightAlignedText([string]$Text,[int]$Width) {
+    $text=(Fit-Text $Text.Trim() $Width).TrimEnd()
+    return (' '*[Math]::Max(0,$Width-(Get-TextWidth $text)))+$text
+}
+
+function Format-MenuPrompt([string]$Text,[int]$Width,[switch]$HasFooter) {
+    if($Text -match '^(?:Enter\s*/\s*B\s*/\s*Esc:|(?:DEMO|PAUSED|RESIZE PAUSED)\s*\||Space (?:pause|resume)\s*\||B/Esc back Q quit)') {
+        return Format-RightAlignedText $Text $Width
+    }
+    if($Text -match '^(?<Detail>.*?)\s*/\s*(?<Controls>(?:B/Esc:|B or Esc:|A: Apply|Enter: Apply).*)$') {
+        $detail=$Matches.Detail;$controls=$Matches.Controls
+        # The footer already contains these keys. Keep the path/error prompt
+        # readable instead of repeating them beside the same input field.
+        if($HasFooter){return Fit-Text $detail $Width}
+        $gap=$Width-(Get-TextWidth $detail)-(Get-TextWidth $controls)
+        if($gap -ge 1){return $detail+(' '*$gap)+$controls}
+    }
+    return Fit-Text $Text $Width
+}
+
+function Get-PlainMenuRows([string[]]$Rows) {
+    $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+    $parts=Get-MenuControlParts $Rows
+    foreach($line in $parts.Rows){(ConvertTo-SafeExternalText $line).TrimStart()}
+    foreach($line in @(Get-MenuRows $parts.ControlRows $width)){Format-RightAlignedText $line $width}
+}
+
 function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
     # Keep source rows intact so a later wider window can unwrap them again.
     # Reserve top padding, the compact banner, borders, prompt and a spare row.
@@ -861,28 +906,37 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows) {
         for ($i=0;$i -lt $Rows.Count;$i++) {if ($Rows[$i] -cne $cached.Rows[$i]) {$same=$false;break}}
         if ($same) {return $cached.Layout}
     }
+    $parts=Get-MenuControlParts $Rows $DefaultRows
+    $controlDefaults=$null
+    $controls=@(Get-MenuRows $parts.ControlRows ($width-4) ([ref]$controlDefaults) $parts.ControlDefaults)
     $overhead=8;$fullOverhead=14;if ($NoInput) {$overhead=7;$fullOverhead=13}
+    $overhead+=$controls.Count;$fullOverhead+=$controls.Count
     $result=$null
     if ($width -ge 72) {
         $wrappedDefaults=$null
-        $wrapped=@(Get-MenuRows $Rows ($width-28) ([ref]$wrappedDefaults) $DefaultRows)
+        $wrapped=@(Get-MenuRows $parts.Rows ($width-28) ([ref]$wrappedDefaults) $parts.DefaultRows)
         $spacing=Get-MenuSpacing $wrapped $wrappedDefaults ([Math]::Max(12,$script:UiHeight-$fullOverhead))
         $wrapped=$spacing.Rows;$wrappedDefaults=$spacing.DefaultRows
         $body=[Math]::Max(12,$wrapped.Count)
-        if ($script:UiHeight -ge $body+$overhead) {
+        # Keep the full logo when a footer needs the space normally reserved
+        # for Mio. A shorter, full-width body can fit both text and controls.
+        $footerNeedsSpace=($controls.Count -gt 0 -and $script:UiHeight -ge 26 -and $script:UiHeight -lt $body+$fullOverhead)
+        if ($script:UiHeight -ge $body+$overhead -and -not $footerNeedsSpace) {
             $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-28);BodyRows=$body;RequiredHeight=($body+$overhead);ShowMio=$true;Fits=$true}
         }
     }
     # Reclaim the mascot column and empty padding before asking for more room.
     if (-not $result) {
         $wrappedDefaults=$null
-        $wrapped=@(Get-MenuRows $Rows ($width-4) ([ref]$wrappedDefaults) $DefaultRows)
+        $wrapped=@(Get-MenuRows $parts.Rows ($width-4) ([ref]$wrappedDefaults) $parts.DefaultRows)
         $budget=$script:UiHeight-$overhead;if($width -ge 72){$budget=$script:UiHeight-$fullOverhead}
         $spacing=Get-MenuSpacing $wrapped $wrappedDefaults $budget
         $wrapped=$spacing.Rows;$wrappedDefaults=$spacing.DefaultRows
         $required=$wrapped.Count+$overhead
         $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-4);BodyRows=$wrapped.Count;RequiredHeight=$required;ShowMio=$false;Fits=($script:UiColumns -ge 44 -and $script:UiHeight -ge $required)}
     }
+    $result | Add-Member NoteProperty ControlRows $controls
+    $result | Add-Member NoteProperty ControlDefaults $controlDefaults
     $script:UiMenuLayoutCache=[pscustomobject]@{Key=$key;Rows=@($Rows);Layout=$result}
     return $result
 }
@@ -898,11 +952,11 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     }
     $Rows=$menuLayout.Rows
     $w=$menuLayout.Width; $left=$menuLayout.TextWidth
-    $bodyRows=$menuLayout.BodyRows; $borderHeight=$bodyRows+3
+    $bodyRows=$menuLayout.BodyRows; $controlRows=@($menuLayout.ControlRows);$borderHeight=$bodyRows+$controlRows.Count+3
     Flush-DisplayEvents
-    $geometryKey=('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $w,$script:UiColumns,$script:UiHeight,$bodyRows,$script:UiMenuActive,$script:UiDemo,$script:UiEventRows.Count,[bool]$NoInput)
+    $geometryKey=('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}' -f $w,$script:UiColumns,$script:UiHeight,$bodyRows,$script:UiMenuActive,$script:UiDemo,$script:UiEventRows.Count,[bool]$NoInput,$controlRows.Count)
     if ($menuLayout.ShowMio -and $geometryKey -cne $script:MioSparseCrtGeometryKey) {
-        $panelRows=$bodyRows+5;if ($NoInput) {$panelRows--}
+        $panelRows=$bodyRows+$controlRows.Count+5;if ($NoInput) {$panelRows--}
         $placeholder=New-Object 'string[]' $panelRows
         $layout=Get-TerminalFrame $placeholder
         $bunnyRow=$layout.Lines.Count-$placeholder.Count+3
@@ -916,7 +970,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
     $patchable=($menuLayout.ShowMio -and $script:UiVT -and -not $script:UiDemo -and -not $NoInput -and
         ($script:UiIdlePoseOverride -or $script:UiSparseCrtPhase -ge 0 -or $script:UiIdleMenuCache.SparseCrt) -and $mio.Count -eq 12 -and
         (-not $script:UiPendingEvents -or $script:UiPendingEvents.Count -eq 0))
-    $rowsKey=($Rows -join [char]0)+'|'+($menuLayout.DefaultRows -join ',')
+    $rowsKey=($Rows -join [char]0)+'|'+($menuLayout.DefaultRows -join ',')+'|'+($controlRows -join [char]0)+'|'+($menuLayout.ControlDefaults -join ',')
     $cached=$script:UiIdleMenuCache
     if ($patchable -and $cached -and $script:UiPinned -and
         $cached.Width -eq $w -and $cached.Height -eq $script:UiHeight -and
@@ -998,8 +1052,13 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+$rightColumn+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1
     }
+    for($i=0;$i -lt $controlRows.Count;$i++) {
+        $rgb='107;216;245';if($menuLayout.ControlDefaults[$i]){$rgb='255;221;144'}
+        $y=$bodyRows+$i+2
+        $lines.Add('  '+(Format-BorderText '|' 0 $y $border)+' '+(Color-Text (Format-RightAlignedText $controlRows[$i] ($w-4)) $rgb)+' '+(Format-BorderText '|' ($w-1) $y $border))
+    }
     $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($borderHeight-1) $border $true))
-    $lines.Add('  '+(Color-Text (Fit-Text $Prompt $w) $PromptColor))
+    $lines.Add('  '+(Color-Text (Format-MenuPrompt $Prompt $w -HasFooter:($controlRows.Count -gt 0)) $PromptColor))
     if ($NoInput) {Write-TerminalPanel $lines.ToArray();return}
     $fieldWidth=$w-8
     $inputView=Get-InputViewport $InputText $Caret $fieldWidth
@@ -1108,7 +1167,7 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
     $lines=[System.Collections.Generic.List[string]]::new()
     $lines.Add('  '+(Fit-Text ('OptiMiyoo / '+$Title) $width))
     $lines.Add('  '+(Fit-Text ('Enlarge window: '+$RequiredHeight+' rows, '+$RequiredWidth+'+ columns.') $width))
-    $lines.Add('  '+(Fit-Text $Detail $width))
+    $lines.Add('  '+(Format-MenuPrompt $Detail $width))
     if ($Caret -ge 0) {
         $fieldWidth=$width-8; $inputView=Get-InputViewport $InputText $Caret $fieldWidth
         $lines.Add('  INPUT > '+(Format-InputField $inputView $fieldWidth (-not $script:UiDemo)))
@@ -1122,7 +1181,8 @@ function Draw-ResizePanel([string]$Title,[string]$Detail,[string]$InputText='',
 }
 
 function Read-PlainMenuInput([string]$Prompt) {
-    Write-Host ($Prompt+': ') -NoNewline
+    $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
+    Write-Host ((Format-MenuPrompt $Prompt $width).TrimEnd()+': ') -NoNewline
     if ([Console]::IsInputRedirected) {
         $line=[Console]::ReadLine()
         if ($null -eq $line) {return 'Q'}
@@ -1161,7 +1221,7 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
     } catch {$canDraw=$false}
     if (-not $canDraw) {
         Clear-DisplayPanel
-        foreach ($line in $Lines) {Write-Host ('  '+(ConvertTo-SafeExternalText $line).TrimStart())}
+        foreach ($line in @(Get-PlainMenuRows $Lines)) {Write-Host ('  '+$line)}
         if ($script:UiInteractive) {try {[Console]::CursorVisible=$true} catch {}}
         return Read-PlainMenuInput $Prompt
     }
@@ -1272,7 +1332,7 @@ function Draw-DisplayPanel([switch]$Force) {
         return
     }
     $w=$script:UiWidth; $left=$w-28; $inner=$w-4
-    $compact=(-not $script:UiPanel)
+    $compact=(-not $script:UiPanel -or (-not $script:UiDemo -and $script:UiHeight -lt 21))
     if ($compact) {$left=$inner}
     $expanded=(-not $compact -and $script:UiHeight -ge 35)
     $mio=@(Get-DisplayMioFrame $script:UiMood $script:UiPoseOverride)
@@ -1362,12 +1422,15 @@ function Draw-DisplayPanel([switch]$Force) {
     if ($compact) {
         if ($script:UiDemo -and $script:UiDemoProgressStatus) {$data[5]='Status: '+$script:UiDemoProgressStatus}
         $plain=@($data | ForEach-Object {$_ -replace '\x1b\[[0-9;?]*[ -/]*[@-~]',''} | Where-Object {$_})
-        Draw-MenuPanel -Title $title -Rows $plain -Prompt ('MIO > '+$script:UiSay) -Caret -1 -Mood $script:UiMood -NoInput -Channel $channel
+        $prompt='MIO > '+$script:UiSay
+        if($script:UiDemo){$prompt=$script:UiSay}
+        Draw-MenuPanel -Title $title -Rows $plain -Prompt $prompt -Caret -1 -Mood $script:UiMood -NoInput -Channel $channel
         return
     }
     $lines=[System.Collections.Generic.List[string]]::new()
     $bodyCount=$data.Count
-    $border=Get-BorderStyle $w ($bodyCount+5)
+    $extraControlRow=0;if(-not $script:UiDemo){$extraControlRow=1}
+    $border=Get-BorderStyle $w ($bodyCount+5+$extraControlRow)
     $heading=Fit-Text ('-- OptiMiyoo v'+$script:AppVersion+' / '+$title+' ') ($w-2)
     $lines.Add('  '+(Format-BorderText ('+'+$heading.TrimEnd().PadRight($w-2,'-')+'+') 0 0 $border))
     $mioStatus='    MIO // READY'
@@ -1375,6 +1438,7 @@ function Draw-DisplayPanel([switch]$Force) {
     $lines.Add('  '+(Format-BorderText '|' 0 1 $border)+' '+(Color-Text (Fit-Text $channel $left) '107;216;245')+(Color-Text ' | ' '91;104;151')+(Color-Text (Fit-Text $mioStatus 22) '249;172;204')+(Format-BorderText '|' ($w-1) 1 $border))
     for ($i=0;$i -lt $bodyCount;$i++) {
         $right=' '*22;if ($i -lt $mio.Count) {$right=$mio[$i]}
+        if($navigation -and $data[$i] -ceq $navigation){$data[$i]=''}
         $content=Fit-Text ($data[$i] -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' ') $left
         if ($i -eq $barIndex) {
             if ($script:UiDemo -and $script:UiDemoProgressStatus) {$content=Color-Text (Fit-Text ('Status: '+$script:UiDemoProgressStatus) $left) '218;224;244'}
@@ -1386,8 +1450,11 @@ function Draw-DisplayPanel([switch]$Force) {
     }
     $lines.Add('  '+(Format-BorderText '+' 0 ($bodyCount+2) $border)+(Format-DisplayStripe ('-'*($w-2)) $true)+(Format-BorderText '+' ($w-1) ($bodyCount+2) $border))
     $safeSay=$script:UiSay -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
-    $lines.Add('  '+(Format-BorderText '|' 0 ($bodyCount+3) $border)+' '+(Color-Text (Fit-Text ('MIO > '+$safeSay) $inner) '249;202;226')+' '+(Format-BorderText '|' ($w-1) ($bodyCount+3) $border))
-    $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($bodyCount+4) $border $true))
+    $footer=Fit-Text ('MIO > '+$safeSay) $inner
+    if($script:UiDemo){$footer=Format-RightAlignedText $safeSay $inner}
+    $lines.Add('  '+(Format-BorderText '|' 0 ($bodyCount+3) $border)+' '+(Color-Text $footer '249;202;226')+' '+(Format-BorderText '|' ($w-1) ($bodyCount+3) $border))
+    if($extraControlRow){$lines.Add('  '+(Format-BorderText '|' 0 ($bodyCount+4) $border)+' '+(Color-Text (Format-RightAlignedText $navigation $inner) '107;216;245')+' '+(Format-BorderText '|' ($w-1) ($bodyCount+4) $border))}
+    $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($bodyCount+4+$extraControlRow) $border $true))
     try {[Console]::CursorVisible=$false} catch {}
     Write-TerminalPanel $lines.ToArray()
 }
@@ -1837,6 +1904,8 @@ function Get-MioPreviewMenuRows([hashtable]$Scene) {
     return $rows
 }
 function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
+    $parts=Get-MenuControlParts $Rows
+    $Rows=$parts.Rows;$controls=@($parts.ControlRows)
     $first=0;$last=$Rows.Count-1
     while($first -le $last -and [string]::IsNullOrWhiteSpace($Rows[$first])){$first++}
     while($last -ge $first -and [string]::IsNullOrWhiteSpace($Rows[$last])){$last--}
@@ -1844,15 +1913,15 @@ function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
     $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
     if ($width -lt 72 -or $script:UiHeight -lt 26) {
         # Small windows retain the normal compact layout and resize prompt.
-        return [pscustomobject]@{Rows=@($Rows);DefaultRows=@();Index=0;Count=1;Anchor=-1}
+        return [pscustomobject]@{Rows=@($Rows)+$controls;DefaultRows=@();Index=0;Count=1;Anchor=-1}
     }
     # Reserve the full logo, top margin, borders, controls and spare bottom row.
     # Page the text rather than switching artwork on and off between scenes.
-    $capacity=$script:UiHeight-14
+    $capacity=[Math]::Max(1,$script:UiHeight-14-@(Get-MenuRows $controls ($width-4)).Count)
     $allDefaults=$null
     $allWrapped=@(Get-MenuRows $Rows ($width-28) ([ref]$allDefaults))
     $spacing=Get-MenuSpacing $allWrapped $allDefaults $capacity
-    if ($spacing.Rows.Count -le $capacity) {return [pscustomobject]@{Rows=$spacing.Rows;DefaultRows=$spacing.DefaultRows;Index=0;Count=1;Anchor=0L}}
+    if ($spacing.Rows.Count -le $capacity) {return [pscustomobject]@{Rows=@($spacing.Rows)+$controls;DefaultRows=@($spacing.DefaultRows)+@($parts.ControlDefaults);Index=0;Count=1;Anchor=0L}}
     # Keep each paragraph together when it fits. In particular, an option and
     # its following explanation must not land on different demo pages.
     $paragraphs=New-Object 'Collections.Generic.List[object]'
@@ -1906,7 +1975,7 @@ function Get-MioPreviewMenuPage([string[]]$Rows,[int]$Page=0,[long]$Anchor=-1) {
     }
     if ($Page -lt 0) {$Page=$count-1}
     $index=[Math]::Max(0,[Math]::Min($count-1,$Page))
-    return [pscustomobject]@{Rows=$pages[$index].Rows;DefaultRows=$pages[$index].DefaultRows;Index=$index;Count=$count;Anchor=$pages[$index].Anchor}
+    return [pscustomobject]@{Rows=@($pages[$index].Rows)+$controls;DefaultRows=@($pages[$index].DefaultRows)+@($parts.ControlDefaults);Index=$index;Count=$count;Anchor=$pages[$index].Anchor}
 }
 function Get-MioPreviewControls([bool]$Paused,[bool]$NeedsSpace=$false) {
     $action='pause';if ($Paused) {$action='resume'}
@@ -1970,7 +2039,7 @@ function Show-MioPreview([string]$Section='Tour') {
                 Write-Host ('  [DEMO {0}/{1}] {2} / {3}' -f ($index+1),$scenes.Count,$scene.System,$scene.Stage)
                 if ($scene.Menu) {
                     Set-MioPreviewProgress $scene 0 3500
-                    foreach ($row in @(Get-MioPreviewMenuRows $scene)) {Write-Host ('  '+$row)}
+                    foreach ($row in @(Get-PlainMenuRows @(Get-MioPreviewMenuRows $scene))) {Write-Host ('  '+$row)}
                 }
                 if ($scene.Detail) {Write-Host ('  '+$scene.Detail)}
                 $index++; continue

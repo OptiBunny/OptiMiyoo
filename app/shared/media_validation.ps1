@@ -138,6 +138,7 @@ namespace OptiMiyoo {
         const long MaximumInput = 512L * 1024 * 1024;
         // A resource policy, not a geometry or maximum track-ID restriction.
         const int MaximumIdentifiers = 65536;
+        struct IdentifierState {public byte Flags; public uint Cylinder, Head;}
         static readonly uint[] Table = MakeTable();
         static uint[] MakeTable() {
             uint[] table = new uint[256];
@@ -205,7 +206,7 @@ namespace OptiMiyoo {
                 report.Poll(0, true);
                 byte[] header = new byte[12], metadata = new byte[56], buffer = new byte[65536];
                 // Ordered lookup avoids attacker-chosen hash-collision chains.
-                SortedDictionary<uint,byte> identifiers = new SortedDictionary<uint,byte>();
+                SortedDictionary<uint,IdentifierState> identifiers = new SortedDictionary<uint,IdentifierState>();
                 bool haveInfo = false, haveTracks = false;
                 uint minCylinder = 0, maxCylinder = 0, minHead = 0, maxHead = 0;
                 uint firstCylinder = uint.MaxValue, lastCylinder = 0, firstHead = uint.MaxValue, lastHead = 0;
@@ -262,12 +263,18 @@ namespace OptiMiyoo {
                         firstHead = Math.Min(firstHead, side); lastHead = Math.Max(lastHead, side);
                     }
                     if ((descriptor || data) && identifier != 0) {
-                        byte flags;
-                        if (!identifiers.TryGetValue(identifier, out flags) && identifiers.Count >= MaximumIdentifiers)
+                        IdentifierState state;
+                        if (!identifiers.TryGetValue(identifier, out state) && identifiers.Count >= MaximumIdentifiers)
                             throw Bad("track/DATA identifier count exceeds its supported limit");
-                        // CAPS accepts either record order. Repeated IDs retain
-                        // its existing semantics; this only checks presence.
-                        identifiers[identifier] = (byte)(flags | (descriptor ? 1 : 2));
+                        // CAPS retains the latest descriptor and DATA per ID. Before
+                        // any DATA arrives, replacing a coordinate would lose that track.
+                        if (descriptor) {
+                            if (state.Flags == 1 && (state.Cylinder != cylinder || state.Head != side))
+                                throw Bad("DATA identifier is reused before its pending track has data");
+                            state.Cylinder = cylinder; state.Head = side;
+                        }
+                        state.Flags = (byte)(state.Flags | (descriptor ? 1 : 2));
+                        identifiers[identifier] = state;
                     }
                 }
                 if (input.Length != length || input.ReadByte() != -1) throw Bad("input changed during validation");
@@ -275,9 +282,9 @@ namespace OptiMiyoo {
                     firstHead < minHead || lastHead > maxHead))
                     throw Bad("INFO geometry excludes a recorded track; conversion would omit it");
                 int checkedIdentifiers = 0;
-                foreach (byte flags in identifiers.Values) {
+                foreach (IdentifierState state in identifiers.Values) {
                     if ((checkedIdentifiers++ & 1023) == 0) report.Poll(length, true);
-                    if (flags == 1) throw Bad("track has no matching DATA record");
+                    if (state.Flags == 1) throw Bad("track has no matching DATA record");
                 }
                 report.Poll(length, true);
             } finally {

@@ -163,9 +163,12 @@ record lengths and CRCs, including DATA payload bounds and supplied checksums,
 from a held input stream before HxC inspection or conversion. The trusted native
 broker independently applies the same checks, so a worker cannot skip input
 integrity validation. Every IMGE/TRCK descriptor must have a nonzero identifier
-with a matching DATA record, in either order. Missing references stop the whole
-input before a converter can silently drop a track. At most 65,536 distinct
-nonzero identifiers are retained in an ordered map with worst-case logarithmic
+with a matching DATA record, in either order. Before that identifier has any
+DATA, another descriptor cannot replace its pending track with a different
+cylinder or head. Sequential identifier reuse after DATA and same-coordinate
+descriptor updates retain their existing handling. Missing or ambiguous pending
+references stop the whole input before a converter can silently drop a track.
+At most 65,536 distinct nonzero identifiers are retained in an ordered map with worst-case logarithmic
 lookup, avoiding attacker-chosen hash-collision chains. This is a bookkeeping
 limit, not a maximum numeric identifier. When INFO is present, its final cylinder
 and head bounds must include every recorded IMGE/TRCK coordinate; otherwise the

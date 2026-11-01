@@ -302,6 +302,7 @@ function Complete-ApplicationSdSession {
     $state.Completed=$true
     $results=New-Object 'Collections.Generic.List[object]';$stagedLeases=New-Object 'Collections.Generic.List[object]'
     $changed=0;$failed=0;$skipped=0;$cancelled=$false;$backupSetLease=$null
+    $primaryFailure=$null;$cleanupFailures=New-Object 'Collections.Generic.List[object]'
     try {
         # Freeze and validate the entire selected snapshot before any original
         # write. Extra child files are never imported or executed.
@@ -360,6 +361,7 @@ function Complete-ApplicationSdSession {
                     try{& $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'Restored config'} $writeLease.Stream $file.Bytes;$restored=$true}
                     catch{
                         $recovery='SD restoration failed; restore '+(ConvertTo-SafeExternalText $file.Path)+' from verified backup '+(ConvertTo-SafeExternalText $backupPath)+' before using this card.'
+                        $recovery+=' Completed config updates kept: '+$changed+'.'
                         foreach($unverified in $state.UnverifiedBackups){$recovery+=' Do not restore from incomplete or unverified backup: '+(ConvertTo-SafeExternalText $unverified.Path)+'.'}
                         throw $recovery
                     }
@@ -367,21 +369,32 @@ function Complete-ApplicationSdSession {
                 $result='Kept';if($restored){$result='Restored'}
                 $results.Add([pscustomobject]@{System=$file.Folder;State=$result;FileTypeState='Unknown';Failed=$true})
             }finally{
-                # A failed backup close must not leave the config write handle
-                # or its parent directory pins held after setup has stopped.
-                try{if($backupLease){$backupLease.Dispose()}}
-                finally{
-                    try{if($backupDirectoryLease){$backupDirectoryLease.Dispose()}}
-                    finally{if($writeLease){$writeLease.Dispose()}}
+                # A buffered stream can fail again while closing after a real
+                # write/restore error. Release every lease without replacing
+                # the primary recovery advice with that secondary close error.
+                foreach($resource in @($backupLease,$backupDirectoryLease,$writeLease)){
+                    try{if($resource){$resource.Dispose()}}
+                    catch{$cleanupFailures.Add($_)}
                 }
             }
+            if($cleanupFailures.Count){throw $cleanupFailures[0]}
         }
         if(-not $cancelled){$cancelled=Test-ApplicationSdCancellation $ApplicationSession}
         if(-not $cancelled -and $Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}
         return [pscustomobject]@{Changed=$changed;Skipped=$skipped;Failed=$failed;Cancelled=$cancelled;BackupRoot=$state.BackupRoot;VerifiedBackups=$state.VerifiedBackups.ToArray();UnverifiedBackups=$state.UnverifiedBackups.ToArray();Results=$results.ToArray()}
+    }catch{
+        $primaryFailure=$_
+        throw
     }finally{
-        try{foreach($lease in $stagedLeases){$lease.Dispose()}}
-        finally{if($backupSetLease){$backupSetLease.Dispose()}}
+        foreach($resource in @($stagedLeases.ToArray())+@($backupSetLease)){
+            try{if($resource){$resource.Dispose()}}
+            catch{$cleanupFailures.Add($_)}
+        }
+        if($cleanupFailures.Count){
+            if($primaryFailure){
+                $primaryFailure.Exception.Data['OptiMiyoo.SdCleanupFailures']=[string[]]@($cleanupFailures | ForEach-Object {$_.Exception.Message})
+            }else{throw $cleanupFailures[0]}
+        }
     }
 }
 

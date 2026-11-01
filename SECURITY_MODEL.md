@@ -93,7 +93,10 @@ the menu worker before the parent creates a fresh session and snapshots `SRC`
 and `DST`. Collection staging never runs alongside that menu worker. The new
 processing worker receives the independently planned batch; the original root
 and source policy remain parent-owned. Opening menus or using SD setup does not
-require readable game collections.
+require readable game collections. During approved batch preparation, the parent
+polls cancellation through both collection inventories, path checks, and file-copy
+chunks. Cancellation stops preparation before any processing worker starts or
+output is published; the session retains uncertain files if safe cleanup fails.
 
 RPC has an operation allowlist, bounded frames and JSON depth, request sequencing,
 and time limits for incomplete messages. Batch policy grants must match the
@@ -217,7 +220,10 @@ be adopted between creation and use. Verify the original bytes in that backup
 before overwriting, verify the replacement, and attempt
 restoration if the write fails. Current backups use
 `Backups/OptiMiyoo_<timestamp>/Emu/<system>/config.json`. Recovery advice must
-distinguish verified backups from partial or unverified files.
+distinguish verified backups from partial or unverified files. If restoration fails,
+the diagnostic identifies the affected config, its verified backup, and the count
+of earlier updates kept. A later stream-close error must not replace that advice;
+cleanup still attempts to release every held lease.
 
 ### Terminal output and diagnostics
 

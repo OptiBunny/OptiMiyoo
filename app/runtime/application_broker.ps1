@@ -269,8 +269,10 @@ function Get-ApplicationBrokerModule([ValidateSet('Playlist','C64','ZX')][string
 }
 
 function New-ApplicationBrokerSession {
-    param([Parameter(Mandatory=$true)][string]$OriginalRoot,[Parameter(Mandatory=$true)][string]$WorkRoot)
+    param([Parameter(Mandatory=$true)][string]$OriginalRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,
+          [scriptblock]$CancellationCheck=$null)
     Assert-ApplicationRootIdentity -Path $OriginalRoot
+    if($CancellationCheck){& $CancellationCheck}
     $original=[IO.Path]::GetFullPath($OriginalRoot).TrimEnd('\','/');$work=[IO.Path]::GetFullPath($WorkRoot).TrimEnd('\','/')
     if(-not [IO.Directory]::Exists($original)){throw 'Application input root must exist.'}
     foreach($name in 'SRC','DST') {
@@ -286,26 +288,32 @@ function New-ApplicationBrokerSession {
         try {foreach($name in 'SRC','DST'){[void][IO.Directory]::CreateDirectory((Join-Path $original $name))}} finally {$originalLease.Dispose()}
         # Inventory before any copy so the accepted snapshot fits the session's
         # bounded cleanup budget, including files and empty directories.
-        $sourceInventory=Get-ApplicationBrokerTree (Join-Path $original 'SRC') -MetadataOnly -MaximumEntries 100000
+        $sourceInventory=Get-ApplicationBrokerTree (Join-Path $original 'SRC') -MetadataOnly -MaximumEntries 100000 -CancellationCheck $CancellationCheck
         $sourceCount=$sourceInventory.Files.Count+$sourceInventory.Directories.Count
-        $destinationInventory=Get-ApplicationBrokerTree (Join-Path $original 'DST') -MetadataOnly -MaximumEntries ([Math]::Max(1,100000-$sourceCount))
+        $destinationInventory=Get-ApplicationBrokerTree (Join-Path $original 'DST') -MetadataOnly -MaximumEntries ([Math]::Max(1,100000-$sourceCount)) -CancellationCheck $CancellationCheck
         $destinationCount=$destinationInventory.Files.Count+$destinationInventory.Directories.Count
         if($sourceCount+$destinationCount -gt 100000){throw 'SRC and DST contain more than 100,000 entries. Split this collection into smaller batches.'}
         # Reuse the inventory to reject unworkable staging paths before copying.
         foreach($snapshot in @(@{Name='SRC';Tree=$sourceInventory},@{Name='DST';Tree=$destinationInventory})) {
+            if($CancellationCheck){& $CancellationCheck}
             $targetRoot=Join-Path $work $snapshot.Name
             Assert-OptiPathBudget -Path $targetRoot -Directory
-            foreach($relative in $snapshot.Tree.Directories){Assert-OptiPathBudget -Path (Join-Path $targetRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)) -Directory}
+            foreach($relative in $snapshot.Tree.Directories){
+                if($CancellationCheck){& $CancellationCheck}
+                Assert-OptiPathBudget -Path (Join-Path $targetRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)) -Directory
+            }
             foreach($relative in $snapshot.Tree.Files.Keys){
+                if($CancellationCheck){& $CancellationCheck}
                 $target=Join-Path $targetRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
                 Assert-OptiPathBudget -Path $target
                 Assert-OptiPathBudget -Path ([IO.Path]::GetDirectoryName($target)) -Directory
             }
         }
-        $source=Get-ApplicationBrokerTree (Join-Path $original 'SRC') (Join-Path $work 'SRC') -MaximumEntries ([Math]::Max(1,$sourceCount)) -ExpectedFiles $sourceInventory.Files
-        $destination=Get-ApplicationBrokerTree (Join-Path $original 'DST') (Join-Path $work 'DST') -MaximumEntries ([Math]::Max(1,$destinationCount)) -ExpectedFiles $destinationInventory.Files
+        $source=Get-ApplicationBrokerTree (Join-Path $original 'SRC') (Join-Path $work 'SRC') -MaximumEntries ([Math]::Max(1,$sourceCount)) -ExpectedFiles $sourceInventory.Files -CancellationCheck $CancellationCheck
+        $destination=Get-ApplicationBrokerTree (Join-Path $original 'DST') (Join-Path $work 'DST') -MaximumEntries ([Math]::Max(1,$destinationCount)) -ExpectedFiles $destinationInventory.Files -CancellationCheck $CancellationCheck
         if($source.Files.Count+$source.Directories.Count+$destination.Files.Count+$destination.Directories.Count -gt 100000){throw 'SRC or DST grew beyond the snapshot entry limit; originals kept.'}
     } finally {$workLease.Dispose()}
+    if($CancellationCheck){& $CancellationCheck}
     $id=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
     $handle=[pscustomobject]@{Id=$id;OriginalRoot=$original;WorkRoot=$work;SourceSnapshot=[pscustomobject]@{FileCount=$source.Files.Count;Bytes=$source.Bytes};DestinationSnapshot=[pscustomobject]@{FileCount=$destination.Files.Count;Bytes=$destination.Bytes};ActiveBatch=$null}
     $script:ApplicationBrokerStates[$id]=[pscustomobject]@{Handle=$handle;Id=$id;OriginalRoot=$original;WorkRoot=$work;SourceSnapshot=$source;DestinationSnapshot=$destination;DestinationTree=$null;Batch=$null;Closed=$false}

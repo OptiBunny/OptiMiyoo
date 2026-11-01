@@ -139,8 +139,8 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
                 if (Test-Path -LiteralPath $item.Destination) {
                     # Keep the temporary name short enough for valid deep output paths.
                     $backup = Join-Path ([IO.Path]::GetDirectoryName($item.Destination)) ('.m3u_' + [Guid]::NewGuid().ToString('N').Substring(0,12) + '.backup')
-                    Move-OutputPath $item.Destination $backup ([bool]$item.Folder)
-                    $captured=[pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder; Guard=$null }
+                    $alternate=Move-SourcePolicyPublicationPath $item.Destination $backup ([bool]$item.Folder)
+                    $captured=[pscustomobject]@{ Path = $item.Destination; Backup = $backup; Folder = [bool]$item.Folder; AlternatePath=$alternate; Guard=$null }
                     $backups.Add($captured)
                     if($ValidateBackup){$captured.Guard=& $ValidateBackup $captured.Path $captured.Backup $captured.Folder;if($null -eq $captured.Guard){throw 'Previous output verification did not return a guard.'}}
                     Write-Log ('BACKUP: {0} -> {1}' -f $item.Destination, $backup)
@@ -149,7 +149,7 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
             if($ValidatePublication -and $backups.Count){
                 # Only paths actually captured by this transaction are checked.
                 # They are temporarily absent, but still need ownership protection.
-                $capturedTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Path;Folder=$_.Folder}})
+                $capturedTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Path;Folder=$_.Folder;AlternatePath=$_.AlternatePath}})
                 $capturedBackups=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Backup;Folder=$_.Folder}})
                 & $ValidatePublication $capturedTargets $capturedBackups | Out-Null
             }
@@ -1377,6 +1377,9 @@ function Update-PlaylistReferenceIndex($Index,[string]$OwnPlaylist,$ReplacedTarg
 }
 
 function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceIndex=$null,[switch]$ProtectedPublication,[object[]]$PrivateTargets=@()) {
+    # Captured DOS names remain references to the previous output while its
+    # ordinary pathname is absent. Folder aliases protect every old descendant.
+    $Targets=@(Get-SourcePolicyPublicationTargets $Targets)
     $existing=@($Targets)
     if(-not $ProtectedPublication){$existing=@($Targets | Where-Object {Test-Path -LiteralPath $_.Destination})}
     if ($existing.Count -eq 0) {return}

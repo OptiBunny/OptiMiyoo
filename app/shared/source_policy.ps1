@@ -66,6 +66,13 @@ namespace OptiMiyoo {
             ref ObjectAttributes attributes, out IoStatusBlock status, IntPtr allocation, uint fileAttributes,
             uint share, uint disposition, uint options, IntPtr eaBuffer, uint eaLength);
         [DllImport("ntdll.dll")] private static extern uint RtlNtStatusToDosError(int status);
+        [DllImport("ntdll.dll")] private static extern int NtQueryInformationFile(SafeFileHandle handle,
+            out IoStatusBlock status, IntPtr information, uint length, int informationClass);
+        [DllImport("ntdll.dll")] private static extern int NtSetInformationFile(SafeFileHandle handle,
+            out IoStatusBlock status, IntPtr information, uint length, int informationClass);
+        [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] private struct FileRename {
+            public byte ReplaceIfExists; public IntPtr RootDirectory; public uint FileNameLength; public char FileName;
+        }
         [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr descriptor, out uint size);
         [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr pointer);
@@ -132,6 +139,60 @@ namespace OptiMiyoo {
                     throw new IOException("File is read-only; keeping it: " + path);
                 return handle;
             } catch { handle.Dispose(); throw; }
+        }
+        public static string MoveForPublication(string source, string destination, bool directory) {
+            RequireWindows(); ValidateAncestorIdentity(source); ValidateAncestorIdentity(destination);
+            string full = Path.GetFullPath(source), target = Path.GetFullPath(destination);
+            string parent = Path.GetDirectoryName(full), leaf = Path.GetFileName(target);
+            if (String.IsNullOrEmpty(leaf) || leaf.EndsWith(".") || leaf.EndsWith(" ") ||
+                leaf.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                !String.Equals(parent, Path.GetDirectoryName(target), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("A publication backup must be a literal sibling path.");
+            using (SourceRemovalLeaseV128 parentLease = OpenDirectory(parent))
+            using (SafeFileHandle handle = CreateFileW(NativePath(full), 0x10081U, 1, IntPtr.Zero, 3,
+                directory ? 0x02200000U : 0x00200000U, IntPtr.Zero)) {
+                if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Publication output could not be captured.");
+                FileInformation information = Inspect(handle);
+                if ((information.Attributes & 0x400U) != 0 || ((information.Attributes & 0x10U) != 0) != directory)
+                    throw new IOException("Publication output is linked or has the wrong type.");
+                if (!directory && (information.Attributes & 1U) != 0)
+                    throw new IOException("Publication output is read-only; keeping it.");
+                // Query the real DOS name while this same rename handle denies
+                // competing writes/renames. A pathname query followed by reopen
+                // could capture an alias belonging to a different directory entry.
+                string alternate = null; IntPtr buffer = Marshal.AllocHGlobal(1024);
+                try {
+                    IoStatusBlock io; int status = NtQueryInformationFile(handle, out io, buffer, 1024, 21);
+                    if (status != unchecked((int)0xc0000034)) { // STATUS_OBJECT_NAME_NOT_FOUND: no DOS alias
+                        if (status != 0) throw new Win32Exception((int)RtlNtStatusToDosError(status), "Publication alternate name could not be captured.");
+                        int length = Marshal.ReadInt32(buffer);
+                        if (length < 0 || length > 510 || (length & 1) != 0 || io.Information.ToUInt64() < (ulong)(4 + length))
+                            throw new IOException("Publication alternate name is invalid.");
+                        string name = Marshal.PtrToStringUni(IntPtr.Add(buffer, 4), length / 2);
+                        if (!String.IsNullOrEmpty(name)) {
+                            if (name == "." || name == ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith(".") || name.EndsWith(" "))
+                                throw new IOException("Publication alternate name is not a literal filename.");
+                            // Do not normalize this path while the original exists:
+                            // GetFullPath would expand away the alias being retained.
+                            alternate = Path.Combine(parent, name);
+                        }
+                    }
+                } finally { Marshal.FreeHGlobal(buffer); }
+                byte[] bytes = System.Text.Encoding.Unicode.GetBytes(leaf);
+                int nameOffset = (int)Marshal.OffsetOf(typeof(FileRename), "FileName");
+                int rootOffset = (int)Marshal.OffsetOf(typeof(FileRename), "RootDirectory");
+                int lengthOffset = (int)Marshal.OffsetOf(typeof(FileRename), "FileNameLength");
+                buffer = Marshal.AllocHGlobal(nameOffset + bytes.Length + 2);
+                try {
+                    for (int i = 0; i < nameOffset + bytes.Length + 2; i++) Marshal.WriteByte(buffer, i, 0);
+                    Marshal.WriteIntPtr(buffer, rootOffset, parentLease.parents[parentLease.parents.Count - 1].DangerousGetHandle());
+                    Marshal.WriteInt32(buffer, lengthOffset, bytes.Length);
+                    Marshal.Copy(bytes, 0, IntPtr.Add(buffer, nameOffset), bytes.Length);
+                    IoStatusBlock io; int status = NtSetInformationFile(handle, out io, buffer, (uint)(nameOffset + bytes.Length), 10);
+                    if (status != 0) throw new Win32Exception((int)RtlNtStatusToDosError(status), "Publication backup rename failed.");
+                } finally { Marshal.FreeHGlobal(buffer); }
+                return alternate;
+            }
         }
         public static SourceRemovalLeaseV128 Open(string path, string root) { return OpenCore(path, root, true); }
         public static SourceRemovalLeaseV128 OpenRead(string path) { return OpenCore(path, Path.GetPathRoot(Path.GetFullPath(path)), false); }
@@ -515,6 +576,21 @@ namespace OptiMiyoo {
     }
 }
 '@
+}
+
+function Move-SourcePolicyPublicationPath([string]$Source,[string]$Destination,[bool]$Folder) {
+    Initialize-SourcePolicyNative
+    return [OptiMiyoo.SourceRemovalLeaseV128]::MoveForPublication($Source,$Destination,$Folder)
+}
+
+function Get-SourcePolicyPublicationTargets([object[]]$Targets) {
+    foreach($target in $Targets) {
+        $target
+        if($target.PSObject.Properties['AlternatePath'] -and $target.AlternatePath -and
+           -not $target.Destination.Equals($target.AlternatePath,[StringComparison]::OrdinalIgnoreCase)) {
+            [pscustomobject]@{Destination=[string]$target.AlternatePath;Folder=[bool]$target.Folder}
+        }
+    }
 }
 
 function Get-SourcePolicyProgressAction([scriptblock]$Progress,[string]$Stage,[string]$Detail) {

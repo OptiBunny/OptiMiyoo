@@ -139,6 +139,12 @@ parent's trusted prompts or explicit supported caller policy, not worker output.
 Overwrite approval does not waive checks for foreign references or unrelated
 contents. The parent derives conflicts and allowed output names independently.
 
+Before moving an existing output to its transaction backup, publication captures
+its Windows alternate filename through the same handle used for the rename.
+Foreign CUE/playlist checks retain that alias while the original name is absent;
+captured folder aliases also protect descendants. Failure to establish this
+identity stops replacement.
+
 Path handling must preserve containment and object identity throughout reads,
 staging, replacement, rollback, and cleanup. Existing controls include pinned
 ancestor/file handles, reparse-point rejection, hard-link checks where identity

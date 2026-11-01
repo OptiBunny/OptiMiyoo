@@ -68,33 +68,52 @@ namespace OptiMiyoo {
             for (int position = 16; position < 256; position += 2) {
                 int track = bytes[position];
                 if (track == 0) { terminated = true; break; }
-                if (track < 2 || track > 85 || seen[track]) throw Bad("invalid or duplicate track number");
+                // The bundled aligner handles IDs 1..84. ID 85 is copied by its
+                // reader but never assigned a track length, so it is silently lost.
+                if (track < 2 || track > 84) throw Bad("track number is outside supported range 2..84");
+                if (seen[track]) throw Bad("duplicate track number");
                 seen[track] = true;
                 count++;
             }
             if (!terminated || count == 0 || count > MaxTracks) throw Bad("empty or invalid track table");
             if (bytes.Length != 256 + count * TrackSize) throw Bad("track data length does not match the NIB header");
         }
-        public static void Validate(string path) {
-            byte[] bytes;
-            // Size and bytes must come from the same locked handle. A pathname
-            // length check followed by ReadAllBytes can allocate an arbitrarily
-            // grown/replaced input before its structural checks run.
-            using (FileStream input = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+        public static void Validate(Stream input, string extension, Action<long,long> progress) {
+            if (input == null || !input.CanRead || !input.CanSeek)
+                throw new ArgumentException("A readable, seekable NIB/NBZ stream is required.");
+            long saved = input.Position;
+            try {
+                bool compressed = String.Equals(extension, ".nbz", StringComparison.OrdinalIgnoreCase);
+                if (!compressed && !String.Equals(extension, ".nib", StringComparison.OrdinalIgnoreCase))
+                    throw Bad("unexpected input extension");
+                // Size and bytes come from the same borrowed, held stream. A
+                // pathname length check followed by ReadAllBytes is not bounded.
                 long length = input.Length;
                 if (length < 1 || length > NativeBuffer) throw Bad("unsupported input size");
-                bytes = new byte[(int)length];
+                input.Position = 0;
+                if (progress != null) progress(0, length);
+                byte[] bytes = new byte[(int)length];
                 int total = 0;
                 while (total < bytes.Length) {
-                    int read = input.Read(bytes, total, bytes.Length - total);
-                    if (read == 0) throw Bad("input changed during validation");
+                    int read = input.Read(bytes, total, Math.Min(65536, bytes.Length - total));
+                    if (read <= 0) throw Bad("input changed during validation");
                     total += read;
+                    if (progress != null) progress(total, length);
                 }
-                if (input.ReadByte() != -1) throw Bad("input changed during validation");
+                if (input.Length != length || input.ReadByte() != -1) throw Bad("input changed during validation");
+                // Decoding is bounded by MaxNib (<1 MiB), including back-references.
+                // Poll before and after that bounded work as well as each read.
+                if (progress != null) progress(length, length);
+                if (compressed) bytes = Decode(bytes);
+                CheckNib(bytes);
+                if (progress != null) progress(length, length);
+            } finally {
+                input.Position = saved;
             }
-            if (String.Equals(Path.GetExtension(path), ".nbz", StringComparison.OrdinalIgnoreCase)) bytes = Decode(bytes);
-            else if (!String.Equals(Path.GetExtension(path), ".nib", StringComparison.OrdinalIgnoreCase)) throw Bad("unexpected input extension");
-            CheckNib(bytes);
+        }
+        public static void Validate(string path) {
+            using (FileStream input = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                Validate(input, Path.GetExtension(path), null);
         }
     }
 }

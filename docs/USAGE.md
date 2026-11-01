@@ -55,6 +55,8 @@ folder such as `Backups/OptiMiyoo_2026-10-31-10-30-00/Emu`.
 To restore a setting, use a **verified backup** listed in the results: copy its
 `config.json` into the matching system folder under the card's `Emu` folder.
 PlayStation's config folder is `Emu/PSX`; its games still go in `Roms/PS`.
+If automatic restoration fails, the error names the config and verified backup
+to restore, and reports how many earlier config updates remain in place.
 
 ## Convert disk images
 
@@ -197,9 +199,9 @@ with the counts of originals removed or kept. The CSV report and log are saved
 beside `SRC` and `DST`; their paths appear in the results. **Enter / B / Esc**
 returns to the main menu and **Q** exits.
 
-During processing, **B / Esc** stops and returns to settings; **Q** stops and
-quits. **Ctrl+C** also requests a stop and closes the app. An update already
-being saved may finish first. Stopping does not undo completed work: saved
+While preparing or processing a batch, **B / Esc** stops and returns to settings;
+**Q** stops and quits. **Ctrl+C** also requests a stop and closes the app. An update
+already being saved may finish first. Stopping does not undo completed work: saved
 outputs stay saved, and originals already removed are not restored.
 
 ## Copy to your Miyoo

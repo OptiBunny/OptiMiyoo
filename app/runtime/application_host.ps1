@@ -448,7 +448,7 @@ function Invoke-ApplicationHost {
                     # No worker is alive in this fresh session while host-owned
                     # collection snapshots are copied into writable staging.
                     if($preparationCancellation){& $preparationCancellation}
-                    $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
+                    $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath -CancellationCheck $preparationCancellation
                     if($preparationCancellation){& $preparationCancellation}
                     $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
                 }

@@ -238,7 +238,7 @@ namespace OptiMiyoo {
   private readonly TerminalSequenceFilter filter=new TerminalSequenceFilter();
   private readonly object outcomeGate=new object();
   private readonly List<SafeFileHandle> pins=new List<SafeFileHandle>();
-  private IDisposable parentLease;
+  private IDisposable parentLease,rootLease;
   private IntPtr process,job,pseudo,sid;
   private string profile,controlPath,rootIdentity;
   private FileStream terminalOutput,terminalInput,requestInput,responseOutput;
@@ -298,7 +298,7 @@ namespace OptiMiyoo {
   private void Pin(string path,bool directory){
    SafeFileHandle h=CreateFile(NativePath(path),directory?1u:0x80000000u,directory?3u:1u,IntPtr.Zero,3,0x00200000u|(directory?0x02000000u:0u),IntPtr.Zero);
    if(h.IsInvalid){h.Dispose();throw new Win32Exception(Marshal.GetLastWin32Error(),"Pin application staging");}
-   try{FileInformation info;Check(GetFileInformationByHandle(h,out info),"Inspect application staging");if((info.attributes&0x400)!=0||((info.attributes&0x10)!=0)!=directory||(!directory&&info.links!=1))throw new IOException("Application staging must contain ordinary unlinked files/directories.");if(directory&&path==RootPath&&rootIdentity==null)rootIdentity=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8");pins.Add(h);}catch{h.Dispose();throw;}
+   try{FileInformation info;Check(GetFileInformationByHandle(h,out info),"Inspect application staging");if((info.attributes&0x400)!=0||((info.attributes&0x10)!=0)!=directory||(!directory&&info.links!=1))throw new IOException("Application staging must contain ordinary unlinked files/directories.");if(directory&&path==RootPath&&rootIdentity!=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8"))throw new IOException("Application scratch creation identity changed; files retained.");pins.Add(h);}catch{h.Dispose();throw;}
   }
   private void PinTree(string path){Queue<string> queue=new Queue<string>();queue.Enqueue(path);int count=0;long bytes=0;while(queue.Count>0){string current=queue.Dequeue();if(++count>12000)throw new IOException("Application code staging has too many entries.");FileAttributes attr=File.GetAttributes(current);bool directory=(attr&FileAttributes.Directory)!=0;Pin(current,directory);if(directory){foreach(string child in Directory.EnumerateFileSystemEntries(current)){if(queue.Count+count>=12000)throw new IOException("Application code staging has too many entries.");queue.Enqueue(child);}}else{long length=new FileInfo(current).Length;if(length>268435456L||(bytes+=length)>1073741824L)throw new IOException("Application code staging exceeds its size limit.");}}}
   public static ApplicationSession Create(){
@@ -306,7 +306,7 @@ namespace OptiMiyoo {
    try{
     string temp=Path.GetFullPath(Path.GetTempPath());if(temp.StartsWith("\\\\",StringComparison.Ordinal)||!String.Equals(new DriveInfo(Path.GetPathRoot(temp)).DriveFormat,"NTFS",StringComparison.OrdinalIgnoreCase))throw new IOException("Application isolation needs a local NTFS temporary directory.");
     result.parentLease=(IDisposable)Policy("OpenDirectory",temp);
-    string root=Path.Combine(temp,"as_"+Guid.NewGuid().ToString("N").Substring(0,16));if(root.Length+2>247)throw new IOException("Application working path is too long. Move OptiMiyoo to a shorter folder, then retry. Originals kept.");Policy("CreateOwnedDirectory",root);result.RootPath=root;Secure(result.RootPath,"S-1-0-0",false);result.Pin(result.RootPath,true);
+    string root=Path.Combine(temp,"as_"+Guid.NewGuid().ToString("N").Substring(0,16));if(root.Length+2>247)throw new IOException("Application working path is too long. Move OptiMiyoo to a shorter folder, then retry. Originals kept.");object claim=Policy("CreatePrivateDirectory",root);result.rootLease=(IDisposable)claim;result.rootIdentity=(string)claim.GetType().GetProperty("DirectoryIdentity").GetValue(claim,null);result.RootPath=root;Secure(result.RootPath,"S-1-0-0",false);result.Pin(result.RootPath,true);
     result.CodePath=Path.Combine(result.RootPath,"c");result.WorkPath=Path.Combine(result.RootPath,"w");result.controlPath=Path.Combine(result.RootPath,"p");Directory.CreateDirectory(result.CodePath);Directory.CreateDirectory(result.WorkPath);Directory.CreateDirectory(result.controlPath);result.Pin(result.WorkPath,true);return result;
    }catch{result.Dispose();throw;}
   }
@@ -467,7 +467,7 @@ namespace OptiMiyoo {
   }
   private int CountScratch(int maximum){Queue<string> pending=new Queue<string>();pending.Enqueue(RootPath);int count=0;while(pending.Count>0){string path=pending.Dequeue();if(++count>maximum)throw new IOException("Application scratch entry limit exceeded; files retained.");FileAttributes attributes=File.GetAttributes(path);if((attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("Application scratch contains a link; files retained.");if((attributes&FileAttributes.Directory)!=0)foreach(string child in Directory.EnumerateFileSystemEntries(path)){if(pending.Count+count>=maximum)throw new IOException("Application scratch entry limit exceeded; files retained.");pending.Enqueue(child);}}return count;}
   private void Cleanup(){
-   foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(RootPath==null||(!Directory.Exists(RootPath)&&!File.Exists(RootPath)))return;
+   foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(rootLease!=null){rootLease.Dispose();rootLease=null;}if(RootPath==null||(!Directory.Exists(RootPath)&&!File.Exists(RootPath)))return;
    for(int retry=0;;retry++){try{Policy("DeleteOwnedVerified",RootPath,Path.GetDirectoryName(RootPath),rootIdentity,cleanupEntryLimit);break;}catch(Win32Exception e){if(retry>=7||(e.NativeErrorCode!=5&&e.NativeErrorCode!=32&&e.NativeErrorCode!=33&&e.NativeErrorCode!=145))throw;Thread.Sleep(Math.Min(100*(1<<retry),1000));if(!Directory.Exists(RootPath))break;}}
   }
   public void Dispose(){
@@ -479,7 +479,7 @@ namespace OptiMiyoo {
    if(pseudo!=IntPtr.Zero){ClosePseudoConsole(pseudo);pseudo=IntPtr.Zero;}if(terminalOutput!=null){try{terminalOutput.Dispose();}catch{}}
    foreach(Thread thread in new Thread[]{inputThread,inputWriterThread,outputThread,rpcThread})if(thread!=null&&thread!=Thread.CurrentThread)thread.Join(1000);
    Close(ref process);Close(ref job);if(sid!=IntPtr.Zero){FreeSid(sid);sid=IntPtr.Zero;}if(profile!=null){int hr=DeleteAppContainerProfile(profile);for(int retry=0;hr<0 && retry<3;retry++){Thread.Sleep(50*(1<<retry));hr=DeleteAppContainerProfile(profile);}if(hr<0)CleanupWarning="Application profile cleanup failed ("+hr.ToString("X8")+").";profile=null;}
-   try{Cleanup();}catch(Exception e){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+e.Message+" Retained application scratch: "+RootPath;}finally{foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
+   try{Cleanup();}catch(Exception e){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+e.Message+" Retained application scratch: "+RootPath;}finally{foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(rootLease!=null){rootLease.Dispose();rootLease=null;}if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
    if(consoleSaved){lock(consoleGate){
     try{WriteTerminal("\x1b[0m\x1b[r\x1b[?25h");}catch{}
     // The ANSI reset selects terminal defaults, not the caller's native colors.

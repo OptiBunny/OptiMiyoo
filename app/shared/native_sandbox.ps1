@@ -135,7 +135,6 @@ namespace OptiMiyoo {
 
 
  public sealed class NativeSandboxJob : IDisposable {
-  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateDirectoryW(string path,IntPtr security);
   [StructLayout(LayoutKind.Sequential)] struct FileInfoNative {public uint attributes;public System.Runtime.InteropServices.ComTypes.FILETIME creation,access,write;public uint volume,sizeHigh,sizeLow,links,indexHigh,indexLow;}
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateFile(string path,uint access,uint share,IntPtr sa,uint disposition,uint flags,IntPtr template);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle file,out FileInfoNative info);
@@ -151,7 +150,7 @@ namespace OptiMiyoo {
   private List<IntPtr> inherited=new List<IntPtr>();
   private List<FileStream> guards=new List<FileStream>();
   private List<SafeFileHandle> directories=new List<SafeFileHandle>();
-  private IDisposable parentLease;
+  private IDisposable parentLease,rootLease;
   private string rootIdentity;
   public string RootPath {get;private set;}
   public string WorkPath {get;private set;}
@@ -201,7 +200,7 @@ namespace OptiMiyoo {
   private void PinDirectory(string path) {
    SafeFileHandle handle=CreateFile(NativeSandboxProcess.NativePath(path),1,3,IntPtr.Zero,3,0x02000000u|0x00200000u,IntPtr.Zero);
    if(handle.IsInvalid){handle.Dispose();throw new Win32Exception(Marshal.GetLastWin32Error(),"Pin sandbox directory");}
-   FileInfoNative info;try{Check(GetFileInformationByHandle(handle,out info),"Inspect sandbox directory");if((info.attributes&0x410)!=0x10)throw new IOException("Sandbox directory was replaced by a link.");if(path==RootPath&&rootIdentity==null)rootIdentity=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8");}catch{handle.Dispose();throw;}
+   FileInfoNative info;try{Check(GetFileInformationByHandle(handle,out info),"Inspect sandbox directory");if((info.attributes&0x410)!=0x10)throw new IOException("Sandbox directory was replaced by a link.");if(path==RootPath&&rootIdentity!=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8"))throw new IOException("Sandbox creation identity changed; files retained.");}catch{handle.Dispose();throw;}
    directories.Add(handle);
    guards.Add(new FileStream(Path.Combine(path,".optimiyoo-guard"),FileMode.CreateNew,FileAccess.ReadWrite,FileShare.Read,1,FileOptions.DeleteOnClose));
   }
@@ -212,9 +211,9 @@ namespace OptiMiyoo {
     string temp=Path.GetFullPath(Path.GetTempPath());NoLinkedParents(temp);
     result.parentLease=(IDisposable)SourcePolicy("OpenDirectory",temp);
     string root=Path.Combine(temp,"os_"+Guid.NewGuid().ToString("N").Substring(0,16));
-    Check(CreateDirectoryW(NativeSandboxProcess.NativePath(root),IntPtr.Zero),"Create a new private sandbox directory");
+    object claim=SourcePolicy("CreatePrivateDirectory",root);result.rootLease=(IDisposable)claim;result.rootIdentity=(string)claim.GetType().GetProperty("DirectoryIdentity").GetValue(claim,null);
     result.RootPath=root;
-    // First protect the new empty root for the current account. The zero SID has no members.
+    // The atomic claim stays held through staging, child execution and cleanup. The zero SID has no members.
     NativeSandboxProcess.Secure(result.RootPath,"S-1-0-0",false);
     result.PinDirectory(result.RootPath);
     string bin=Path.Combine(result.RootPath,"bin"),input=Path.Combine(result.RootPath,"input");result.WorkPath=Path.Combine(result.RootPath,"work");
@@ -260,10 +259,10 @@ namespace OptiMiyoo {
    try{return method.Invoke(null,arguments);}catch(System.Reflection.TargetInvocationException error){throw error.InnerException??error;}
   }
   private void Cleanup() {
-   if(RootPath==null||(!Directory.Exists(RootPath)&&!File.Exists(RootPath)))return;
    // The child is dead. Release staging pins before the deletion helper obtains
    // its own DELETE handles and pins every ancestor; never use a recursive path delete.
-   foreach(FileStream guard in guards)guard.Dispose();guards.Clear();foreach(SafeFileHandle directory in directories)directory.Dispose();directories.Clear();
+   foreach(FileStream guard in guards)guard.Dispose();guards.Clear();foreach(SafeFileHandle directory in directories)directory.Dispose();directories.Clear();if(rootLease!=null){rootLease.Dispose();rootLease=null;}
+   if(RootPath==null||(!Directory.Exists(RootPath)&&!File.Exists(RootPath)))return;
    for(int retry=0;;retry++){
     try{SourcePolicy("DeleteOwnedVerified",RootPath,Path.GetDirectoryName(RootPath),rootIdentity,50000);break;}
     catch(Win32Exception error){bool transient=error.NativeErrorCode==5||error.NativeErrorCode==32||error.NativeErrorCode==33||error.NativeErrorCode==145;if(!transient||retry>=7)throw;System.Threading.Thread.Sleep(Math.Min(100*(1<<retry),1000));if(!Directory.Exists(RootPath))break;}
@@ -275,7 +274,7 @@ namespace OptiMiyoo {
    if(child!=null){child.Dispose();if(child.CleanupWarning!=null)CleanupWarning=child.CleanupWarning;child=null;}}
    foreach(IntPtr handle in inherited)CloseHandle(handle);inherited.Clear();
    try{Cleanup();}catch(Exception error){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+error.Message+" Retained scratch: "+RootPath;}
-   finally{foreach(FileStream guard in guards)guard.Dispose();guards.Clear();foreach(SafeFileHandle directory in directories)directory.Dispose();directories.Clear();if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
+   finally{foreach(FileStream guard in guards)guard.Dispose();guards.Clear();foreach(SafeFileHandle directory in directories)directory.Dispose();directories.Clear();if(rootLease!=null){rootLease.Dispose();rootLease=null;}if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
   }
  }
 }

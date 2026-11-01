@@ -142,6 +142,9 @@ function Invoke-ApplicationMenuWorker([string]$Path,[hashtable]$Arguments) {
     $selection=@{Operation=$operation;System=$Arguments.System;Storage=$output.Storage}
     if ($operation -eq 'Playlist') {$selection.SingleStorage=$output.SingleStorage}
     $batch=Invoke-ApplicationRpc -Operation Batch.Begin -Payload $selection
+    # The parent stops this menu worker before taking collection snapshots and
+    # starts the approved operation in a fresh isolated processing session.
+    if($batch.PSObject.Properties['Handoff'] -and $batch.Handoff -eq $true){return 0}
     $jobs=New-Object 'System.Collections.Generic.List[object]';$offset=0
     do {
         $page=Invoke-ApplicationRpc -Operation Batch.Jobs -Payload @{BatchId=$batch.BatchId;Offset=$offset}

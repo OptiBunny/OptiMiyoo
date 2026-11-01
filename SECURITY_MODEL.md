@@ -86,6 +86,15 @@ Cleanup releases the claim, then verifies its recorded identity before deletion;
 it must not adopt a replacement directory after startup failure or cancellation. Defaults include 1 GiB of memory and 1,800 CPU seconds;
 the latter is not a wall-clock timeout.
 
+Menu-only sessions have no collection broker or native-job broker. They can ask
+for a parent-owned policy choice, hand off that matching selection, choose SD
+setup, or change the display preference. An accepted processing handoff stops
+the menu worker before the parent creates a fresh session and snapshots `SRC`
+and `DST`. Collection staging never runs alongside that menu worker. The new
+processing worker receives the independently planned batch; the original root
+and source policy remain parent-owned. Opening menus or using SD setup does not
+require readable game collections.
+
 RPC has an operation allowlist, bounded frames and JSON depth, request sequencing,
 and time limits for incomplete messages. Batch policy grants must match the
 approved operation, system, and storage selection. Job, conflict, task, and batch

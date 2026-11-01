@@ -10,6 +10,8 @@ at the main menu, they keep you there. Letters need **Enter** in selection
 menus; during demo playback or processing, these keys work immediately.
 
 To create playlists or convert files, [prepare your games](#prepare-a-batch) first.
+OptiMiyoo reads `SRC` and `DST` when you start a playlist or conversion batch.
+Opening the menu, viewing the demo, and SD setup do not read your game files.
 
 | Choose | Task |
 | --- | --- |

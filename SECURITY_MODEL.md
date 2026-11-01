@@ -180,6 +180,14 @@ parent's trusted prompts or explicit supported caller policy, not worker output.
 Overwrite approval does not waive checks for foreign references or unrelated
 contents. The parent derives conflicts and allowed output names independently.
 
+Before publication, the parent polls cancellation while copying and hashing
+private output bytes, enumerating folder members, and at archive verification
+checkpoints. Cancellation releases unpublished staging and keeps the affected
+originals and prior output. Archive checks follow worker progress; this does not
+promise a fixed response time from a silent worker. Installation and rollback
+retain their uninterrupted transaction boundaries, and ordinary I/O failures
+remain failures even when cancellation is also requested.
+
 Before moving an existing output to its transaction backup, publication captures
 its Windows alternate filename through the same handle used for the rename.
 Foreign CUE/playlist checks retain that alias while the original name is absent;

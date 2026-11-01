@@ -321,33 +321,47 @@ function New-ApplicationBrokerSession {
     return $handle
 }
 
-function Get-ApplicationBrokerFile([string]$Path,[string]$Root,[string]$CopyTo,[switch]$SingleLink,[long[]]$AllowedLengths,[switch]$ArchiveBudget) {
+function Get-ApplicationBrokerFile([string]$Path,[string]$Root,[string]$CopyTo,[switch]$SingleLink,[long[]]$AllowedLengths,[switch]$ArchiveBudget,[scriptblock]$CancellationCheck=$null) {
+    if($CancellationCheck){& $CancellationCheck}
     Initialize-ApplicationBrokerNative
     $lease=Open-SourcePolicyReadLease $Path $Root;$output=$null;$sha=$null
     try {
         if($SingleLink -and [OptiMiyoo.ApplicationBrokerLease]::LinkCount($lease.Stream.SafeFileHandle) -ne 1){throw 'Sandbox output is a hard link; originals kept.'}
         if($null -ne $AllowedLengths -and $AllowedLengths.Count -gt 0 -and $lease.Stream.Length -notin $AllowedLengths){throw 'Sandbox output length does not match the independently verified content.'}
         if($ArchiveBudget){Assert-ArchiveBudget -Stream $lease.Stream -Profile Media}
+        if($CancellationCheck){& $CancellationCheck}
         if($CopyTo){
             $output=[IO.File]::Open($CopyTo,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
             $sha=[Security.Cryptography.SHA256]::Create();$buffer=New-Object byte[] 1048576;$length=0L
             # Hash the exact bytes copied while the same native read lease is held.
-            while(($count=$lease.Stream.Read($buffer,0,$buffer.Length)) -gt 0){
+            while($true){
+                if($CancellationCheck){& $CancellationCheck}
+                $count=$lease.Stream.Read($buffer,0,$buffer.Length)
+                if($count -le 0){break}
                 $output.Write($buffer,0,$count);[void]$sha.TransformBlock($buffer,0,$count,$buffer,0);$length+=$count
             }
             [void]$sha.TransformFinalBlock((New-Object byte[] 0),0,0)
             if($length -ne $lease.Stream.Length){throw 'Sandbox output verification read was incomplete; originals kept.'}
             $hash=[BitConverter]::ToString($sha.Hash).Replace('-','')
             $output.Flush($true);$output.Dispose();$output=$null
-        }else{$hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($lease.Stream,$null)}
+        }else{
+            $hashAction=$null
+            if($CancellationCheck){
+                $hashPoll={param([long]$done,[long]$total)& $CancellationCheck}.GetNewClosure()
+                $hashAction=[Action[long,long]]$hashPoll
+            }
+            $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($lease.Stream,$hashAction)
+        }
+        if($CancellationCheck){& $CancellationCheck}
         return [pscustomobject]@{Hash=$hash;Length=$lease.Stream.Length}
     } finally {
         try{if($output){$output.Dispose()}}finally{try{if($sha){$sha.Dispose()}}finally{$lease.Dispose()}}
     }
 }
 
-function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64','ZX')][string]$InspectMedia='',$RenamedNames=$null) {
-    return (& $Module {param($path,$inspectMedia,$renamedNames)
+function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64','ZX')][string]$InspectMedia='',$RenamedNames=$null,[scriptblock]$CancellationCheck=$null) {
+    return (& $Module {param($path,$inspectMedia,$renamedNames,$cancel)
+        if($cancel){& $cancel}
         $profile='Media';$inspection=@{}
         if($inspectMedia){
             $profile='Floppy';$extension='.g64';if($inspectMedia -eq 'ZX'){$extension='.dsk'}
@@ -361,9 +375,15 @@ function Get-ApplicationBrokerArchive($Module,[string]$Path,[ValidateSet('','C64
             }}
         }
         $archive=Open-ArchiveWithBudget -Path $path -Profile $profile
-        try {return Invoke-ArchiveSandbox -ZipPath $path -Archive $archive -Profile $profile -Operation Hash @inspection}
-        finally {$archive.Dispose()}
-    } $Path $InspectMedia $RenamedNames)
+        try {
+            if($cancel){& $cancel}
+            $progress=$null
+            if($cancel){$progress={param($index,$count,$done,$total)& $cancel}.GetNewClosure()}
+            $manifest=Invoke-ArchiveSandbox -ZipPath $path -Archive $archive -Profile $profile -Operation Hash -Progress $progress @inspection
+            if($cancel){& $cancel}
+            return $manifest
+        } finally {$archive.Dispose()}
+    } $Path $InspectMedia $RenamedNames $CancellationCheck)
 }
 
 function Assert-ApplicationBrokerPassthroughMedia($Module,$Lease,[string]$Operation) {
@@ -835,15 +855,17 @@ function Close-ApplicationBrokerPublicationContainer($Container,[switch]$Preserv
     }
 }
 
-function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null) {
+function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null,[scriptblock]$CancellationCheck=$null) {
     $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
     $items=New-Object 'System.Collections.Generic.List[object]';$owned=New-Object 'System.Collections.Generic.List[string]';$locks=New-Object 'System.Collections.Generic.List[IDisposable]'
     $containers=New-Object 'System.Collections.Generic.List[object]'
     $verifiedParents=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $resourcesTransferred=$false
     try {
+        if($CancellationCheck){& $CancellationCheck}
         Assert-ApplicationBrokerOwnership $Batch $Job $dst $ReferenceIndex
         foreach($write in $Job.Writes){
+            if($CancellationCheck){& $CancellationCheck}
             $relative=Get-ApplicationBrokerRelative $write.Destination $dst
             $childPath=Join-Path $workDst $relative
             $parent=[IO.Path]::GetDirectoryName($write.Destination);$anchor=$parent
@@ -870,7 +892,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 # produced exactly the independently planned layout as well.
                 $bytes=(New-Object Text.UTF8Encoding($false)).GetBytes($Job.PlaylistText)
                 $sha=[Security.Cryptography.SHA256]::Create();try{$hash=[BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','')}finally{$sha.Dispose()}
-                $child=Get-ApplicationBrokerFile $childPath $workDst -SingleLink -AllowedLengths @($bytes.Length)
+                $child=Get-ApplicationBrokerFile $childPath $workDst -SingleLink -AllowedLengths @($bytes.Length) -CancellationCheck $CancellationCheck
                 if($child.Hash -cne $hash -or $child.Length -ne $bytes.Length){throw 'Staged playlist does not match the independent output plan.'}
                 $stream=[IO.File]::Open($stage,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
                 try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
@@ -883,19 +905,20 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 # never writable by the child; each source handle denies writes
                 # and deletion while its bytes are copied and hashed.
                 $actual=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
-                $inventory=Get-ApplicationBrokerTree $childPath -RequireSingleLink -MaximumEntries 50000 -MetadataOnly
+                $inventory=Get-ApplicationBrokerTree $childPath -RequireSingleLink -MaximumEntries 50000 -MetadataOnly -CancellationCheck $CancellationCheck
                 if($inventory.Files.Count -ne $Job.Files.Count){throw 'Staged output contains extra or missing files.'}
                 foreach($name in $Job.Files.Keys){
+                    if($CancellationCheck){& $CancellationCheck}
                     if(-not $inventory.Files.ContainsKey($name)){throw 'Staged output member is missing.'}
                     $target=Join-Path $stage $name;[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
                     $lengths=Get-ApplicationBrokerExpectedLengths $Job.Files[$name] $Batch $ReceiptStore
-                    $actual[$name]=Get-ApplicationBrokerFile (Join-Path $childPath $name) $workDst $target -SingleLink -AllowedLengths $lengths
+                    $actual[$name]=Get-ApplicationBrokerFile (Join-Path $childPath $name) $workDst $target -SingleLink -AllowedLengths $lengths -CancellationCheck $CancellationCheck
                 }
                 Assert-ApplicationBrokerManifest $Job.Files $actual $Batch $ReceiptStore
                 # Directory creation can resolve an earlier directory's DOS
                 # alias. Verify the copied namespace by enumeration, not by
                 # reopening planned paths that may name the same directory.
-                $copied=Get-ApplicationBrokerTree $stage -RequireSingleLink -MaximumEntries 50000 -MetadataOnly
+                $copied=Get-ApplicationBrokerTree $stage -RequireSingleLink -MaximumEntries 50000 -MetadataOnly -CancellationCheck $CancellationCheck
                 if($copied.Files.Count -ne $Job.Files.Count){throw 'Copied output file count does not match the independent source plan.'}
                 $copiedNames=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
                 foreach($name in $copied.Files.Keys){[void]$copiedNames.Add($name)}
@@ -910,10 +933,10 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                     $lengths=Get-ApplicationBrokerExpectedLengths $expected[@($expected.Keys)[0]] $Batch $ReceiptStore
                 }
                 elseif($Job.ContainerHash){$lengths=@($State.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $Job.SourceJob.Zip (Join-Path $State.OriginalRoot 'SRC'))].Length)}
-                $copied=Get-ApplicationBrokerFile $childPath $workDst $stage -SingleLink -AllowedLengths $lengths -ArchiveBudget:($Job.DataKind -eq 'Zip')
+                $copied=Get-ApplicationBrokerFile $childPath $workDst $stage -SingleLink -AllowedLengths $lengths -ArchiveBudget:($Job.DataKind -eq 'Zip') -CancellationCheck $CancellationCheck
                 if($Job.ContainerHash -and $copied.Hash -cne $Job.ContainerHash){throw 'Archive that required no conversion differs from the original ZIP.'}
                 $actual=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
-                if($Job.DataKind -eq 'Zip'){$actual=Get-ApplicationBrokerArchive $Batch.Module $stage}
+                if($Job.DataKind -eq 'Zip'){$actual=Get-ApplicationBrokerArchive $Batch.Module $stage -CancellationCheck $CancellationCheck}
                 else {
                     if($expected.Count -ne 1){throw 'Single-file output plan has multiple members.'}
                     $name=@($expected.Keys)[0];$actual[$name]=$copied
@@ -922,6 +945,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$false;Hash=$copied.Hash})
             }
         }
+        if($CancellationCheck){& $CancellationCheck}
         $sealed=[pscustomobject]@{Items=$items.ToArray();Owned=$owned.ToArray();Containers=$containers.ToArray();Locks=$locks}
         $resourcesTransferred=$true
         return $sealed
@@ -1014,7 +1038,7 @@ function Complete-ApplicationBrokerBatch {
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
             $publicationLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
             try {
-                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex
+                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex -CancellationCheck $throwIfCancelled
                 Assert-ApplicationBrokerOwnership $batch $job $dst $referenceIndex
                 # Cancellation is safe before installation, while every old output
                 # remains untouched. Never interrupt installation or its rollback.
@@ -1042,8 +1066,17 @@ function Complete-ApplicationBrokerBatch {
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
                 $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})
-            } catch {$results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result='Failed';Detail=$_.Exception.Message})}
-            finally {
+            } catch {
+                # Callback cancellation can be wrapped by a native hash delegate.
+                # A concurrent ordinary I/O failure must still remain a failure.
+                $cancelledError=$false;$cause=$_.Exception
+                while($cause){
+                    if($cause -is [OperationCanceledException]){$cancelledError=$true;break}
+                    $cause=$cause.InnerException
+                }
+                if($cancellation.Requested -and $cancelledError){break}
+                $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result='Failed';Detail=$_.Exception.Message})
+            } finally {
                 if($results.Count -and $results[$results.Count-1].JobId -ceq $id){[void]$processedIds.Add($id)}
                 foreach($lock in $publicationLocks){$lock.Dispose()}
                 if($sealed){

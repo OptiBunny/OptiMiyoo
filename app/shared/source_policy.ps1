@@ -830,7 +830,7 @@ function Assert-SourcePolicyDescriptorBudget([string]$Root,[hashtable]$Snapshot)
 function Get-SourcePolicyDescriptorSnapshot([string]$Root) {
     # Deliberate filesystem boundary for planning-only tests. Direct callers must
     # freeze untracked descriptors too; an unknown descriptor at cleanup is unsafe.
-    $snapshot=@{};$totalBytes=0L
+    $snapshot=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$totalBytes=0L
     foreach($path in (Get-SourcePolicyDescriptorPaths $Root)) {
         $lease=Open-SourcePolicyReadLease $path $Root
         try {
@@ -846,7 +846,9 @@ function Get-SourcePolicyDescriptorSnapshot([string]$Root) {
 }
 
 function New-SourcePolicyPlan([string]$Root,[string]$Policy,[hashtable]$DescriptorSnapshot=$null) {
-    $plan=[pscustomobject]@{Root=$Root; Policy=$Policy; Files=@{}; Jobs=@{}; References=@{}; ReferenceHashes=@{}; DescriptorSnapshot=@{}; BlockReason=''}
+    # Every source spelling keeps its own ownership and reporting state. Job
+    # identifiers retain their existing comparison contract.
+    $plan=[pscustomobject]@{Root=$Root; Policy=$Policy; Files=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)); Jobs=@{}; References=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)); ReferenceHashes=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)); DescriptorSnapshot=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)); BlockReason=''}
     if($Policy -eq 'Remove') {
         try {
             if($null -eq $DescriptorSnapshot){$DescriptorSnapshot=Get-SourcePolicyDescriptorSnapshot $Root}
@@ -858,7 +860,7 @@ function New-SourcePolicyPlan([string]$Root,[string]$Policy,[hashtable]$Descript
 }
 
 function Add-SourcePolicyJob($Plan,[string]$Id,[string[]]$Paths,[string]$BlockReason='') {
-    $unique=@{}; $declared=@{}
+    $unique=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $declared=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($path in $Paths) {
         $full=[IO.Path]::GetFullPath($path)
         if ($declared.ContainsKey($full)) {continue}
@@ -873,7 +875,7 @@ function Add-SourcePolicyJob($Plan,[string]$Id,[string[]]$Paths,[string]$BlockRe
             $Plan.Files[$full]=[pscustomobject]@{Path=$full; Owners=$Plan.References[$full]; State='Kept'; Reason='Not processed successfully.'}
         }
     }
-    $Plan.Jobs[$Id]=[pscustomobject]@{Paths=@($unique.Keys); Hashes=@{}; Outputs=@(); Succeeded=$false; BlockReason=$BlockReason}
+    $Plan.Jobs[$Id]=[pscustomobject]@{Paths=@($unique.Keys); Hashes=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)); Outputs=@(); Succeeded=$false; BlockReason=$BlockReason}
     if ($Plan.Policy -ne 'Remove') {return}
     foreach ($full in @($unique.Keys | Where-Object {[IO.Path]::GetExtension($_) -ieq '.cue'})) {
         $snapshot=$null; $sha=$null
@@ -1043,7 +1045,7 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
 function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null) {
     if($Plan.Policy -ne 'Remove'){throw 'A cleanup context requires Remove policy.'}
     if($Plan.BlockReason){throw $Plan.BlockReason}
-    $context=[pscustomobject]@{Plan=$Plan;InventoryGuard=$InventoryGuard;OwnsInventoryGuard=($null -eq $InventoryGuard);ReferenceLeases=@{};ProtectedPaths=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Disposed=$false}
+    $context=[pscustomobject]@{Plan=$Plan;InventoryGuard=$InventoryGuard;OwnsInventoryGuard=($null -eq $InventoryGuard);ReferenceLeases=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));ProtectedPaths=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Disposed=$false}
     $context | Add-Member ScriptMethod Dispose {
         if($this.Disposed){return};$this.Disposed=$true;$failure=$null
         foreach($lease in $this.ReferenceLeases.Values){try{$lease.Dispose()}catch{if(-not $failure){$failure=$_}}}
@@ -1111,7 +1113,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
         }
         return
     }
-    $referenceLeases=@{}; $ownsCleanupContext=$false; $cleanupCancelled=$false
+    $referenceLeases=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $ownsCleanupContext=$false; $cleanupCancelled=$false
     try {
         try {
             # The host holds the complete context across its final snapshot.
@@ -1126,7 +1128,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
             # Validate connected ownership components together. A changed source
             # must not leave a retained CUE without its unchanged tracks. Independent
             # games use bounded sets of source/output handles, not whole-batch locks.
-            $visited=@{}; $expandedJobs=@{}
+            $visited=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $expandedJobs=@{}
             foreach ($start in @($Plan.Files.Keys | Sort-Object)) {
                 if ($Plan.BlockReason) {break}
                 if ($visited.ContainsKey($start)) {continue}
@@ -1158,7 +1160,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                     foreach ($file in $candidates) {$file.State='Kept'; $file.Reason='A dependent original changed; complete source set kept.'}
                     continue
                 }
-                $owners=@{}; $outputs=New-Object 'System.Collections.Generic.List[object]'; $locks=$null; $leases=@{}; $bad=$false
+                $owners=@{}; $outputs=New-Object 'System.Collections.Generic.List[object]'; $locks=$null; $leases=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $bad=$false
                 foreach ($file in $candidates) {foreach ($id in $file.Owners) {$owners[$id]=$true}}
                 foreach ($id in $owners.Keys) {foreach ($output in $Plan.Jobs[$id].Outputs) {$outputs.Add($output)}}
                 try {

@@ -159,7 +159,8 @@ function Get-ApplicationBrokerRelative([string]$Path,[string]$Root) {
 function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$RequireSingleLink,[int]$MaximumEntries=100000,[switch]$MetadataOnly,[hashtable]$ExpectedFiles,[hashtable]$BorrowedSourceLeases,[scriptblock]$CancellationCheck=$null) {
     if($CancellationCheck){& $CancellationCheck}
     Initialize-ApplicationBrokerNative
-    $files=@{};$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0;$buffer=$null
+    # Windows path identity must not merge distinct canonical Unicode spellings.
+    $files=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$directories=New-Object 'System.Collections.Generic.List[string]';$bytes=0L;$entryCount=0;$buffer=$null
     if($MaximumEntries -lt 1 -or $MaximumEntries -gt 1000000){throw 'Invalid broker snapshot entry limit.'}
     if($MetadataOnly -and $CopyTo){throw 'A metadata-only inventory cannot copy file data.'}
     Assert-OptiPathBudget -Path $Root -Directory
@@ -485,7 +486,7 @@ function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job) {
 }
 
 function New-ApplicationBrokerJob([string]$SourceKey,$SourceJob,$Plan) {
-    return [pscustomobject]@{JobId=[Guid]::NewGuid().ToString('N');SourceKey=$SourceKey;ConflictId='';SourceJob=$SourceJob;Plan=$Plan;BlockedReason='';BlockedResult='Failed';Paths=@();SourceHashes=@{};Files=@{};DiskNames=@();Writes=@();Retired=@();Conflicts=@();Decision='Write';PlaylistText=$null;DataKind='';SourceBlockReason='';ContainerHash=''}
+    return [pscustomobject]@{JobId=[Guid]::NewGuid().ToString('N');SourceKey=$SourceKey;ConflictId='';SourceJob=$SourceJob;Plan=$Plan;BlockedReason='';BlockedResult='Failed';Paths=@();SourceHashes=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));Files=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));DiskNames=@();Writes=@();Retired=@();Conflicts=@();Decision='Write';PlaylistText=$null;DataKind='';SourceBlockReason='';ContainerHash=''}
 }
 
 function Assert-ApplicationBrokerJobPaths($State,[string]$Operation,$Job,[hashtable]$ArchiveFiles) {
@@ -597,7 +598,7 @@ function Start-ApplicationBrokerBatch {
     }
     if($CancellationCheck){& $CancellationCheck}
     $module=Get-ApplicationBrokerModule $Operation;$sourceModule=Get-ApplicationBrokerModule 'Playlist'
-    $jobs=New-Object 'System.Collections.Generic.List[object]';$profile=$null;$archives=@{}
+    $jobs=New-Object 'System.Collections.Generic.List[object]';$profile=$null;$archives=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     if($Operation -eq 'Playlist'){
         $profiles=Get-Content -LiteralPath (Join-Path $script:ApplicationBrokerCodeRoot 'systems.json') -Raw | ConvertFrom-Json
         $selected=@($profiles | Where-Object {$_.Folder -eq $System})
@@ -668,7 +669,7 @@ function Start-ApplicationBrokerBatch {
     if($jobs.Count -gt 20000){throw 'This batch contains more than 20,000 jobs. Split the collection into smaller batches.'}
     $descriptorSnapshot=$null
     if($SourcePolicy -eq 'Remove') {
-        $descriptorSnapshot=@{}
+        $descriptorSnapshot=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
         foreach($relative in $state.SourceSnapshot.Files.Keys) {
             if([IO.Path]::GetExtension($relative) -in @('.cue','.m3u','.m3u8')){$descriptorSnapshot[(Join-Path $src $relative)]=$state.SourceSnapshot.Files[$relative]}
         }
@@ -862,7 +863,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
             $expected=$Job.Files
             if($Job.DataKind -eq 'Files' -and -not $playlist){
                 if(-not $write.PSObject.Properties['MemberName'] -or -not $Job.Files.ContainsKey($write.MemberName)){throw 'Loose output has no independently planned source member.'}
-                $expected=@{};$expected[$write.MemberName]=$Job.Files[$write.MemberName]
+                $expected=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$expected[$write.MemberName]=$Job.Files[$write.MemberName]
             }
             if($playlist){
                 # Generate trusted playlist bytes, and require the child to have
@@ -881,7 +882,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 # Copy only independently named members. The private copy is
                 # never writable by the child; each source handle denies writes
                 # and deletion while its bytes are copied and hashed.
-                $actual=@{}
+                $actual=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
                 $inventory=Get-ApplicationBrokerTree $childPath -RequireSingleLink -MaximumEntries 50000 -MetadataOnly
                 if($inventory.Files.Count -ne $Job.Files.Count){throw 'Staged output contains extra or missing files.'}
                 foreach($name in $Job.Files.Keys){
@@ -911,7 +912,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 elseif($Job.ContainerHash){$lengths=@($State.SourceSnapshot.Files[(Get-ApplicationBrokerRelative $Job.SourceJob.Zip (Join-Path $State.OriginalRoot 'SRC'))].Length)}
                 $copied=Get-ApplicationBrokerFile $childPath $workDst $stage -SingleLink -AllowedLengths $lengths -ArchiveBudget:($Job.DataKind -eq 'Zip')
                 if($Job.ContainerHash -and $copied.Hash -cne $Job.ContainerHash){throw 'Archive that required no conversion differs from the original ZIP.'}
-                $actual=@{}
+                $actual=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
                 if($Job.DataKind -eq 'Zip'){$actual=Get-ApplicationBrokerArchive $Batch.Module $stage}
                 else {
                     if($expected.Count -ne 1){throw 'Single-file output plan has multiple members.'}

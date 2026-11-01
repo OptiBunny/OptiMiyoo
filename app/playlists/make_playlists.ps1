@@ -371,7 +371,13 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     foreach ($disk in $disks) {
         if (-not $stems.Add([IO.Path]::ChangeExtension($disk,$null))) {throw "Multiple formats of the same game file in one ZIP: $disk. Keep one playable version."}
     }
-    return @(Get-OrderedArchiveMedia @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}}))
+    # Linguistic keys can tie for distinct Windows names. Fixed-width UTF-16
+    # hex preserves every code unit and makes that final order runtime-independent.
+    return @(Get-OrderedArchiveMedia @($disks | Sort-Object @{Expression={Get-NaturalDiskKey $_}}, @{Expression={$_}}, @{Expression={
+        $ordinalKey=New-Object Text.StringBuilder
+        foreach($unit in $_.ToCharArray()){[void]$ordinalKey.Append(([int]$unit).ToString('X4',[Globalization.CultureInfo]::InvariantCulture))}
+        $ordinalKey.ToString()
+    }}))
 }
 function Assert-ZipExtractionNames([IO.Compression.ZipArchive]$Archive) {
     Assert-ArchiveSandboxMemberBudget $Archive

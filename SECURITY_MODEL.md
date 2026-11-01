@@ -134,11 +134,17 @@ case-insensitive collisions, and file/directory overlaps, including empty-direct
 paths. Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
-Archive manifests, destination directory indexes, and conversion/playlist
-descriptor caches use ordinal, case-insensitive identity. Linguistic equality must
-not merge distinct Windows filenames, including composed and decomposed Unicode spellings. Newly discovered
-CUE/playlist files require their own reference check; a cache entry for another
-spelling cannot authorize replacement of files they reference.
+Archive manifests, broker collection inventories and output member maps, parent
+source-ownership records, destination directory indexes, and conversion/playlist
+descriptor caches use ordinal, case-insensitive identity. Linguistic equality must not merge distinct
+Windows filenames, including composed and decomposed Unicode spellings. Newly
+discovered CUE/playlist files require their own reference check; a cache entry for
+another spelling cannot authorize replacement of files they reference. These
+identity checks do not override conservative media-group ambiguity checks;
+ambiguous loose titles can still be refused while unrelated jobs proceed.
+Archive playlist ordering keeps natural disk-number sorting and uses an ordinal
+final tie-breaker for linguistically equal filenames, so the parent and its
+PowerShell 5.1 worker produce the same playlist bytes for those names.
 
 Playlist dependency checks consider representable literal, right-trimmed, and
 fully trimmed spellings of each non-comment line. A space before `#` can belong

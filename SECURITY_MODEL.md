@@ -168,7 +168,14 @@ identity stops replacement.
 Folder verification compares actual enumerated relative filenames with the
 planned member names, as well as file counts and hashes. This check applies to
 private publication copies, installed folders, and outputs used to authorize
-source removal. The final removal check enumerates names while verified file
+source removal. Publication verifies installed members through retained file and
+ancestor leases, checking length and hash through the same open stream and then
+checking the enumerated names. The caller owns these leases before verification
+starts and keeps them through old-output backup removal and commit recording;
+cleanup can release them even if engine Stop interrupts a function return.
+The leases prevent changes to verified members during that interval. They do not
+freeze every possible new directory entry or protect files after publication ends.
+The final removal check independently enumerates names while its verified file
 and ancestor leases are held. A path resolving through a Windows alternate
 filename does not prove that the planned directory layout was preserved.
 

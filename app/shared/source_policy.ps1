@@ -691,9 +691,14 @@ function Remove-SourcePolicyFile([string]$Path,$Lease) {
 
 function Open-SourcePolicyOutputs {
     [CmdletBinding()]
-    param([object[]]$Outputs,[scriptblock]$Progress=$null)
+    param([object[]]$Outputs,[scriptblock]$Progress=$null,[switch]$ForPublication,[Collections.Generic.List[IDisposable]]$PublicationLocks=$null)
     $outputCommand=$PSCmdlet
     $locks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+    if($ForPublication){
+        if($null -eq $PublicationLocks){throw 'Publication requires a caller-owned output lease collection.'}
+        $locks=$PublicationLocks
+    }elseif($null -ne $PublicationLocks){throw 'Publication leases require publication verification mode.'}
+    $firstLock=$locks.Count
     $transferred=$false
     try {
         foreach ($output in $Outputs) {
@@ -704,7 +709,7 @@ function Open-SourcePolicyOutputs {
             if ($output.Folder) {
                 if ($null -eq $output.Manifest -or $output.Manifest.Count -eq 0) {throw 'Output manifest is missing; original kept.'}
                 $prefix=[IO.Path]::GetFullPath($output.Destination).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-                $seen=@{}
+                $seen=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
                 foreach ($name in $output.Manifest.Keys) {
                     if ([string]::IsNullOrWhiteSpace($name) -or [IO.Path]::IsPathRooted($name)) {throw 'Output manifest has an unsafe path; originals kept.'}
                     foreach ($part in ($name -split '[\\/]')) {
@@ -713,18 +718,29 @@ function Open-SourcePolicyOutputs {
                     $path=[IO.Path]::GetFullPath((Join-Path $output.Destination $name))
                     if (-not $path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or $seen.ContainsKey($path)) {throw 'Output manifest escapes its folder or repeats a file; originals kept.'}
                     $seen[$path]=$true
-                    $files.Add(@{Path=$path; Hash=$output.Manifest[$name].Hash})
+                    $expectedLength=$null;if($ForPublication){$expectedLength=$output.Manifest[$name].Length}
+                    $files.Add(@{Path=$path; Hash=$output.Manifest[$name].Hash; Length=$expectedLength})
                 }
-            } else {$files.Add(@{Path=$output.Destination; Hash=$output.Hash})}
+            } else {
+                $expectedLength=$null;if($ForPublication){$expectedLength=$output.Length}
+                $files.Add(@{Path=$output.Destination; Hash=$output.Hash; Length=$expectedLength})
+            }
             foreach ($file in $files) {
                 if (-not $file.Hash) {throw 'Expected output hash is missing; original kept.'}
+                if ($ForPublication -and ($null -eq $file.Length -or [long]$file.Length -lt 0)) {throw 'Expected publication output length is missing or invalid.'}
                 Initialize-SourcePolicyNative
                 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-                    $lock=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($file.Path); $stream=$lock.Stream
+                    # Retain each verified member and its ancestor identities.
+                    # Publication still needs to move sibling playlists and remove
+                    # old backups, so its ancestor handles permit those writes.
+                    if ($ForPublication) {$lock=[OptiMiyoo.SourceRemovalLeaseV128]::OpenReadForPublication($file.Path)}
+                    else {$lock=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($file.Path)}
+                    $stream=$lock.Stream
                 } else {
                     $lock=[IO.File]::Open($file.Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read); $stream=$lock
                 }
                 $locks.Add($lock)
+                if ($ForPublication -and $stream.Length -ne [long]$file.Length) {throw ('Installed output length does not match the verified publication: '+$file.Path)}
                 $progressAction=Get-SourcePolicyProgressAction $Progress 'Checking installed outputs' $file.Path
                 # Observe engine Stop inside native hashing before handing off
                 # the complete lock set. Renderer errors remain best effort.
@@ -757,9 +773,12 @@ function Open-SourcePolicyOutputs {
             }
         }
         $transferred=$true
+        # The caller already owns publication leases, including if engine Stop
+        # interrupts this return before the surrounding command completes.
+        if($ForPublication){return}
         return ,$locks
     } finally {
-        if (-not $transferred) {foreach ($lock in $locks) {$lock.Dispose()}}
+        if (-not $transferred) {for($index=$firstLock;$index -lt $locks.Count;$index++){$locks[$index].Dispose()}}
     }
 }
 

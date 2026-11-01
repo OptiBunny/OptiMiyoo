@@ -99,12 +99,16 @@ function Assert-PlainOutputParents([string]$Path, [string]$Root) {
     }
 }
 
-function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null, [scriptblock]$ValidatePublication=$null) {
+function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Retired=@(), [scriptblock]$ValidateBackup=$null, [scriptblock]$ValidatePublication=$null, [Collections.Generic.List[IDisposable]]$PublicationLocks=$null) {
     # A playlist and its disk data are one replacement. Roll back both if either
     # install fails; never leave a new playlist pointing at missing/old data.
     $backups = New-Object 'System.Collections.Generic.List[object]'
     $installed = New-Object 'System.Collections.Generic.List[object]'
     $locks = New-Object 'System.Collections.Generic.List[System.IDisposable]'
+    if($null -ne $PublicationLocks){
+        if($PublicationLocks.Count -ne 0){throw 'Publication requires an empty caller-owned output lease collection.'}
+        $locks=$PublicationLocks
+    }
     $locksTransferred=$false
     $targets = New-Object 'System.Collections.Generic.List[object]'
     $replaceTargets = New-Object 'System.Collections.Generic.List[object]'
@@ -156,7 +160,12 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
             foreach ($item in $Items) {
                 Move-OutputPath $item.Staged $item.Destination ([bool]$item.Folder)
                 $installed.Add($item)
-                if ($item.Folder) { Assert-FolderManifest $item.Destination $item.Manifest }
+                if ($item.Folder) {
+                    # Verify through retained member/ancestor leases, including
+                    # exact names after acquisition. Keep them through backup
+                    # removal and the caller's commit handoff, like file outputs.
+                    Open-SourcePolicyOutputs @($item) -ForPublication -PublicationLocks $locks
+                }
                 if (-not $item.Folder) {
                     $lock = [IO.File]::Open($item.Destination, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
                     $locks.Add($lock)
@@ -199,7 +208,8 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
         $locksTransferred=$true
         return $commitResult
     } finally {
-        # Engine Stop bypasses catch; release file locks that never reached the caller.
+        # Engine Stop bypasses catch. Production callers own this list before
+        # invocation, so a Stop during the return cannot strand its leases.
         if(-not $locksTransferred){foreach($lock in $locks){$lock.Dispose()}}
         foreach($backup in $backups){if($backup.Guard){$backup.Guard.Dispose()}}
         foreach ($directoryLock in $directoryLocks) {$directoryLock.Dispose()}
@@ -1939,6 +1949,7 @@ try {
         Write-Event 'GAME' ('{0}/{1} | {2}/{3}' -f ($script:Processed+1),$script:Total,$job.System,$job.Source)
         $destinationRoot=Join-Path $Root 'DST'
         $stageData=$null; $stageContent=$null; $stageM3u=$null; $stageContainer=$null; $stageIdentity=''; $stageLease=$null; $commit=$null; $archive=$null; $sourceLock=$null; $items=@()
+        $publicationLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
         $outputDirectoryLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
         $zipMode=$false; if($job.OutputPlan){$zipMode=[bool]$job.OutputPlan.ZipMode}
         $result=[pscustomobject]@{System=$job.System; Source=$job.Source; Playlist=($job.Stem+$profile.Playlist); DiskImages=0; Result='Failed'; Original='Kept in SRC'; RemovedFiles=0; KeptFiles=0; RemovalFailures=0; Detail=''}
@@ -2071,7 +2082,7 @@ try {
             $validatePublication={param($capturedTargets,$capturedBackups)
                 & $publicationCheck $plan $capturedTargets $playlistReferenceIndex -ProtectedPublication -PrivateTargets (@($publicationPrivate)+@($capturedBackups))
             }.GetNewClosure()
-            $commit=Install-PlaylistSet $items $overwrite $retired -ValidatePublication $validatePublication
+            $commit=Install-PlaylistSet $items $overwrite $retired -ValidatePublication $validatePublication -PublicationLocks $publicationLocks
             Complete-SourcePolicyJob $sourcePlan $job.SourceId $sourceHashes $items
             Complete-ApplicationCurrentJob
             $result.Result='Written'; if ($commit.Replaced) {$result.Result='Overwritten'}
@@ -2092,9 +2103,9 @@ try {
             $script:UiMood='oops'; $script:UiSay='Processing failed. Source files are preserved.'
             Write-Event 'FAILED' ('{0}/{1} - {2}' -f $job.System,$job.Source,$result.Detail)
         } finally {
+            foreach($lock in $publicationLocks){$lock.Dispose()}
             if ($archive) {$archive.Dispose()}
             if ($sourceLock) {$sourceLock.Dispose()}
-            if ($commit) {foreach ($lock in $commit.Locks) {$lock.Dispose()}}
             if($stageLease){$stageLease.Dispose()}
             if($stageContainer -and $stageIdentity -and (Test-Path -LiteralPath $stageContainer)){
                 Reset-PlaylistReferenceIndexTargets $playlistReferenceIndex @([pscustomobject]@{Destination=$stageContainer;Folder=$true})

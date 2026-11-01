@@ -71,10 +71,26 @@ namespace OptiMiyoo {
         public string DirectoryIdentity { get; private set; }
         private bool disposed;
         private SourceRemovalLeaseV128() {}
+        private static void ValidateAncestorIdentity(string full) {
+            // Framework can preserve a whitespace suffix in the middle of a
+            // path but trim it when that ancestor is reopened on its own.
+            // Inspect lexical prefixes before DirectoryInfo normalizes them.
+            string root = Path.GetPathRoot(full);
+            string current = full.TrimEnd('\\', '/');
+            while (current.Length > root.Length) {
+                char last = current[current.Length - 1];
+                if ((Char.IsWhiteSpace(last) || last == '.') &&
+                    !String.Equals(Path.GetFullPath(current), current, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Windows cannot preserve an ancestor path exactly; files kept.");
+                int separator = current.LastIndexOf(Path.DirectorySeparatorChar);
+                current = separator < root.Length ? root : current.Substring(0, separator);
+            }
+        }
         private static string NativePath(string path) {
             // Keep canonical ordinary paths for all boundary comparisons. Only
             // the Win32 call receives extended syntax, after normalization.
             string full = Path.GetFullPath(path);
+            ValidateAncestorIdentity(full);
             if (full.StartsWith(@"\\?\", StringComparison.Ordinal) || full.StartsWith(@"\\.\", StringComparison.Ordinal))
                 throw new IOException("Device paths are not supported.");
             return full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full.Substring(2) : @"\\?\" + full;
@@ -159,6 +175,7 @@ namespace OptiMiyoo {
                 throw new PlatformNotSupportedException("Verified file removal requires Windows; files kept on this platform.");
         }
         private static List<string> Ancestors(string full) {
+            ValidateAncestorIdentity(full);
             List<string> ancestors = new List<string>();
             string parent = Path.GetDirectoryName(full);
             while (!String.IsNullOrEmpty(parent)) {
@@ -299,6 +316,7 @@ namespace OptiMiyoo {
             // Unlike Directory.CreateDirectory, this never adopts an existing
             // directory. Callers may claim cleanup ownership only after success.
             string full = Path.GetFullPath(path);
+            ValidateAncestorIdentity(full);
             using (SourceRemovalLeaseV128 parent = OpenDirectory(Path.GetDirectoryName(full))) {
                 if (!CreateDirectoryW(NativePath(full), IntPtr.Zero))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create a new private scratch directory.");

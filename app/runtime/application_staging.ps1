@@ -16,7 +16,11 @@ function Get-ApplicationLiteralHelper {
 
 function ConvertTo-ApplicationWorkLease {
     param([string]$Source,[string]$WorkRoot)
-    $escaped=$WorkRoot.Replace('\','\\').Replace('"','\"')
+    # C# treats NEL and Unicode line/paragraph separators as newlines even
+    # though Windows permits them inside directory names. Preserve their exact
+    # UTF-16 values in the generated string literal instead of normalizing paths.
+    $escaped=[regex]::Replace($WorkRoot.Replace('\','\\').Replace('"','\"'),
+        '[\x00-\x1f\x7f-\x9f\u2028\u2029]',{param($match) '\u'+([int][char]$match.Value).ToString('X4')})
     $scope=@'
                 string scope = "__WORK__";
                 string checkedPath = Path.GetFullPath(full).TrimEnd('\\', '/');

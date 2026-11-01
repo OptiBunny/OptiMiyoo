@@ -286,7 +286,8 @@ function Test-ConversionReferenceTarget([string]$Path,$Targets) {
 }
 
 function New-ConversionDescriptorCache([string]$Root) {
-    return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');Entries=@{};Characters=0L;
+    # A newly discovered descriptor must not reuse another filename's text.
+    return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');Entries=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));Characters=0L;
         MaximumDescriptors=4096;MaximumCharacters=16MB;Disabled=$false;Closed=$false}
 }
 

@@ -42,7 +42,7 @@ function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorNam
     $cue=[IO.Path]::GetExtension($DescriptorName) -ieq '.cue'
     if(-not $cue -and [IO.Path]::GetExtension($DescriptorName) -notin '.m3u','.m3u8'){return}
     if($Text.Length -gt 1MB -or $Text.IndexOf([char]0) -ge 0){throw ('Supplied conversion descriptor exceeds its text limit or contains invalid text: '+$DescriptorName)}
-    $lines=[regex]::Split($Text,'\r\n|\r|\n');$references=0
+    $lines=[regex]::Split($Text,'\r\n|\r|\n');$references=0;$referenceBudget=New-OptiPlaylistReferenceBudget
     if($lines.Count -gt 16384){throw ('Supplied conversion descriptor exceeds its line limit: '+$DescriptorName)}
     foreach($line in $lines){
         if($line.Length -gt 8192){throw ('Supplied conversion descriptor contains an overlong line: '+$DescriptorName)}
@@ -51,14 +51,13 @@ function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorNam
             if($line -notmatch '^\s*FILE\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$'){throw ('Supplied conversion descriptor has an unreadable FILE reference: '+$DescriptorName)}
             $reference=$Matches[1];if(-not $reference){$reference=$Matches[2]}
             if(++$references -gt 1024){throw ('Supplied conversion descriptor exceeds its reference limit: '+$DescriptorName)}
+            $candidates=@($reference)
         }else{
-            $reference=$line.Trim();if(-not $reference -or $reference.StartsWith('#')){continue}
+            if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
+            $candidates=@(Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)
         }
-        $targets=@((Resolve-ConversionDescriptorTarget $DescriptorName $reference))
-        # Check the full spelling first: '#' is also legal in an image filename.
-        # A ZIP-member reference additionally owns the path before its separator.
-        if(-not $cue -and $reference.Contains('#')){$targets+=Resolve-ConversionDescriptorTarget $DescriptorName ($reference.Split('#')[0])}
-        foreach($target in $targets){
+        foreach($candidate in $candidates){
+            $target=Resolve-ConversionDescriptorTarget $DescriptorName $candidate
             if($target -and $RenamedNames.ContainsKey($target)){
                 throw ('Supplied descriptor '+$DescriptorName+' references '+$target+', whose extension conversion changes. Update or remove that descriptor before conversion; original kept.')
             }
@@ -439,7 +438,7 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
         $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache -RequireHeld:$ProtectedPublication
         $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach ($line in @($text -split '\r\n|\r|\n')) {
-            $line=$line.Trim();if (-not $line -or $line.StartsWith('#')) {continue}
+            if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {continue}
             foreach($candidate in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
                 $reference=$candidate.Replace('/','\')
                 if($reference.StartsWith('\\?\',[StringComparison]::Ordinal) -or $reference.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}

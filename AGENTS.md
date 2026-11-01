@@ -6,7 +6,7 @@ C# compiled for .NET Framework. Do not assume PowerShell 7 or modern .NET APIs.
 
 Use [the user guide](docs/USAGE.md) for expected behavior. For security-sensitive
 changes, also read [SECURITY.md](SECURITY.md) and the relevant parts of
-[the threat model](docs/threat-model.md), then verify those claims against the
+[the security model](SECURITY_MODEL.md), then verify those claims against the
 current implementation.
 
 ## Code Review Rules

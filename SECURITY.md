@@ -1,6 +1,6 @@
 # Security review guidance
 
-Use [the threat model](docs/threat-model.md) for OptiMiyoo's assets, attacker
+Use [the security model](SECURITY_MODEL.md) for OptiMiyoo's assets, attacker
 capabilities, trust boundaries, and residual risks. Check the current code when
 reviewing a change; the model records a reviewed baseline, not proof that every
 later implementation preserves it. General review guidance is in
@@ -22,7 +22,7 @@ dismiss path substitution or filesystem races simply because they occur locally.
 ## Security Review Rules
 
 Apply the checks relevant to changed code and follow the affected boundary through
-callers and shared helpers. The [code map](docs/threat-model.md#code-map-and-review-use)
+callers and shared helpers. The [code map](SECURITY_MODEL.md#code-map-and-review-use)
 identifies the main implementation areas.
 
 1. **Keep confinement intact.** Verify isolation before resuming workers. Review
@@ -86,4 +86,4 @@ and unavailable Windows validation honestly. Successful tests do not establish
 whole-batch atomicity, guaranteed recovery after power loss, or absence of defects.
 
 When a change adds an input surface or alters execution, authorization, publication,
-or recovery, update the relevant threat-model section alongside the implementation.
+or recovery, update the relevant security-model section alongside the implementation.

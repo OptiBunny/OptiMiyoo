@@ -1,6 +1,6 @@
 # OptiMiyoo security model
 
-Last reviewed: 2026-10-31.
+Last reviewed: 2026-11-01.
 
 This model covers the Windows desktop application: playlist creation, C64 and
 ZX Spectrum conversion, Onion SD setup, and their shared runtime. It describes
@@ -80,7 +80,10 @@ The application process starts suspended, enters a constrained Windows Job
 Object, and has its AppContainer token verified before execution resumes.
 It receives a rebuilt environment, restricted pipe handles, and child-process
 restrictions. Failure to establish isolation must stop the operation, without
-an unconstrained fallback. Defaults include 1 GiB of memory and 1,800 CPU seconds;
+an unconstrained fallback. Application sessions, native jobs, and archive helper
+scratch roots retain an exclusive native creation claim through staging and use.
+Cleanup releases the claim, then verifies its recorded identity before deletion;
+it must not adopt a replacement directory after startup failure or cancellation. Defaults include 1 GiB of memory and 1,800 CPU seconds;
 the latter is not a wall-clock timeout.
 
 RPC has an operation allowlist, bounded frames and JSON depth, request sequencing,
@@ -143,6 +146,13 @@ matters, exact manifests, inventory checks, and hash verification. Path strings
 alone are not durable authority. Failure to verify a path must not lead to broad
 recursive deletion or an unchecked pathname fallback.
 
+Private publication containers are created exclusively with a protected access
+list and a native handle returned by the creation operation. A directory lease
+protects that identity through installation and rollback. After releasing the
+lease, bounded native cleanup checks the captured identity again; a substituted
+container or failed verification must be retained, not adopted or recursively
+removed by pathname.
+
 Selected roots are checked in their original and provider-resolved spelling before
 lossy normalization. Ordinary path components ending in a dot or ASCII space are
 refused; Unicode whitespace must retain its identity on the active runtime. Native
@@ -174,8 +184,10 @@ over the configured size limit. Extra files created by the updater are not impor
 
 Before publication, validate every selected proposed config, reacquire write
 authority for the original, and compare it with the captured bytes. Reject linked
-or multiply hard-linked write targets. Create a new backup set, verify the original
-bytes in that backup before overwriting, verify the replacement, and attempt
+or multiply hard-linked write targets. Create a new backup set and retain the
+native handle returned by exclusive creation, so a competing directory cannot
+be adopted between creation and use. Verify the original bytes in that backup
+before overwriting, verify the replacement, and attempt
 restoration if the write fails. Current backups use
 `Backups/OptiMiyoo_<timestamp>/Emu/<system>/config.json`. Recovery advice must
 distinguish verified backups from partial or unverified files.

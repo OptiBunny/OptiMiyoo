@@ -56,6 +56,19 @@ namespace OptiMiyoo {
         private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         private static extern bool CreateDirectoryW(string path, IntPtr security);
+        [StructLayout(LayoutKind.Sequential)] private struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
+        [StructLayout(LayoutKind.Sequential)] private struct ObjectAttributes {
+            public uint Length; public IntPtr RootDirectory, ObjectName; public uint Attributes;
+            public IntPtr SecurityDescriptor, SecurityQualityOfService;
+        }
+        [StructLayout(LayoutKind.Sequential)] private struct IoStatusBlock { public IntPtr Status; public UIntPtr Information; }
+        [DllImport("ntdll.dll")] private static extern int NtCreateFile(out SafeFileHandle handle, uint access,
+            ref ObjectAttributes attributes, out IoStatusBlock status, IntPtr allocation, uint fileAttributes,
+            uint share, uint disposition, uint options, IntPtr eaBuffer, uint eaLength);
+        [DllImport("ntdll.dll")] private static extern uint RtlNtStatusToDosError(int status);
+        [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr descriptor, out uint size);
+        [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr pointer);
         [DllImport("kernel32.dll", SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
@@ -322,6 +335,56 @@ namespace OptiMiyoo {
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create a new private scratch directory.");
             }
         }
+        public static SourceRemovalLeaseV128 CreatePrivateDirectory(string path) {
+            RequireWindows();
+            // Check the original spelling before Framework normalization can
+            // discard a suffix from the leaf or an ancestor component.
+            if (String.IsNullOrEmpty(path)) throw new IOException("Private publication directory path is missing.");
+            ValidateAncestorIdentity(path);
+            string full = Path.GetFullPath(path); ValidateAncestorIdentity(full);
+            string leaf = Path.GetFileName(full);
+            if (String.IsNullOrEmpty(leaf) || leaf.Length > 32766 || leaf.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || leaf.EndsWith(".") || leaf.EndsWith(" "))
+                throw new IOException("Invalid private publication directory name.");
+            // FILE_CREATE returns the exact new directory and its handle together.
+            // A competing creator is refused; no pathname reopen can claim a
+            // replacement between creation and the transaction lease handoff.
+            using (SourceRemovalLeaseV128 parent = OpenDirectory(Path.GetDirectoryName(full))) {
+                SafeFileHandle created = null; IntPtr descriptor = IntPtr.Zero, name = IntPtr.Zero, unicode = IntPtr.Zero;
+                bool parentHeld = false; SafeFileHandle parentHandle = parent.parents[parent.parents.Count - 1];
+                try {
+                    string sid = System.Security.Principal.WindowsIdentity.GetCurrent().User.Value; uint size;
+                    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + sid + ")", 1, out descriptor, out size))
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                    name = Marshal.StringToHGlobalUni(leaf);
+                    UnicodeString value = new UnicodeString { Length = (ushort)(leaf.Length * 2), MaximumLength = (ushort)(leaf.Length * 2 + 2), Buffer = name };
+                    unicode = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString))); Marshal.StructureToPtr(value, unicode, false);
+                    parentHandle.DangerousAddRef(ref parentHeld);
+                    ObjectAttributes attributes = new ObjectAttributes { Length = (uint)Marshal.SizeOf(typeof(ObjectAttributes)), RootDirectory = parentHandle.DangerousGetHandle(), ObjectName = unicode, Attributes = 0x40, SecurityDescriptor = descriptor };
+                    IoStatusBlock status;
+                    int result = NtCreateFile(out created, 0x100081, ref attributes, out status, IntPtr.Zero, 0x80, 1, 2, 0x200021, IntPtr.Zero, 0);
+                    if (result != 0) throw new Win32Exception(unchecked((int)RtlNtStatusToDosError(result)), "Could not exclusively create private publication staging.");
+                    if (created == null || created.IsInvalid || status.Status != IntPtr.Zero || status.Information.ToUInt64() != 2)
+                        throw new IOException("Private publication directory creation was not confirmed; files retained.");
+                    FileInformation information = Inspect(created);
+                    if ((information.Attributes & 0x410) != 0x10) throw new IOException("Private publication staging is not an ordinary directory.");
+                    // OpenDirectory installs its nonempty guard and relaxes write
+                    // sharing for child moves while this exact create handle still
+                    // denies rename/reparse changes. The returned lease owns that
+                    // continuous protection through publication and rollback.
+                    SourceRemovalLeaseV128 lease = OpenDirectory(full);
+                    if (!String.Equals(lease.DirectoryIdentity, Identity(information), StringComparison.Ordinal)) {
+                        lease.Dispose(); throw new IOException("Private publication directory identity changed; files retained.");
+                    }
+                    return lease;
+                } finally {
+                    if (created != null) created.Dispose();
+                    if (parentHeld) parentHandle.DangerousRelease();
+                    if (unicode != IntPtr.Zero) Marshal.FreeHGlobal(unicode);
+                    if (name != IntPtr.Zero) Marshal.FreeHGlobal(name);
+                    if (descriptor != IntPtr.Zero) LocalFree(descriptor);
+                }
+            }
+        }
         private static string Identity(FileInformation information) {
             return information.VolumeSerial.ToString("X8") + ":" + information.IndexHigh.ToString("X8") + information.IndexLow.ToString("X8");
         }
@@ -506,6 +569,11 @@ function Remove-SourcePolicyOwnedPath([string]$Path,[string]$Root,[string]$Ident
 function New-SourcePolicyOwnedDirectory([string]$Path) {
     Initialize-SourcePolicyNative
     [OptiMiyoo.SourceRemovalLeaseV128]::CreateOwnedDirectory($Path)
+}
+
+function Open-SourcePolicyPrivateDirectory([string]$Path) {
+    Initialize-SourcePolicyNative
+    return [OptiMiyoo.SourceRemovalLeaseV128]::CreatePrivateDirectory($Path)
 }
 
 function Open-SourcePolicyReadLease([string]$Path,[string]$Root) {

@@ -92,9 +92,8 @@ internal static class ArchivePayloadWorker {
     $process=$null;$started=$false;$parentLease=$null;$folderLease=$null;$created=$false;$folderIdentity=$null
     try {
         $parentLease=Open-SourcePolicyDirectoryLease (Get-OptiScratchRoot)
-        New-SourcePolicyOwnedDirectory $folder;$created=$true
-        $folderLease=Open-SourcePolicyDirectoryLease $folder
-        $folderIdentity=$folderLease.DirectoryIdentity
+        $folderLease=Open-SourcePolicyPrivateDirectory $folder
+        $folderIdentity=$folderLease.DirectoryIdentity;$created=$true
         [IO.File]::WriteAllText((Join-Path $folder 'worker.cs'),$source,(New-Object Text.UTF8Encoding($true)))
         $compiler=Join-Path ([Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()) 'csc.exe'
         if(-not [IO.File]::Exists($compiler)) {$compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'}
@@ -231,9 +230,8 @@ function Invoke-ArchiveSandbox {
         Initialize-NativeSandbox;Initialize-NativeTextCapture
         $exeBytes=Get-ArchiveSandboxExecutableBytes
         $toolParentLease=Open-SourcePolicyDirectoryLease (Get-OptiScratchRoot)
-        New-SourcePolicyOwnedDirectory $toolRoot;$toolCreated=$true
-        $toolLease=Open-SourcePolicyDirectoryLease $toolRoot
-        $toolIdentity=$toolLease.DirectoryIdentity
+        $toolLease=Open-SourcePolicyPrivateDirectory $toolRoot
+        $toolIdentity=$toolLease.DirectoryIdentity;$toolCreated=$true
         $exe=Join-Path $toolRoot 'archive.exe';[IO.File]::WriteAllBytes($exe,$exeBytes)
         $checksums=Get-ZipChecksums $ZipPath $Archive.Entries.Count
         if($EntryIndex -lt -1 -or $EntryIndex -ge $Archive.Entries.Count) {throw 'Invalid ZIP entry selection.'}

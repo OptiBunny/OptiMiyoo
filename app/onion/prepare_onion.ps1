@@ -46,6 +46,16 @@ namespace OptiMiyoo {
             public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime, AccessTime, WriteTime;
             public uint VolumeSerial, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
         }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ObjectAttributes { public uint Length; public IntPtr RootDirectory, ObjectName; public uint Attributes; public IntPtr SecurityDescriptor, SecurityQualityOfService; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoStatusBlock { public IntPtr Status; public UIntPtr Information; }
+        [DllImport("ntdll.dll")]
+        private static extern int NtCreateFile(out SafeFileHandle handle, uint access, ref ObjectAttributes attributes, out IoStatusBlock status, IntPtr allocation, uint fileAttributes, uint share, uint disposition, uint options, IntPtr eaBuffer, uint eaLength);
+        [DllImport("ntdll.dll")]
+        private static extern uint RtlNtStatusToDosError(int status);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
@@ -140,6 +150,37 @@ namespace OptiMiyoo {
                 return lease;
             } catch { lease.Dispose(); throw; }
         }
+        private static SafeFileHandle CreateNewDirectory(SafeFileHandle parent, string leaf) {
+            if (String.IsNullOrEmpty(leaf) || leaf.Length > 32766 || leaf != Path.GetFileName(leaf) || leaf.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                throw new IOException("Invalid SD backup folder name.");
+            IntPtr text = IntPtr.Zero, name = IntPtr.Zero;
+            SafeFileHandle created = null;
+            bool parentHeld = false;
+            try {
+                text = Marshal.StringToHGlobalUni(leaf);
+                UnicodeString unicode = new UnicodeString { Length = checked((ushort)(leaf.Length * 2)), MaximumLength = checked((ushort)(leaf.Length * 2 + 2)), Buffer = text };
+                name = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
+                Marshal.StructureToPtr(unicode, name, false);
+                parent.DangerousAddRef(ref parentHeld);
+                ObjectAttributes attributes = new ObjectAttributes { Length = (uint)Marshal.SizeOf(typeof(ObjectAttributes)), RootDirectory = parent.DangerousGetHandle(), ObjectName = name, Attributes = 0x40 };
+                IoStatusBlock result;
+                // FILE_CREATE returns the new directory and its share-read-only
+                // handle together. A path reopen could adopt another creator's set.
+                int status = NtCreateFile(out created, 0x100081, ref attributes, out result, IntPtr.Zero, 0x80, 1, 2, 0x200021, IntPtr.Zero, 0);
+                if (status != 0) throw new Win32Exception(unchecked((int)RtlNtStatusToDosError(status)), "SD backup set could not be created safely.");
+                if (created == null || created.IsInvalid || result.Status != IntPtr.Zero || result.Information.ToUInt64() != 2)
+                    throw new IOException("SD backup folder creation did not establish ownership.");
+                FileInformation information;
+                if (!GetFileInformationByHandle(created, out information)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if ((information.Attributes & 0x410U) != 0x10U) throw new IOException("SD backup folder is not an ordinary directory.");
+                SafeFileHandle owned = created; created = null; return owned;
+            } finally {
+                if (created != null) created.Dispose();
+                if (parentHeld) parent.DangerousRelease();
+                if (name != IntPtr.Zero) Marshal.FreeHGlobal(name);
+                if (text != IntPtr.Zero) Marshal.FreeHGlobal(text);
+            }
+        }
         public static OnionPathLease CreateBackupSet(string root) {
             string fullRoot = Path.GetFullPath(root);
             string parent = Path.Combine(fullRoot, "Backups");
@@ -152,16 +193,18 @@ namespace OptiMiyoo {
                     if (id == previous) { System.Threading.Thread.Sleep(50); continue; }
                     previous = id;
                     string candidate = Path.Combine(parent, "OptiMiyoo_" + id);
-                    // Reserve a new set atomically. A same-second collision must
-                    // never merge this run's originals into an existing backup.
-                    if (!CreateDirectoryW(NativePath(candidate), IntPtr.Zero)) {
-                        int error = Marshal.GetLastWin32Error();
-                        if (error == 183) continue;
-                        throw new Win32Exception(error, "SD backup set could not be created safely.");
-                    }
-                    lease.directories.Add(OpenHandle(candidate, true, false, false));
-                    lease.DirectoryPath = candidate;
-                    return lease;
+                    // Keep the creation handle itself. Neither a same-second
+                    // collision nor a replacement can supply an existing set.
+                    SafeFileHandle created = null;
+                    try {
+                        created = CreateNewDirectory(lease.directories[lease.directories.Count - 1], "OptiMiyoo_" + id);
+                        lease.directories.Add(created); created = null;
+                        lease.DirectoryPath = candidate;
+                        return lease;
+                    } catch (Win32Exception error) {
+                        if (error.NativeErrorCode == 183) continue;
+                        throw;
+                    } finally { if (created != null) created.Dispose(); }
                 }
                 throw new IOException("A new timestamped SD backup folder could not be reserved. Retry SD setup.");
             } catch { lease.Dispose(); throw; }

@@ -40,10 +40,6 @@ namespace OptiMiyoo {
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
         static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr sa,uint disposition,uint flags,IntPtr template);
         [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle handle,out Info info);
-        [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes {public int Length;public IntPtr Descriptor;public int Inherit;}
-        [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl,uint revision,out IntPtr descriptor,out uint size);
-        [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateDirectoryW(string path,ref SecurityAttributes attributes);
-        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr pointer);
         [StructLayout(LayoutKind.Sequential)] struct Disposition {public byte Delete;}
         [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle,int kind,ref Disposition value,uint size);
         readonly List<SafeFileHandle> handles=new List<SafeFileHandle>();
@@ -51,14 +47,6 @@ namespace OptiMiyoo {
             string full=Path.GetFullPath(path);
             if(full.StartsWith(@"\\?\",StringComparison.Ordinal)||full.StartsWith(@"\\.\",StringComparison.Ordinal))throw new IOException("Device paths are not supported.");
             return full.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+full.Substring(2):@"\\?\"+full;
-        }
-        public static void CreatePrivateDirectory(string path) {
-            string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
-            IntPtr descriptor;uint size;
-            if(!ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;"+sid+")",1,out descriptor,out size))throw new Win32Exception(Marshal.GetLastWin32Error());
-            try {SecurityAttributes attributes=new SecurityAttributes();attributes.Length=Marshal.SizeOf(typeof(SecurityAttributes));attributes.Descriptor=descriptor;
-                if(!CreateDirectoryW(NativePath(path),ref attributes))throw new Win32Exception(Marshal.GetLastWin32Error(),"Could not create private broker publication staging.");
-            } finally {LocalFree(descriptor);}
         }
         public static ApplicationBrokerLease Directory(string path) {
             ApplicationBrokerLease lease=new ApplicationBrokerLease();
@@ -826,9 +814,22 @@ function Reset-ApplicationBrokerReferences($Batch,$ReferenceIndex,[object[]]$Tar
     }
 }
 
+function Close-ApplicationBrokerPublicationContainer($Container,[switch]$Preserve) {
+    if(-not $Container.Lease){return}
+    $identity=$Container.Lease.DirectoryIdentity
+    # Keep the exact root pinned until all publication and recovery work ends.
+    # Cleanup must release that no-delete pin, then recheck the captured identity
+    # through its deletion handle before touching any member of the directory.
+    $Container.Lease.Dispose();$Container.Lease=$null
+    if(-not $Preserve -and (Test-Path -LiteralPath $Container.Path)){
+        Remove-SourcePolicyOwnedPath -Path $Container.Path -Root ([IO.Path]::GetDirectoryName($Container.Path)) -Identity $identity -MaximumEntries 100005
+    }
+}
+
 function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null) {
     $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
     $items=New-Object 'System.Collections.Generic.List[object]';$owned=New-Object 'System.Collections.Generic.List[string]';$locks=New-Object 'System.Collections.Generic.List[IDisposable]'
+    $containers=New-Object 'System.Collections.Generic.List[object]'
     $verifiedParents=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $resourcesTransferred=$false
     try {
@@ -843,9 +844,10 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
             if($parent -ne $anchor){$locks.Add((Open-SourcePolicyDirectoryLease $parent))}
             Assert-ApplicationBrokerOutputParentCase $parent $dst $verifiedParents
             $container=Join-Path $parent ('.app_'+[Guid]::NewGuid().ToString('N').Substring(0,16)+'.tmp')
-            # Supply the protected DACL in CreateDirectory itself: there is no
-            # interval where this folder inherits a broad application ACL.
-            [OptiMiyoo.ApplicationBrokerLease]::CreatePrivateDirectory($container)
+            $claim=[pscustomobject]@{Path=$container;Lease=$null};$containers.Add($claim)
+            # Atomically create with a private DACL and retain the exact directory
+            # lease; a competing ordinary directory is never cleanup authority.
+            $claim.Lease=Open-SourcePolicyPrivateDirectory $container
             $owned.Add($container)
             $stage=Join-Path $container 'data'
             $playlist=($write.PSObject.Properties['Role'] -and $write.Role -eq 'Playlist')
@@ -901,7 +903,7 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$false;Hash=$copied.Hash})
             }
         }
-        $sealed=[pscustomobject]@{Items=$items.ToArray();Owned=$owned.ToArray();Locks=$locks}
+        $sealed=[pscustomobject]@{Items=$items.ToArray();Owned=$owned.ToArray();Containers=$containers.ToArray();Locks=$locks}
         $resourcesTransferred=$true
         return $sealed
     } finally {
@@ -909,8 +911,11 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
         # every private copy and directory lease; the caller has no sealed set.
         if(-not $resourcesTransferred){
             try {
-                foreach($path in $owned){if(Test-Path -LiteralPath $path){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalText $path))}}}
-            } finally {foreach($lock in $locks){$lock.Dispose()}}
+                foreach($claim in $containers){try{Close-ApplicationBrokerPublicationContainer $claim}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalText $claim.Path))}}
+            } finally {
+                foreach($claim in $containers){if($claim.Lease){$claim.Lease.Dispose();$claim.Lease=$null}}
+                foreach($lock in $locks){$lock.Dispose()}
+            }
         }
     }
 }
@@ -1022,12 +1027,20 @@ function Complete-ApplicationBrokerBatch {
                 if($results.Count -and $results[$results.Count-1].JobId -ceq $id){[void]$processedIds.Add($id)}
                 if($commit){foreach($lock in $commit.Locks){$lock.Dispose()}}
                 if($sealed){
-                    foreach($path in $sealed.Owned){
-                        Reset-ApplicationBrokerReferences $batch $referenceIndex @([pscustomobject]@{Destination=$path;Folder=$true})
-                        $preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path,[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0
-                        if(-not $preserve -and (Test-Path -LiteralPath $path)){try{Remove-SourcePolicyOwnedPath $path ([IO.Path]::GetDirectoryName($path))}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalText $path))}}
+                    try {
+                        foreach($claim in $sealed.Containers){
+                            $path=$claim.Path
+                            $preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path+'\',[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0
+                            try{Reset-ApplicationBrokerReferences $batch $referenceIndex @([pscustomobject]@{Destination=$path;Folder=$true})}
+                            catch{$preserve=$true;Write-Warning ('Broker reference cleanup failed; staging retained: '+(ConvertTo-SafeExternalText $path))}
+                            finally{try{Close-ApplicationBrokerPublicationContainer $claim -Preserve:$preserve}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalText $path))}}
+                        }
+                    } finally {
+                        # Even a reference reset or diagnostic failure must not
+                        # strand the other exact directory leases in this set.
+                        foreach($claim in $sealed.Containers){if($claim.Lease){$claim.Lease.Dispose();$claim.Lease=$null}}
+                        foreach($lock in $sealed.Locks){$lock.Dispose()}
                     }
-                    foreach($lock in $sealed.Locks){$lock.Dispose()}
                 }
             }
         }

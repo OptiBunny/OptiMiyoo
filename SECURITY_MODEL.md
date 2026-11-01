@@ -140,7 +140,9 @@ descriptor caches use ordinal, case-insensitive identity. Linguistic equality mu
 Windows filenames, including composed and decomposed Unicode spellings. Newly
 discovered CUE/playlist files require their own reference check; a cache entry for
 another spelling cannot authorize replacement of files they reference. These
-identity checks do not override conservative media-group ambiguity checks;
+ownership checks also prevent an existing playlist's reference to one Unicode
+spelling from authorizing replacement or retirement of another. These identity
+checks do not override conservative media-group ambiguity checks;
 ambiguous loose titles can still be refused while unrelated jobs proceed.
 Archive playlist ordering keeps natural disk-number sorting and uses an ordinal
 final tie-breaker for linguistically equal filenames, so the parent and its

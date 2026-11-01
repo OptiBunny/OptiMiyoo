@@ -1068,20 +1068,20 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
 }
 
 function Get-PlaylistOwnedMedia([string]$Path,[string]$Stem,[string]$Root,$Plan=$null) {
-    $owned=@{}
+    $owned=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {return $owned}
     $lines=Read-PlaylistLines $Path
     $depth=@($Stem.Split('/')).Count-1
     $prefix=('../'*$depth)+'.hidden/'+$Stem
     $references=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
-    $knownFiles=@{}
+    $knownFiles=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     if ($Plan) {
         $layouts=@([pscustomobject]@{Lines=$Plan.FlatPlaylistLines;Writes=$Plan.FlatDataWrites;ZipPath=''})
         if ($Plan.PSObject.Properties['PreservedPlaylistLines']) {
             $layouts+=[pscustomobject]@{Lines=$Plan.PreservedPlaylistLines;Writes=$Plan.PreservedDataWrites;ZipPath=$Plan.PreservedZipPath}
         }
         foreach ($layout in $layouts) {
-            $members=@{}
+            $members=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
             foreach ($item in $layout.Writes) {$members[$item.MemberName]=$item.Destination;$knownFiles[$item.Destination]=$item.MemberName}
             for ($i=0;$i -lt $layout.Lines.Count;$i++) {
                 $member=$Plan.DiskNames[$i]

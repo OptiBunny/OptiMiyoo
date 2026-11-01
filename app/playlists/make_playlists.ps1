@@ -1100,7 +1100,14 @@ function Get-PlaylistOwnedMedia([string]$Path,[string]$Stem,[string]$Root,$Plan=
 function New-PlaylistReferenceIndex([string]$Root) {
     # Explicit batch lifetime, never a module/global cache. Cached descriptors
     # remain read-locked; names and links are inventoried again on every check.
-    return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');Playlists=@{};Cues=@{};StandaloneCues=@{};Exact=@{};Folders=@{};Guarded=@{};
+    # Match Windows path identity without merging distinct Unicode spellings.
+    # Hashtable preserves the existing void Remove/Clear return contract.
+    return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');
+        Playlists=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
+        Cues=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));StandaloneCues=@{};
+        Exact=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
+        Folders=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
+        Guarded=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
         MaximumDescriptors=4096;MaximumReferences=100000;MaximumReferenceCharacters=16777216;ReferenceCount=0;ReferenceCharacters=0;LimitReached=$false;Disabled=$false;Closed=$false}
 }
 

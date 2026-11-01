@@ -88,6 +88,7 @@ function New-ApplicationStagedCode {
     foreach ($pair in @(
         @('app/ui/display.ps1','Initialize-Display'),@('app/ui/display.ps1','Initialize-FrameTimer'),
         @('app/shared/archive_limits.ps1','Initialize-ArchiveLimits'),@('app/shared/media_validation.ps1','Initialize-NibValidation'),
+        @('app/shared/media_validation.ps1','Initialize-IpfValidation'),
         @('app/shared/native_process.ps1','Initialize-NativeTextCapture'))) {
         $sources.Add((Get-ApplicationLiteralHelper $texts[$pair[0]] $pair[1]))
     }

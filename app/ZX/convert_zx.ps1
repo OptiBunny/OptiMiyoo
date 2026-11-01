@@ -39,6 +39,7 @@ $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/archive_limits.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/zip_integrity.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/native_process.ps1')
+. (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/media_validation.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/archive_sandbox.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/overwrite_prompt.ps1')
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'shared/conversion_layout.ps1')
@@ -349,18 +350,13 @@ function Set-CapsRuntimeDirectory([string]$EnginePath, [string]$Directory) {
 
 function Invoke-IPFEngineText([string]$EnginePath,[string]$Arguments,[string]$InputPath,[int]$TimeoutMs) {
     # HxC auto-detects several formats. Require the CAPS/IPF header before its
-    # native parser runs, and pin the validated input until the child exits.
+    # native parser runs; verify container integrity and pin it until the child exits.
     $lease=Open-SourcePolicyReadLease $InputPath ([IO.Path]::GetDirectoryName($InputPath))
     $input=$null
     try {
         $input=[IO.File]::Open($InputPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-        if ($input.Length -lt 108 -or $input.Length -gt 512MB) {throw 'IPF input has an unsupported size; original kept.'}
-        $header=New-Object byte[] 12
-        $expected=[byte[]]@(0x43,0x41,0x50,0x53,0,0,0,12,0x1c,0xd5,0x73,0xba)
-        if ($input.Read($header,0,12) -ne 12) {throw 'IPF header is truncated; original kept.'}
-        for ($i=0;$i -lt 12;$i++) {
-            if ($header[$i] -ne $expected[$i]) {throw 'Input does not have a valid CAPS/IPF header; original kept.'}
-        }
+        Initialize-IpfValidation
+        [OptiMiyoo.IpfInputV1]::Validate($input,$null)
         $input.Dispose();$input=$null
         return (Invoke-EngineText $EnginePath $Arguments $TimeoutMs)
     } finally {

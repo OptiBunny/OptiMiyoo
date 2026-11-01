@@ -105,3 +105,122 @@ function Assert-NibSource([string]$Path) {
     Initialize-NibValidation
     [OptiMiyoo.NibInput]::Validate($Path)
 }
+
+# IPF container integrity follows the bundled CAPS CapsID/CapsData records.
+# This verifies lengths and checksums, not media geometry or faithful conversion.
+function Initialize-IpfValidation {
+    if ('OptiMiyoo.IpfInputV1' -as [type]) {return}
+    Add-OptiMiyooType -TypeDefinition @'
+using System;
+using System.IO;
+namespace OptiMiyoo {
+    public static class IpfInputV1 {
+        const long MaximumInput = 512L * 1024 * 1024;
+        static readonly uint[] Table = MakeTable();
+        static uint[] MakeTable() {
+            uint[] table = new uint[256];
+            for (uint i = 0; i < table.Length; i++) {
+                uint value = i;
+                for (int bit = 0; bit < 8; bit++)
+                    value = (value >> 1) ^ ((value & 1) != 0 ? 0xedb88320U : 0);
+                table[i] = value;
+            }
+            return table;
+        }
+        static InvalidDataException Bad(string reason) {
+            return new InvalidDataException("Invalid or truncated IPF: " + reason + ". Original kept.");
+        }
+        static uint U32(byte[] bytes, int offset) {
+            return ((uint)bytes[offset] << 24) | ((uint)bytes[offset + 1] << 16) |
+                   ((uint)bytes[offset + 2] << 8) | bytes[offset + 3];
+        }
+        static uint Update(uint crc, byte[] bytes, int count) {
+            for (int i = 0; i < count; i++) crc = Table[(crc ^ bytes[i]) & 255] ^ (crc >> 8);
+            return crc;
+        }
+        sealed class Progress {
+            readonly Action<long,long> callback;
+            readonly long length;
+            long last;
+            public Progress(Action<long,long> callback, long length) {this.callback = callback; this.length = length;}
+            public int LimitRead(int count, long position) {
+                return callback == null ? count : (int)Math.Min(count, 65536 - (position - last));
+            }
+            public void Poll(long position, bool force) {
+                if (callback != null && (force || position - last >= 65536)) {
+                    callback(position, length);
+                    last = position;
+                }
+            }
+        }
+        static void ReadExact(Stream input, byte[] buffer, int count, long length, Progress progress) {
+            int offset = 0;
+            while (offset < count) {
+                int read = input.Read(buffer, offset, progress.LimitRead(count - offset, input.Position));
+                if (read <= 0) throw Bad("record or data payload is incomplete");
+                offset += read;
+                progress.Poll(input.Position, false);
+            }
+        }
+        static uint ReadBody(Stream input, long count, byte[] buffer, uint crc, long length, Progress progress) {
+            while (count > 0) {
+                int take = (int)Math.Min(count, buffer.Length);
+                ReadExact(input, buffer, take, length, progress);
+                crc = Update(crc, buffer, take);
+                count -= take;
+            }
+            return crc;
+        }
+        public static void Validate(Stream input, Action<long,long> progress) {
+            if (input == null || !input.CanRead || !input.CanSeek)
+                throw new ArgumentException("A readable, seekable IPF stream is required.");
+            long saved = input.Position;
+            try {
+                long length = input.Length;
+                if (length < 108 || length > MaximumInput) throw Bad("unsupported input size");
+                input.Position = 0;
+                Progress report = new Progress(progress, length);
+                report.Poll(0, true);
+                byte[] header = new byte[12], dataHeader = new byte[16], buffer = new byte[65536];
+                bool first = true;
+                while (input.Position < length) {
+                    long start = input.Position;
+                    if (length - start < header.Length) throw Bad("record header is incomplete");
+                    ReadExact(input, header, header.Length, length, report);
+                    uint size = U32(header, 4), expected = U32(header, 8);
+                    if (size < 12 || size > length - start) throw Bad("record length exceeds its container");
+                    if (first && (header[0] != 'C' || header[1] != 'A' || header[2] != 'P' || header[3] != 'S' || size != 12))
+                        throw Bad("missing CAPS header");
+                    first = false;
+                    bool data = header[0] == 'D' && header[1] == 'A' && header[2] == 'T' && header[3] == 'A';
+                    uint payload = 0, dataCrc = 0;
+                    header[8] = header[9] = header[10] = header[11] = 0;
+                    uint crc = Update(0xffffffffU, header, header.Length);
+                    long body = size - 12;
+                    if (data) {
+                        if (body < dataHeader.Length) throw Bad("DATA metadata is incomplete");
+                        ReadExact(input, dataHeader, dataHeader.Length, length, report);
+                        crc = Update(crc, dataHeader, dataHeader.Length);
+                        payload = U32(dataHeader, 0); dataCrc = U32(dataHeader, 8);
+                        body -= dataHeader.Length;
+                    }
+                    // Unknown/extended records retain their declared byte layout.
+                    crc = ReadBody(input, body, buffer, crc, length, report);
+                    if ((crc ^ 0xffffffffU) != expected) throw Bad("record CRC does not match");
+                    if (data) {
+                        if (payload > length - input.Position) throw Bad("DATA payload exceeds its container");
+                        uint actual = ReadBody(input, payload, buffer, 0xffffffffU, length, report) ^ 0xffffffffU;
+                        // CAPS permits an absent (zero) DATA checksum.
+                        if (dataCrc != 0 && actual != dataCrc) throw Bad("DATA CRC does not match");
+                    }
+                }
+                if (input.Length != length || input.ReadByte() != -1) throw Bad("input changed during validation");
+                report.Poll(length, true);
+            } finally {
+                input.Position = saved;
+            }
+        }
+    }
+}
+'@
+}

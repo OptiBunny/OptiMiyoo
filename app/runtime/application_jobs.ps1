@@ -1,5 +1,6 @@
 ﻿. (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
 . (Join-Path $PSScriptRoot '../shared/native_process.ps1')
+. (Join-Path $PSScriptRoot '../shared/media_validation.ps1')
 # Fixed native-converter requests for the application AppContainer. This module
 # runs in the trusted parent; paths and receipts are never authority from a child.
 function Resolve-ApplicationJobPath {
@@ -151,6 +152,10 @@ function Invoke-ApplicationNativeRequest {
             $inputFile=Resolve-ApplicationJobPath $work ([string]$Payload.Input)
             $job.InputLease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($inputFile)
             if ($job.InputLease.Stream.Length -gt 512MB) {throw 'Native input exceeds 512 MiB.'}
+            if($kind -ne 'Nib'){
+                Initialize-IpfValidation
+                [OptiMiyoo.IpfInputV1]::Validate($job.InputLease.Stream,$hashProgress)
+            }
             $job.InputHash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($job.InputLease.Stream,$hashProgress)
         }
         if ($mode -eq 'Convert') {

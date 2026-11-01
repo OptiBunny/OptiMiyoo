@@ -385,7 +385,7 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
         $privatePaths=[pscustomobject]@{Exact=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Folders=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
         foreach($private in $PrivateTargets){[void]$privatePaths.Exact.Add($private.Destination);if($private.Folder){[void]$privatePaths.Folders.Add($private.Destination)}}
     }
-    foreach($write in $referenceTargets){[void]$targets.Exact.Add($write.Destination);if($write.Folder){[void]$targets.Folders.Add($write.Destination)}}
+    foreach($write in (Get-SourcePolicyPublicationTargets $referenceTargets)){[void]$targets.Exact.Add($write.Destination);if($write.Folder){[void]$targets.Folders.Add($write.Destination)}}
     foreach ($item in $Group.Items) {
         [void]$names.Add($item.Name);$parent=([string][IO.Path]::GetDirectoryName($item.Name)).Replace('\','/')
         while ($parent) {[void]$directories.Add($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')}
@@ -509,12 +509,12 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
             if (Test-Path -LiteralPath $output.Destination) {
                 if (-not $Overwrite) {throw 'An output appeared during conversion; rerun to choose overwrite.'}
                 $backup=Join-Path ([IO.Path]::GetDirectoryName($output.Destination)) ('.ppg_'+[Guid]::NewGuid().ToString('N').Substring(0,12)+'.backup')
-                if ($output.Folder) {[IO.Directory]::Move($output.Destination,$backup)} else {[IO.File]::Move($output.Destination,$backup)}
-                $backups.Add([pscustomobject]@{Path=$backup;Destination=$output.Destination;Folder=$output.Folder})
+                $alternate=Move-SourcePolicyPublicationPath $output.Destination $backup ([bool]$output.Folder)
+                $backups.Add([pscustomobject]@{Path=$backup;Destination=$output.Destination;Folder=$output.Folder;AlternatePath=$alternate})
             }
         }
         if($backups.Count){
-            $capturedTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Destination;Folder=$_.Folder}})
+            $capturedTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Destination;Folder=$_.Folder;AlternatePath=$_.AlternatePath}})
             $privateTargets=@($backups | ForEach-Object {[pscustomobject]@{Destination=$_.Path;Folder=$_.Folder}})+@($staged | ForEach-Object {[pscustomobject]@{Destination=$_.Container;Folder=$true}})
             Assert-ConversionGroupOwnership $Group $DestinationRoot $DescriptorCache -ProtectedPublication -CapturedTargets $capturedTargets -PrivateTargets $privateTargets
         }

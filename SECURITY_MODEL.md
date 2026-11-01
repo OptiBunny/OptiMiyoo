@@ -125,6 +125,11 @@ not merge distinct Windows filenames, including composed and decomposed Unicode 
 CUE/playlist files require their own reference check; a cache entry for another
 spelling cannot authorize replacement of files they reference.
 
+Playlist dependency checks consider representable literal, right-trimmed, and
+fully trimmed spellings of each non-comment line. A space before `#` can belong
+to a filename; it does not make the original line a comment. Whitespace and
+archive-member interpretations share the same bounded candidate budget.
+
 NIB/NBZ decoding is bounded before native conversion. G64/DSK structure checks
 and parent-owned receipts bind accepted converted bytes to the batch, converter,
 input hash, output hash, and length. Passthrough files must match captured source
@@ -144,6 +149,13 @@ its Windows alternate filename through the same handle used for the rename.
 Foreign CUE/playlist checks retain that alias while the original name is absent;
 captured folder aliases also protect descendants. Failure to establish this
 identity stops replacement.
+
+Folder verification compares actual enumerated relative filenames with the
+planned member names, as well as file counts and hashes. This check applies to
+private publication copies, installed folders, and outputs used to authorize
+source removal. The final removal check enumerates names while verified file
+and ancestor leases are held. A path resolving through a Windows alternate
+filename does not prove that the planned directory layout was preserved.
 
 Path handling must preserve containment and object identity throughout reads,
 staging, replacement, rollback, and cleanup. Existing controls include pinned

@@ -393,9 +393,22 @@ function Read-ZipContents([IO.Compression.ZipArchive]$Archive,[string]$Destinati
 }
 
 function Assert-FolderManifest([string]$Directory,[hashtable]$Manifest) {
-    $files=@(Get-ChildItem -LiteralPath $Directory -Recurse -File -Force)
-    if ($files.Count -ne $Manifest.Count) { throw 'Output folder file count does not match source.' }
+    $root=Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if(-not $root.PSIsContainer -or ($root.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Output folder was replaced or linked.'}
+    $prefix=[IO.Path]::GetFullPath($Directory).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    $actualNames=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $pending=New-Object 'Collections.Generic.Stack[string]';$pending.Push($Directory)
+    while($pending.Count -gt 0){
+        foreach($entry in @(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction Stop)){
+            if($entry.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Output folder contains a link.'}
+            if($entry.PSIsContainer){$pending.Push($entry.FullName);continue}
+            $full=[IO.Path]::GetFullPath($entry.FullName)
+            if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or -not $actualNames.Add($full.Substring($prefix.Length).Replace('\','/'))){throw 'Output folder file names do not match source.'}
+        }
+    }
+    if ($actualNames.Count -ne $Manifest.Count) { throw 'Output folder file count does not match source.' }
     foreach ($name in $Manifest.Keys) {
+        if(-not $actualNames.Contains($name.Replace('\','/'))){throw 'Output folder file names do not match source.'}
         $path=Join-Path $Directory $name.Replace('/',[IO.Path]::DirectorySeparatorChar)
         $item=Get-Item -LiteralPath $path -Force
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint -or $item.Length -ne $Manifest[$name].Length -or (Get-VerifiedHash -LiteralPath $path).Hash -ne $Manifest[$name].Hash) {
@@ -1277,9 +1290,8 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
         $entry.Descriptor=Open-PlaylistReferenceDescriptor $Path $Index.Root
         $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach($line in (Read-PlaylistLines $Path)){
-            $reference=$line.Trim()
-            if(-not $reference -or $reference.StartsWith('#')){continue}
-            foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
+            if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
+            foreach($candidate in (Get-OptiPlaylistReferenceCandidates $line $referenceBudget)){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                 if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
@@ -1440,9 +1452,8 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
             if ($file.Extension -notin '.m3u','.m3u8' -or $file.FullName.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)) {continue}
             $referenceBudget=New-OptiPlaylistReferenceBudget
             foreach ($line in (Read-PlaylistLines $file.FullName)) {
-                $reference=$line.Trim()
-                if (-not $reference -or $reference.StartsWith('#')) {continue}
-                foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
+                if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {continue}
+                foreach($candidate in (Get-OptiPlaylistReferenceCandidates $line $referenceBudget)){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                     if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                     $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}

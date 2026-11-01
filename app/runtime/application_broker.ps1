@@ -883,6 +883,16 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
                     $actual[$name]=Get-ApplicationBrokerFile (Join-Path $childPath $name) $workDst $target -SingleLink -AllowedLengths $lengths
                 }
                 Assert-ApplicationBrokerManifest $Job.Files $actual $Batch $ReceiptStore
+                # Directory creation can resolve an earlier directory's DOS
+                # alias. Verify the copied namespace by enumeration, not by
+                # reopening planned paths that may name the same directory.
+                $copied=Get-ApplicationBrokerTree $stage -RequireSingleLink -MaximumEntries 50000 -MetadataOnly
+                if($copied.Files.Count -ne $Job.Files.Count){throw 'Copied output file count does not match the independent source plan.'}
+                $copiedNames=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+                foreach($name in $copied.Files.Keys){[void]$copiedNames.Add($name)}
+                foreach($name in $Job.Files.Keys){
+                    if(-not $copiedNames.Contains($name)){throw 'Copied output member spelling does not match the independent source plan.'}
+                }
                 $items.Add([pscustomobject]@{Staged=$stage;Destination=$write.Destination;Folder=$true;Manifest=$actual;Hash=$null})
             } else {
                 $lengths=$null

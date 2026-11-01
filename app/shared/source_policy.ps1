@@ -703,16 +703,6 @@ function Open-SourcePolicyOutputs {
             if ([bool]$item.PSIsContainer -ne [bool]$output.Folder -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Verified output was replaced or linked; original kept.'}
             if ($output.Folder) {
                 if ($null -eq $output.Manifest -or $output.Manifest.Count -eq 0) {throw 'Output manifest is missing; original kept.'}
-                # Enumerate without following directory links.
-                $pending=New-Object 'System.Collections.Generic.Stack[string]'
-                $pending.Push($output.Destination); $count=0
-                while ($pending.Count -gt 0) {
-                    foreach ($entry in @(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction Stop)) {
-                        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'Output contains a link; original kept.'}
-                        if ($entry.PSIsContainer) {$pending.Push($entry.FullName)} else {$count++}
-                    }
-                }
-                if ($count -ne $output.Manifest.Count) {throw 'Output file count changed; original kept.'}
                 $prefix=[IO.Path]::GetFullPath($output.Destination).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
                 $seen=@{}
                 foreach ($name in $output.Manifest.Keys) {
@@ -744,6 +734,26 @@ function Open-SourcePolicyOutputs {
                 }.GetNewClosure()
                 $hash=[OptiMiyoo.SourceRemovalLeaseV128]::HashStream($stream,[Action[long,long]]$hashCallback)
                 if ($hash -ne $file.Hash) {throw ('Output changed after verification; original kept: '+$file.Path)}
+            }
+            if ($output.Folder) {
+                # Verify names after file/ancestor leases are held. A rename
+                # before acquisition must not pass through a matching 8.3 alias.
+                $actualNames=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+                $pending=New-Object 'System.Collections.Generic.Stack[string]'
+                $pending.Push($output.Destination); $count=0
+                while ($pending.Count -gt 0) {
+                    foreach ($entry in @(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction Stop)) {
+                        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'Output contains a link; original kept.'}
+                        if ($entry.PSIsContainer) {$pending.Push($entry.FullName)} else {
+                            $count++;$full=[IO.Path]::GetFullPath($entry.FullName)
+                            if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or -not $actualNames.Add($full.Substring($prefix.Length).Replace('\','/'))){throw 'Output file names changed; original kept.'}
+                        }
+                    }
+                }
+                if ($count -ne $output.Manifest.Count) {throw 'Output file count changed; original kept.'}
+                foreach($name in $output.Manifest.Keys){
+                    if(-not $actualNames.Contains($name.Replace('\','/'))){throw 'Output file names changed; original kept.'}
+                }
             }
         }
         $transferred=$true
@@ -921,20 +931,49 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
        ($Budget['Count'] -isnot [long] -and $Budget['Count'] -isnot [int]) -or ($Budget['Characters'] -isnot [long] -and $Budget['Characters'] -isnot [int]) -or
        $Budget['Count'] -lt 0 -or $Budget['Count'] -gt 65536 -or $Budget['Characters'] -lt 0 -or $Budget['Characters'] -gt 16777216){throw 'Invalid playlist reference expansion budget.'}
     if([string]::IsNullOrEmpty($Reference)){return}
-    # A literal '#' may occur before the actual archive-member separator.
-    # Count every interpretation before allocating prefixes or yielding any.
-    $count=1L;$characters=[long]$Reference.Length
-    if($count -gt 65536-$Budget['Count'] -or $characters -gt 16777216-$Budget['Characters']){throw 'Playlist reference expansion exceeds its descriptor budget.'}
-    for($separator=$Reference.IndexOf('#');$separator -ge 0;$separator=$Reference.IndexOf('#',$separator+1)){
-        if($separator -eq 0){continue}
-        $count++;$characters+=$separator
+    # Consumers differ: some preserve whitespace, some trim its right side,
+    # and some trim both sides. Protect every distinct literal path they can use.
+    $trimmed=$Reference.Trim();$spellings=New-Object 'Collections.Generic.List[string]'
+    $seen=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach($spelling in @($Reference,$Reference.TrimEnd(),$trimmed)){
+        if(-not $spelling -or -not $seen.Add($spelling)){continue}
+        if(-not [StringComparer]::Ordinal.Equals($spelling,$Reference) -and $spelling.StartsWith('#')){continue}
+        if(-not [StringComparer]::Ordinal.Equals($spelling,$trimmed)){
+            # Indentation tabs and a padded drive/URI cannot be literal Windows
+            # names. Let their trimmed interpretation reach the existing URI,
+            # device and stream checks. Legal spaces/NBSP remain significant.
+            $literal=$spelling -notmatch '[<>"|?*\x00-\x1f]'
+            $colon=$spelling.IndexOf(':')
+            if($colon -ge 0 -and ($colon -ne 1 -or $spelling[0] -notmatch '[A-Za-z]' -or $spelling.IndexOf(':',2) -ge 0)){$literal=$false}
+            foreach($part in $spelling.Replace('/','\').Split('\')){
+                if($part -notin '.','..' -and ($part.EndsWith(' ') -or $part.EndsWith('.'))){$literal=$false;break}
+            }
+            if(-not $literal){continue}
+        }
+        # Keep the original trimmed spelling even when unsafe: callers must
+        # still refuse it, rather than silently treating it as no reference.
+        $spellings.Add($spelling)
+    }
+    # Count every whitespace and archive-member interpretation before emitting
+    # candidates or allocating prefixes. All spellings share one line budget.
+    $count=0L;$characters=0L
+    foreach($spelling in $spellings){
+        $count++;$characters+=$spelling.Length
         if($count -gt 128){throw 'Playlist reference expansion exceeds its 128-candidate line budget.'}
         if($count -gt 65536-$Budget['Count'] -or $characters -gt 16777216-$Budget['Characters']){throw 'Playlist reference expansion exceeds its descriptor budget.'}
+        for($separator=$spelling.IndexOf('#');$separator -ge 0;$separator=$spelling.IndexOf('#',$separator+1)){
+            if($separator -eq 0){continue}
+            $count++;$characters+=$separator
+            if($count -gt 128){throw 'Playlist reference expansion exceeds its 128-candidate line budget.'}
+            if($count -gt 65536-$Budget['Count'] -or $characters -gt 16777216-$Budget['Characters']){throw 'Playlist reference expansion exceeds its descriptor budget.'}
+        }
     }
     $Budget['Count']+=$count;$Budget['Characters']+=$characters
-    $Reference
-    for($separator=$Reference.IndexOf('#');$separator -ge 0;$separator=$Reference.IndexOf('#',$separator+1)){
-        if($separator -gt 0){$Reference.Substring(0,$separator)}
+    foreach($spelling in $spellings){
+        $spelling
+        for($separator=$spelling.IndexOf('#');$separator -ge 0;$separator=$spelling.IndexOf('#',$separator+1)){
+            if($separator -gt 0){$spelling.Substring(0,$separator)}
+        }
     }
 }
 
@@ -961,8 +1000,8 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
         $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach($line in $lines) {
             if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
-            $value=$line.Trim();if(-not $value -or $value.StartsWith('#')){continue}
-            foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $value -Budget $referenceBudget)) {
+            if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
+            foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
                 if($name.StartsWith('file://',[StringComparison]::OrdinalIgnoreCase)){throw 'Source playlist has an unsupported local file URI; originals kept.'}
                 if($name -match '^[A-Za-z][A-Za-z0-9+.-]+://'){continue}
                 $relative=$name.Replace('/',[IO.Path]::DirectorySeparatorChar).Replace('\',[IO.Path]::DirectorySeparatorChar)

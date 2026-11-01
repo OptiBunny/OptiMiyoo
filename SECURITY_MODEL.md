@@ -50,6 +50,9 @@ authentication boundary in this application.
 ## Data flow and trust boundaries
 
 1. **Launch and staging.** The trusted launcher starts the parent coordinator.
+   Its local command environment enables the required CMD extensions and clears
+   any inherited `ERRORLEVEL` variable, so exit status comes from the child process.
+   These changes end with the batch launcher and do not change the caller's settings.
    The parent stages a fixed list of installed scripts and literal compiled
    helpers. Compiled work-directory literals escape Unicode line separators and
    control characters without changing the path or its confinement scope. Application

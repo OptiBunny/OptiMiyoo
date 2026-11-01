@@ -1,5 +1,7 @@
 @echo off
-setlocal DisableDelayedExpansion
+setlocal EnableExtensions DisableDelayedExpansion
+rem Read the actual child status even if the caller defined ERRORLEVEL.
+set "ERRORLEVEL="
 set "PSModuleAnalysisCachePath=NUL"
 title OptiMiyoo v0.0.9
 set "OPTIMIYOO_SCRIPT=%~dp0app\launch.ps1"

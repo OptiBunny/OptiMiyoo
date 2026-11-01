@@ -318,7 +318,7 @@ function Invoke-ArchiveSandbox {
             if($archiveCommand.Stopping){throw [Management.Automation.PipelineStoppedException]::new()}
         }.GetNewClosure()
         $payloadHashAction=[Action[long,long]]$payloadHashCallback
-        $manifest=@{};$readBytes=$null
+        $manifest=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$readBytes=$null
         foreach($index in $rows.Keys) {
             $entry=$Archive.Entries[$index];$row=$rows[$index]
             if($Operation -ne 'Hash' -or $inspection.Contains($index)) {

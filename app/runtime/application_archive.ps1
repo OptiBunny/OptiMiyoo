@@ -265,7 +265,7 @@ function Invoke-ApplicationArchive {
         $payload.DestinationRelativePath=$output.Substring($prefix.Length).Replace('\','/')
     }
     $started=Invoke-ApplicationRpc -Operation 'Archive.Start' -Payload $payload
-    $taskId=[string]$started.TaskId;$offset=0;$manifest=@{};$memory=$null
+    $taskId=[string]$started.TaskId;$offset=0;$manifest=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$memory=$null
     if($Operation -eq 'Read'){$memory=New-Object IO.MemoryStream}
     try {
         while($true) {

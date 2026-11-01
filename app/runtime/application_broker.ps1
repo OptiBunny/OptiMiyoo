@@ -464,7 +464,7 @@ function Assert-ApplicationBrokerOutputParentCase([string]$Parent,[string]$Root,
 }
 
 function Get-ApplicationBrokerExpectedFiles($State,$Module,$Job) {
-    $manifest=@{};$sourceRoot=Join-Path $State.OriginalRoot 'SRC'
+    $manifest=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$sourceRoot=Join-Path $State.OriginalRoot 'SRC'
     if($Job.Zip){
         $archiveFiles=Get-ApplicationBrokerArchive $Module ([string]$Job.Zip)
         foreach($name in $archiveFiles.Keys){Add-ApplicationBrokerExpectedFile $manifest $name $archiveFiles[$name]}
@@ -919,7 +919,7 @@ function Get-ApplicationBrokerBackupManifest($State,[string]$Relative,[switch]$I
     # Each snapshot entry is indexed once. A folder replacement then visits only
     # its descendants, rather than rescanning the entire DST for every game.
     if($null -eq $State.DestinationTree) {
-        $tree=@{}
+        $tree=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
         foreach($name in @('')+@($State.DestinationSnapshot.Directories)){$tree[$name]=[pscustomobject]@{Files=(New-Object 'Collections.Generic.List[string]');Children=(New-Object 'Collections.Generic.List[string]')}}
         foreach($name in $State.DestinationSnapshot.Directories){$cut=$name.LastIndexOf('/');$parent='';if($cut -ge 0){$parent=$name.Substring(0,$cut)};$tree[$parent].Children.Add($name)}
         foreach($name in $State.DestinationSnapshot.Files.Keys){$cut=$name.LastIndexOf('/');$parent='';if($cut -ge 0){$parent=$name.Substring(0,$cut)};$tree[$parent].Files.Add($name)}

@@ -152,7 +152,10 @@ function Invoke-ApplicationNativeRequest {
             $inputFile=Resolve-ApplicationJobPath $work ([string]$Payload.Input)
             $job.InputLease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($inputFile)
             if ($job.InputLease.Stream.Length -gt 512MB) {throw 'Native input exceeds 512 MiB.'}
-            if($kind -ne 'Nib'){
+            if($kind -eq 'Nib'){
+                Initialize-NibValidation
+                [OptiMiyoo.NibInput]::Validate($job.InputLease.Stream,[IO.Path]::GetExtension($inputFile),$hashProgress)
+            }else{
                 Initialize-IpfValidation
                 [OptiMiyoo.IpfInputV1]::Validate($job.InputLease.Stream,$hashProgress)
             }

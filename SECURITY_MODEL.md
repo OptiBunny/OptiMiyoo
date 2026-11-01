@@ -153,7 +153,12 @@ fully trimmed spellings of each non-comment line. A space before `#` can belong
 to a filename; it does not make the original line a comment. Whitespace and
 archive-member interpretations share the same bounded candidate budget.
 
-NIB/NBZ decoding is bounded before native conversion. IPF validation streams
+NIB/NBZ decoding validates bounded input and expanded sizes, track tables, and
+supported track numbers before native conversion. The trusted parent independently
+validates the bytes from its held input stream. Declared track 85 is refused
+because the bundled converter does not process it; the whole input is retained
+instead of silently dropping that track. These checks do not prove faithful
+conversion. IPF validation streams
 record lengths and CRCs, including DATA payload bounds and supplied checksums,
 from a held input stream before HxC inspection or conversion. The trusted native
 broker independently applies the same checks, so a worker cannot skip input

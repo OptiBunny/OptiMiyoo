@@ -1,2 +1,7 @@
 # Preserve imported Windows files' BOMs and line endings on every platform.
 * -text
+
+# Keep review guidance in Git checkouts, out of source archives.
+/AGENTS.md export-ignore
+/SECURITY.md export-ignore
+/docs/threat-model.md export-ignore

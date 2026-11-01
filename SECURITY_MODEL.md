@@ -1,4 +1,4 @@
-# OptiMiyoo threat model
+# OptiMiyoo security model
 
 Last reviewed: 2026-10-31. Implementation baseline: `e64f739`.
 
@@ -105,7 +105,7 @@ Separate media/floppy budgets bound entry counts, metadata, individual files,
 and expanded totals. Decompression also checks actual lengths and CRCs. A high
 compression ratio alone is not rejected because valid disk images can compress
 well. Review both declared sizes and actual expansion against
-[the archive limits](../app/shared/archive_limits.ps1).
+[the archive limits](app/shared/archive_limits.ps1).
 
 Archive payload workers write numbered temporary files, not paths taken from
 member names. The parent validates reports and rehashes payloads before import.
@@ -205,7 +205,7 @@ hostile text can still mislead a reader outside the trusted prompts.
   or bound every aggregate batch cost. There is no general scratch-disk quota;
   interrupted operations or safe-cleanup failures can leave temporary data behind.
 - Bundled-tool provenance and source/build details are recorded in
-  [third-party documentation](../third_party/README.md). Those records and fixed
+  [third-party documentation](third_party/README.md). Those records and fixed
   staging lists do not authenticate an already-modified installation or eliminate
   dependency vulnerabilities. New dependencies, executables, downloads, or launch
   paths need a fresh review of the trust boundary.
@@ -214,13 +214,13 @@ hostile text can still mislead a reader outside the trusted prompts.
 
 | Area | Primary implementation |
 | --- | --- |
-| Startup, worker confinement, RPC, trusted decisions | [Host](../app/runtime/application_host.ps1), [session](../app/runtime/application_session.ps1), [prompts](../app/runtime/application_prompts.ps1) |
-| Staged code and local scratch | [Staging](../app/runtime/application_staging.ps1), [portable storage](../app/shared/portable_storage.ps1) |
-| Output authority and original removal | [Broker](../app/runtime/application_broker.ps1), [source policy](../app/shared/source_policy.ps1), [conversion layout](../app/shared/conversion_layout.ps1), [playlists](../app/playlists/make_playlists.ps1) |
-| Native jobs and output receipts | [Job broker](../app/runtime/application_jobs.ps1), [native sandbox](../app/shared/native_sandbox.ps1), [native capture](../app/shared/native_process.ps1) |
-| ZIP/media processing | [Archive broker](../app/runtime/application_archive.ps1), [archive sandbox](../app/shared/archive_sandbox.ps1), [ZIP integrity](../app/shared/zip_integrity.ps1), [media validation](../app/shared/media_validation.ps1) |
-| SD selection, patching, backups | [SD session](../app/runtime/application_sd.ps1), [config handling](../app/onion/core_support.ps1), [SD updater and leases](../app/onion/prepare_onion.ps1) |
-| Display and export handling | [Output safety](../app/shared/output_safety.ps1), [display](../app/ui/display.ps1) |
+| Startup, worker confinement, RPC, trusted decisions | [Host](app/runtime/application_host.ps1), [session](app/runtime/application_session.ps1), [prompts](app/runtime/application_prompts.ps1) |
+| Staged code and local scratch | [Staging](app/runtime/application_staging.ps1), [portable storage](app/shared/portable_storage.ps1) |
+| Output authority and original removal | [Broker](app/runtime/application_broker.ps1), [source policy](app/shared/source_policy.ps1), [conversion layout](app/shared/conversion_layout.ps1), [playlists](app/playlists/make_playlists.ps1) |
+| Native jobs and output receipts | [Job broker](app/runtime/application_jobs.ps1), [native sandbox](app/shared/native_sandbox.ps1), [native capture](app/shared/native_process.ps1) |
+| ZIP/media processing | [Archive broker](app/runtime/application_archive.ps1), [archive sandbox](app/shared/archive_sandbox.ps1), [ZIP integrity](app/shared/zip_integrity.ps1), [media validation](app/shared/media_validation.ps1) |
+| SD selection, patching, backups | [SD session](app/runtime/application_sd.ps1), [config handling](app/onion/core_support.ps1), [SD updater and leases](app/onion/prepare_onion.ps1) |
+| Display and export handling | [Output safety](app/shared/output_safety.ps1), [display](app/ui/display.ps1) |
 
 For each finding, identify the attacker-controlled input, reachable code path,
 violated boundary or invariant, and concrete impact. Distinguish malicious-input

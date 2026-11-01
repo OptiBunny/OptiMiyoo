@@ -1011,6 +1011,7 @@ function Complete-ApplicationBrokerBatch {
         foreach($id in $CompletedJobIds){
             if(& $checkCancellation){break}
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
+            $publicationLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
             try {
                 $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex
                 Assert-ApplicationBrokerOwnership $batch $job $dst $referenceIndex
@@ -1036,14 +1037,14 @@ function Complete-ApplicationBrokerBatch {
                     }.GetNewClosure()
                 }
                 Reset-ApplicationBrokerReferences $batch $referenceIndex (@($job.Writes)+@($job.Retired)+@($sealed.Owned | ForEach-Object {[pscustomobject]@{Destination=$_;Folder=$true}}))
-                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator,$publicationValidator)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator -ValidatePublication $publicationValidator} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup $validatePublication
+                $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator,$publicationValidator,$publicationLocks)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator -ValidatePublication $publicationValidator -PublicationLocks $publicationLocks} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup $validatePublication $publicationLocks
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
                 $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})
             } catch {$results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result='Failed';Detail=$_.Exception.Message})}
             finally {
                 if($results.Count -and $results[$results.Count-1].JobId -ceq $id){[void]$processedIds.Add($id)}
-                if($commit){foreach($lock in $commit.Locks){$lock.Dispose()}}
+                foreach($lock in $publicationLocks){$lock.Dispose()}
                 if($sealed){
                     try {
                         foreach($claim in $sealed.Containers){

@@ -45,7 +45,7 @@ function Invoke-ApplicationHostRequest {
     if ($State.StopRequested) {throw 'The application session has completed.'}
     switch -Exact ($Request.Operation) {
         'Policy.Source' {
-            if ($State.Broker.ActiveBatch -or $State.Completed) {throw 'A batch is already active.'}
+            if (($State.Broker -and $State.Broker.ActiveBatch) -or $State.Completed) {throw 'A batch is already active.'}
             $selection=Get-ApplicationSelection $payload
             $choice=Invoke-ApplicationPolicyPrompt -Session $State.Session -Kind SourcePolicy @selection -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             $State.Grant=$null
@@ -58,6 +58,12 @@ function Invoke-ApplicationHostRequest {
             foreach ($key in 'Operation','System','Storage','SingleStorage') {if ($selection[$key] -cne $State.Grant[$key]) {throw 'Batch does not match the approved selection.'}}
             $selection.SourcePolicy=$State.Grant.SourcePolicy;$State.Grant=$null
             $State.ResumeSelection=$selection.Clone()
+            if($State.PSObject.Properties['MenuOnly'] -and $State.MenuOnly){
+                # The menu owns no collection snapshot. Stop its worker before
+                # creating a fresh processing session from this exact grant.
+                $State.NextBatchSelection=$selection.Clone();$State.StopRequested=$true
+                return @{Accepted=$true;Handoff=$true}
+            }
             $State.Session.NavigationEnabled=$true
             $nativeSession=$State.Session
             $cancellationCheck={
@@ -121,7 +127,7 @@ function Invoke-ApplicationHostRequest {
             return @{Accepted=$true}
         }
         'SD.Select' {
-            if ($State.Broker.ActiveBatch) {throw 'Finish the active batch first.'}
+            if ($State.Broker -and $State.Broker.ActiveBatch) {throw 'Finish the active batch first.'}
             $root=Invoke-ApplicationSdFolderPrompt -Session $State.Session -DisplayEffect $State.DisplayEffect -NoAnimation:([bool]$State.NoAnimation) -NoColor:([bool]$State.NoColor)
             if($root -and $root -isnot [string] -and $root.Choice -eq 'Exit'){return @{Choice='Exit'}}
             if (-not $root) {return @{Cancelled=$true}}
@@ -387,10 +393,13 @@ function Invoke-ApplicationHost {
             try {Show-OnionProgress -Stage $Stage -Detail $Detail -Completed $Completed -Total $Total -Unit $Unit}
             catch {Write-Verbose 'Could not refresh the SD progress display.'}
         }
-        $again=$true;$exitCode=1;$selectedOnionRoot=$null;$resumeSelection=$null
+        $again=$true;$exitCode=1;$selectedOnionRoot=$null;$resumeSelection=$null;$nextBatchSelection=$null
         if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
         while ($again) {
             $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
+            $approvedSelection=$nextBatchSelection;$nextBatchSelection=$null
+            $menuOnly=($menu -and $Entry -ne 'SD' -and -not $approvedSelection)
+            $preparationCancellation=$null
             $progressDisplay=$false;$previousEffect=$script:DisplayEffect;$cancelled=$false;$sdPlan=$null
             try {
                 if ($Entry -eq 'SD') {
@@ -399,6 +408,13 @@ function Invoke-ApplicationHost {
                     $null=& $sdProgress 'Preparing SD setup' 'Starting a protected setup session.' 0 -1 systems
                 } else {Write-Host '';Write-Host 'Preparing isolated OptiMiyoo...' -ForegroundColor Cyan}
                 $session=[OptiMiyoo.ApplicationSession]::Create()
+                if($approvedSelection){
+                    $session.NavigationEnabled=$true
+                    $preparationSession=$session
+                    $preparationTest=(Get-Command Test-ApplicationPreparationNavigation).ScriptBlock
+                    $preparationCancellation={& $preparationTest $preparationSession}.GetNewClosure()
+                    & $preparationCancellation
+                }
                 if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {
                     $sdNavigation={Test-ApplicationPreparationNavigation $session}
                     $sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress -CancellationCheck $sdNavigation
@@ -428,26 +444,51 @@ function Invoke-ApplicationHost {
                 }
                 $staged=New-ApplicationStagedCode -ApplicationRoot $application -Session $session
                 $receipts=New-ApplicationReceiptStore
-                if ($Entry -ne 'SD' -and -not $Arguments.Preview) {
+                if ($Entry -ne 'SD' -and -not $Arguments.Preview -and -not $menuOnly) {
+                    # No worker is alive in this fresh session while host-owned
+                    # collection snapshots are copied into writable staging.
+                    if($preparationCancellation){& $preparationCancellation}
                     $broker=New-ApplicationBrokerSession -OriginalRoot $originalRoot -WorkRoot $session.WorkPath
+                    if($preparationCancellation){& $preparationCancellation}
                     $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
                 }
                 $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
-                $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;ResumeSelection=$null;StopRequested=$false;NextOnionRoot=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
+                $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;ResumeSelection=$null;StopRequested=$false;NextOnionRoot=$null;MenuOnly=$menuOnly;NextBatchSelection=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
                 $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
                 foreach ($key in 'NoAnimation','NoColor','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
                 if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
-                if ($menu) {$worker.StartPage=$startPage}
-                if($menu -and $resumeSelection){
+                if ($menuOnly) {$worker.StartPage=$startPage}
+                if($menuOnly -and $resumeSelection){
                     foreach($key in 'Storage','SingleStorage'){if($resumeSelection[$key]){$worker[$key]=$resumeSelection[$key]}}
                 }
-                $batch=$null
-                if (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD') {
-                    $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
-                    $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;SingleStorage=$output.SingleStorage})
-                    $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
-                    $batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing
-                    if ($Entry -eq 'Playlist') {$worker.System=$selection.System;$worker.SingleStorage=$selection.SingleStorage}
+                $batch=$null;$bootstrapEntry=$Entry
+                if ($approvedSelection -or (-not $menu -and -not $Arguments.Preview -and $Entry -ne 'SD')) {
+                    if($approvedSelection){
+                        $selection=Get-ApplicationSelection ([pscustomobject]$approvedSelection)
+                        $policy=[string]$approvedSelection.SourcePolicy
+                        if($policy -notin 'Keep','Remove'){throw 'Approved batch policy is unavailable.'}
+                        $bootstrapEntry=[string]$selection.Operation
+                        $state.ResumeSelection=$approvedSelection.Clone()
+                    }else{
+                        $output=Resolve-ApplicationOutputSelection -Operation $Entry -Storage $Arguments.Storage -SingleStorage $Arguments.SingleStorage
+                        $selection=Get-ApplicationSelection ([pscustomobject]@{Operation=$Entry;System=$Arguments.System;Storage=$output.Storage;SingleStorage=$output.SingleStorage})
+                        $policy='Keep';if ($Arguments.SourcePolicy -eq 'Remove') {$policy='Remove'}
+                    }
+                    try {$batch=Start-ApplicationBrokerBatch -Session $broker @selection -SourcePolicy $policy -Existing $existing -CancellationCheck $preparationCancellation}
+                    catch {
+                        if($approvedSelection){
+                            if($session.Failure){throw $session.Failure}
+                            # Native verification wraps callback cancellation.
+                            # A real error racing with Stop must remain an error.
+                            $cause=$_.Exception
+                            while($cause){
+                                if($session.CancellationRequested -and $cause -is [OperationCanceledException]){throw [OperationCanceledException]::new('Application cancelled.')}
+                                $cause=$cause.InnerException
+                            }
+                        }
+                        throw
+                    }
+                    if ($bootstrapEntry -eq 'Playlist') {$worker.System=$selection.System;$worker.SingleStorage=$selection.SingleStorage}
                     else {[void]$worker.Remove('Preview')}
                     $worker.Storage=$selection.Storage
                 }
@@ -457,8 +498,9 @@ function Invoke-ApplicationHost {
                     if($sdPlan){foreach($key in $sdPlan.Keys){$worker[$key]=$sdPlan[$key]}}
                 }
                 $session.NavigationEnabled=($Entry -eq 'SD' -or $null -ne $batch)
-                Write-ApplicationBootstrap $session $Entry $worker $batch
+                Write-ApplicationBootstrap $session $bootstrapEntry $worker $batch
                 $operations=[string[]]@('Policy.Source','Policy.Overwrite','Batch.Begin','Batch.Jobs','Batch.Complete','Display.Preference','SD.Select','Native.Start','Native.Read','Native.Stop','Archive.Start','Archive.Read','Archive.Stop')
+                if($menuOnly){$operations=[string[]]@('Policy.Source','Batch.Begin','SD.Select','Display.Preference')}
                 if ($Arguments.Preview) {$operations=[string[]]@('Display.Preference')}
                 # Only one renderer owns the console while the isolated worker runs.
                 if ($progressDisplay) {$progressDisplay=$false;Restore-Display}
@@ -498,8 +540,13 @@ function Invoke-ApplicationHost {
                     $sdResult=Complete-ApplicationSdSession -Session $sd -Progress $sdProgress -ApplicationSession $session
                 }
                 if ($state.NextOnionRoot) {$selectedOnionRoot=$state.NextOnionRoot;$Entry='SD';$again=$true}
+                if($state.NextBatchSelection){
+                    if($exitCode -ne 0 -or $session.Failure -or $session.CancellationRequested){throw 'Approved batch handoff did not complete.'}
+                    $nextBatchSelection=$state.NextBatchSelection.Clone();$state.NextBatchSelection=$null;$again=$true
+                }
             } catch {
-                $failure=$_
+                $failure=$_;$nextBatchSelection=$null
+                if($state){$state.NextBatchSelection=$null}
                 if ($progressDisplay) {$progressDisplay=$false;try {Restore-Display} catch {}}
                 if ($session -and $session.CancellationRequested -and -not $session.Failure -and $failure.Exception -is [OperationCanceledException]) {
                     $cancelled=$true;$exitCode=137
@@ -568,6 +615,8 @@ function Invoke-ApplicationHost {
                 if ($menu) {$selectedOnionRoot=$null;$Entry='Playlist';$startPage='Main';$again=($returnToMenu -and -not $sdResult.Cancelled)}
             }
             if($navigation) {
+                $nextBatchSelection=$null
+                if($state){$state.NextBatchSelection=$null}
                 # Navigation never authorizes new writes. Unpublished staging is
                 # discarded above; transactions already committed remain intact.
                 $again=($navigation -eq 'Back' -and $menu -and $exitCode -ne 1 -and -not $deferredFailures.Count)
@@ -575,6 +624,11 @@ function Invoke-ApplicationHost {
                     if($sd -or $Entry -eq 'SD'){$Entry='Playlist';$startPage='SD';$selectedOnionRoot=$null;$resumeSelection=$null}
                     elseif($state -and $state.ResumeSelection){
                         $resumeSelection=$state.ResumeSelection;$Entry='Playlist'
+                        $startPage=if($resumeSelection.Operation -eq 'Playlist'){'Storage:'+$resumeSelection.System}else{$resumeSelection.Operation}
+                    } elseif($approvedSelection){
+                        # Back during pre-worker snapshot/planning restores only
+                        # the menu choices; the consumed grant is never reused.
+                        $resumeSelection=$approvedSelection.Clone();$Entry='Playlist'
                         $startPage=if($resumeSelection.Operation -eq 'Playlist'){'Storage:'+$resumeSelection.System}else{$resumeSelection.Operation}
                     } else {$Entry='Playlist';$startPage='Main'}
                 }

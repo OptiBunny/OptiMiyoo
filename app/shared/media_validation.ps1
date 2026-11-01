@@ -131,10 +131,13 @@ function Initialize-IpfValidation {
     if ('OptiMiyoo.IpfInputV1' -as [type]) {return}
     Add-OptiMiyooType -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.IO;
 namespace OptiMiyoo {
     public static class IpfInputV1 {
         const long MaximumInput = 512L * 1024 * 1024;
+        // A resource policy, not a geometry or maximum track-ID restriction.
+        const int MaximumIdentifiers = 65536;
         static readonly uint[] Table = MakeTable();
         static uint[] MakeTable() {
             uint[] table = new uint[256];
@@ -200,7 +203,8 @@ namespace OptiMiyoo {
                 input.Position = 0;
                 Progress report = new Progress(progress, length);
                 report.Poll(0, true);
-                byte[] header = new byte[12], dataHeader = new byte[16], buffer = new byte[65536];
+                byte[] header = new byte[12], metadata = new byte[56], buffer = new byte[65536];
+                Dictionary<uint,byte> identifiers = new Dictionary<uint,byte>();
                 bool first = true;
                 while (input.Position < length) {
                     long start = input.Position;
@@ -212,16 +216,22 @@ namespace OptiMiyoo {
                         throw Bad("missing CAPS header");
                     first = false;
                     bool data = header[0] == 'D' && header[1] == 'A' && header[2] == 'T' && header[3] == 'A';
-                    uint payload = 0, dataCrc = 0;
+                    bool image = header[0] == 'I' && header[1] == 'M' && header[2] == 'G' && header[3] == 'E';
+                    bool track = header[0] == 'T' && header[1] == 'R' && header[2] == 'C' && header[3] == 'K';
+                    bool descriptor = image || track;
+                    uint payload = 0, dataCrc = 0, identifier = 0;
                     header[8] = header[9] = header[10] = header[11] = 0;
                     uint crc = Update(0xffffffffU, header, header.Length);
                     long body = size - 12;
-                    if (data) {
-                        if (body < dataHeader.Length) throw Bad("DATA metadata is incomplete");
-                        ReadExact(input, dataHeader, dataHeader.Length, length, report);
-                        crc = Update(crc, dataHeader, dataHeader.Length);
-                        payload = U32(dataHeader, 0); dataCrc = U32(dataHeader, 8);
-                        body -= dataHeader.Length;
+                    // IMGE ends its used fields with did; reserved/extension tails stay streamed.
+                    int metadataLength = image ? 56 : (data || track ? 16 : 0);
+                    if (metadataLength != 0) {
+                        if (body < metadataLength) throw Bad("track or DATA metadata is incomplete");
+                        ReadExact(input, metadata, metadataLength, length, report);
+                        crc = Update(crc, metadata, metadataLength);
+                        identifier = U32(metadata, image ? 52 : 12);
+                        if (data) {payload = U32(metadata, 0); dataCrc = U32(metadata, 8);}
+                        body -= metadataLength;
                     }
                     // Unknown/extended records retain their declared byte layout.
                     crc = ReadBody(input, body, buffer, crc, length, report);
@@ -232,8 +242,22 @@ namespace OptiMiyoo {
                         // CAPS permits an absent (zero) DATA checksum.
                         if (dataCrc != 0 && actual != dataCrc) throw Bad("DATA CRC does not match");
                     }
+                    if (descriptor && identifier == 0) throw Bad("track has a zero DATA identifier");
+                    if ((descriptor || data) && identifier != 0) {
+                        byte flags;
+                        if (!identifiers.TryGetValue(identifier, out flags) && identifiers.Count >= MaximumIdentifiers)
+                            throw Bad("track/DATA identifier count exceeds its supported limit");
+                        // CAPS accepts either record order. Repeated IDs retain
+                        // its existing semantics; this only checks presence.
+                        identifiers[identifier] = (byte)(flags | (descriptor ? 1 : 2));
+                    }
                 }
                 if (input.Length != length || input.ReadByte() != -1) throw Bad("input changed during validation");
+                int checkedIdentifiers = 0;
+                foreach (byte flags in identifiers.Values) {
+                    if ((checkedIdentifiers++ & 1023) == 0) report.Poll(length, true);
+                    if (flags == 1) throw Bad("track has no matching DATA record");
+                }
                 report.Poll(length, true);
             } finally {
                 input.Position = saved;

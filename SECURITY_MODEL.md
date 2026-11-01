@@ -162,10 +162,15 @@ conversion. IPF validation streams
 record lengths and CRCs, including DATA payload bounds and supplied checksums,
 from a held input stream before HxC inspection or conversion. The trusted native
 broker independently applies the same checks, so a worker cannot skip input
-integrity validation. Reads and cancellation polling are bounded; validation
-restores the borrowed stream position. Unknown extension records and absent
-optional DATA checksums remain supported. These checks establish container
-integrity, not complete track semantics or faithful conversion.
+integrity validation. Every IMGE/TRCK descriptor must have a nonzero identifier
+with a matching DATA record, in either order. Missing references stop the whole
+input before a converter can silently drop a track. At most 65,536 distinct
+nonzero identifiers are retained; this is a bookkeeping limit, not a disk-geometry
+limit. Reads and cancellation polling are bounded, including the final reference
+check, and validation restores the borrowed stream position. Paired zero-length
+DATA for empty/noise tracks, unknown extension records, extended metadata tails,
+and absent optional DATA checksums remain supported. These checks establish
+container and reference integrity, not complete track semantics or faithful conversion.
 
 G64/DSK structure checks and parent-owned receipts bind accepted converted bytes
 to the batch, converter, input hash, output hash, and length. Passthrough files

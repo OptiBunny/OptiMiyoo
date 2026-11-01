@@ -1104,7 +1104,7 @@ function New-PlaylistReferenceIndex([string]$Root) {
     # Hashtable preserves the existing void Remove/Clear return contract.
     return [pscustomobject]@{Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/');
         Playlists=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
-        Cues=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));StandaloneCues=@{};
+        Cues=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));StandaloneCues=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
         Exact=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
         Folders=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));
         Guarded=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));

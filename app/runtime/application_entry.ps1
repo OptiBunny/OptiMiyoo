@@ -1,8 +1,26 @@
 ﻿# Shared entry routing. A caller-controlled variable cannot bypass the boundary.
 function Assert-ApplicationRootIdentity {
     param([Parameter(Mandatory=$true)][string]$Path,[string]$ResolvedPath)
-    if(-not $PSBoundParameters.ContainsKey('ResolvedPath')){$ResolvedPath=[IO.Path]::GetFullPath($Path)}
     $message='Windows cannot preserve this folder path exactly. Choose another path; originals were not changed.'
+    # Check caller spelling before provider/GetFullPath normalization removes
+    # trailing dots or spaces. These can name distinct native Windows entries.
+    # Strip only provider/drive syntax; UNC server/share names are root syntax.
+    $spellings=@($Path);if($PSBoundParameters.ContainsKey('ResolvedPath')){$spellings+=$ResolvedPath}
+    foreach($spelling in $spellings){
+        # A filesystem PSDrive can contribute an unsafe component not present
+        # in the caller's relative spelling. Check its unresolved path as well.
+        $lexical=$spelling.Replace('/','\');$qualifier=$lexical.IndexOf('::',[StringComparison]::Ordinal)
+        if($qualifier -ge 0){$lexical=$lexical.Substring($qualifier+2)}
+        $start=0
+        if($lexical.StartsWith('\\',[StringComparison]::Ordinal)){$parts=$lexical.Substring(2).Split('\');$start=2}
+        else{$lexical=[regex]::Replace($lexical,'\A[^\\:]+:','');$parts=$lexical.Split('\')}
+        for($index=$start;$index -lt $parts.Length;$index++){
+            $part=$parts[$index]
+            if(-not $part -or [StringComparer]::Ordinal.Equals($part,'.') -or [StringComparer]::Ordinal.Equals($part,'..')){continue}
+            if($part.EndsWith('.',[StringComparison]::Ordinal) -or $part.EndsWith(' ',[StringComparison]::Ordinal)){throw $message}
+        }
+    }
+    if(-not $PSBoundParameters.ContainsKey('ResolvedPath')){$ResolvedPath=[IO.Path]::GetFullPath($Path)}
     # Provider resolution can already discard final Unicode whitespace. Keep
     # caller spelling until this check, including relative and PSDrive paths.
     $ending=[regex]::Match($Path.TrimEnd('\','/'),'\s+$').Value

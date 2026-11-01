@@ -1,6 +1,6 @@
 # OptiMiyoo security model
 
-Last reviewed: 2026-10-31. Implementation baseline: `e64f739`.
+Last reviewed: 2026-10-31.
 
 This model covers the Windows desktop application: playlist creation, C64 and
 ZX Spectrum conversion, Onion SD setup, and their shared runtime. It describes
@@ -51,8 +51,10 @@ authentication boundary in this application.
 
 1. **Launch and staging.** The trusted launcher starts the parent coordinator.
    The parent stages a fixed list of installed scripts and literal compiled
-   helpers. Application scratch lives under `data/temp`; process-local temporary
-   environment changes are restored when the scope closes.
+   helpers. Compiled work-directory literals escape Unicode line separators and
+   control characters without changing the path or its confinement scope. Application
+   scratch lives under `data/temp`; process-local temporary environment changes are
+   restored when the scope closes.
 2. **Application worker.** Menus and processing scripts run in a fresh,
    zero-capability Windows AppContainer. Staged code/control files are read-only
    to the worker; its disposable work area is writable. Original `SRC`/`DST`
@@ -114,6 +116,12 @@ case-insensitive collisions, and file/directory overlaps, including empty-direct
 paths. Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
+Archive manifests, destination directory indexes, and conversion/playlist
+descriptor caches use ordinal, case-insensitive identity. Linguistic equality must
+not merge distinct Windows filenames, including composed and decomposed Unicode spellings. Newly discovered
+CUE/playlist files require their own reference check; a cache entry for another
+spelling cannot authorize replacement of files they reference.
+
 NIB/NBZ decoding is bounded before native conversion. G64/DSK structure checks
 and parent-owned receipts bind accepted converted bytes to the batch, converter,
 input hash, output hash, and length. Passthrough files must match captured source
@@ -135,6 +143,13 @@ matters, exact manifests, inventory checks, and hash verification. Path strings
 alone are not durable authority. Failure to verify a path must not lead to broad
 recursive deletion or an unchecked pathname fallback.
 
+Selected roots are checked in their original and provider-resolved spelling before
+lossy normalization. Ordinary path components ending in a dot or ASCII space are
+refused; Unicode whitespace must retain its identity on the active runtime. Native
+file leases check lexical ancestor prefixes before directory APIs can normalize
+them into different folders. An unrepresentable ancestor must stop the operation,
+not cause a different directory to be checked or pinned.
+
 Original removal requires successful publication and verification of all affected
 owning jobs and dependencies. Recheck installed output bytes, source bytes, and
 retained CUE/playlist references before deleting through held source handles.
@@ -146,7 +161,9 @@ files. Preserve recovery data when rollback or safe cleanup cannot complete.
 
 SD setup edits known file-list extensions in fixed profile config paths. It does
 not check, install, or switch emulator cores. Core compatibility information is
-not authority to change other SD files or execute a card's `launch.sh`.
+not authority to change other SD files or execute a card's `launch.sh`. SD path
+prompts preserve literal characters inside quotes, including when an invalid path
+is shown again for correction. Retrying must not select a normalized sibling.
 
 Selections begin with Keep. The parent validates fixed profile IDs and On/Off
 intentions and computes the exact permitted config bytes from captured originals.

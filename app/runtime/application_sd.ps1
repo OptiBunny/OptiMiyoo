@@ -521,11 +521,13 @@ function Show-ApplicationSdResult {
     Read-ApplicationSdResult -Result $Result -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
 }
 
-function Resolve-ApplicationSdInput([string]$Text) {
+function Resolve-ApplicationSdInput([string]$Text,[switch]$Literal) {
     $choice=[pscustomobject]@{Path=$null;Error=$null}
     # Only surrounding ASCII spaces are prompt padding. Unicode whitespace can
     # be part of a real folder name and must not select a different sibling.
-    $candidate=$Text.Trim(' ').Trim('"')
+    # The interactive reader already removes prompt padding/quotes once. Its
+    # literal result must retain any trailing space that was inside quotes.
+    $candidate=$Text;if(-not $Literal){$candidate=$Text.Trim(' ').Trim('"')}
     if ([string]::IsNullOrWhiteSpace($candidate)) {
         $choice.Error='Enter your SD path, e.g. E:\ / B/Esc: Back / Q: Exit';return $choice
     }
@@ -537,7 +539,7 @@ function Resolve-ApplicationSdInput([string]$Text) {
         $candidate -match '[\x00-\x1f<>|"*?]' -or ($drive -and $candidate.Substring(2).Contains(':')) -or ($unc -and $candidate.Contains(':'))) {
         $choice.Error='Use a full SD path, e.g. E:\ / B/Esc: Back / Q: Exit';return $choice
     }
-    try {$choice.Path=[IO.Path]::GetFullPath($candidate)}
+    try {Assert-ApplicationRootIdentity -Path $candidate;$choice.Path=[IO.Path]::GetFullPath($candidate)}
     catch {$choice.Error='Check the SD path / B/Esc: Back / Q: Exit'}
     # Some Windows PowerShell runtimes trim Unicode whitespace in GetFullPath.
     # Refuse that normalization rather than silently selecting a sibling folder.
@@ -634,8 +636,11 @@ function Invoke-ApplicationSdFolderPrompt {
             if ($null -eq $selected) {break}
             if([string]::Equals($selected,'B',[StringComparison]::OrdinalIgnoreCase)){$selected=$null;break}
             if([string]::Equals($selected,'Q',[StringComparison]::OrdinalIgnoreCase)){$selected=[pscustomobject]@{Choice='Exit'};break}
-            $choice=Resolve-ApplicationSdInput $selected
+            $choice=Resolve-ApplicationSdInput $selected -Literal
             $text=$selected
+            # Retain quoting for a literal trailing space on every retry; a
+            # second Enter must not reinterpret that character as prompt padding.
+            if($selected.EndsWith(' ',[StringComparison]::Ordinal)){$text='"'+$selected+'"'}
             if ($choice.Error) {$message=$choice.Error;continue}
             if (-not [IO.Directory]::Exists($choice.Path)) {
                 $message='Folder not found. Check your SD path / B/Esc: Back / Q: Exit';continue

@@ -728,14 +728,20 @@ function Get-DisplayMioFrame([string]$Mood,[string]$PoseOverride) {
     }
     return (Get-MioFrame $Mood 0 $PoseOverride)
 }
+function Format-PrideProgressCells([string]$Cells) {
+    $text=''
+    for ($i=0;$i -lt $Cells.Length;$i++) {
+        $rgb='71;78;103'
+        if ($Cells[$i] -eq '#') {$rgb=$script:Pride[([int][Math]::Floor($i*$script:Pride.Count/$Cells.Length))%$script:Pride.Count]}
+        $text+=(Color-Text ([string]$Cells[$i]) $rgb)
+    }
+    return $text
+}
 function Get-ProgressBar([double]$Percent,[int]$Width,[int]$Tick) {
     $text=''
     if ($Percent -ge 0) {
         $filled=[int][Math]::Floor($Width*[Math]::Min(100,$Percent)/100)
-        for ($i=0;$i -lt $Width;$i++) {
-            if ($i -lt $filled) {$text+=(Color-Text '#' $script:Pride[([int][Math]::Floor($i*$script:Pride.Count/$Width))%$script:Pride.Count])}
-            else {$text+=(Color-Text '.' '71;78;103')}
-        }
+        $text=Format-PrideProgressCells (('#'*$filled)+('.'*($Width-$filled)))
     } else {
         $spot=$Tick%($Width+4)-4
         for ($i=0;$i -lt $Width;$i++) {
@@ -1138,11 +1144,15 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         if ($i -lt $menuLayout.DefaultRows.Count -and $menuLayout.DefaultRows[$i]) {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
         elseif ($unverifiedRow) {$rgb='255;190;96'}
-        elseif ($NoInput -and $text -match '^\[[#.]+\] \d+%$') {$rgb='107;216;245'}
         elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
         $rightColumn=' '
         if ($menuLayout.ShowMio) {$rightColumn=(Color-Text ' | ' '91;104;151')+$right}
-        $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+(Color-Text (Fit-Text $text $left) $rgb)+$rightColumn+(Format-BorderText '|' ($w-1) ($i+2) $border))
+        $fitted=Fit-Text $text $left
+        $progress=[regex]::Match($fitted,'^\[(?<cells>[#.]+)\](?<suffix> \d+% *)$')
+        if ($progress.Success) {
+            $content=(Color-Text '[' $rgb)+(Format-PrideProgressCells $progress.Groups['cells'].Value)+(Color-Text (']'+$progress.Groups['suffix'].Value) $rgb)
+        } else {$content=Color-Text $fitted $rgb}
+        $lines.Add('  '+(Format-BorderText '|' 0 ($i+2) $border)+' '+$content+$rightColumn+(Format-BorderText '|' ($w-1) ($i+2) $border))
         $rowOffset+=$text.Length+1
     }
     $lines.Add('  '+(Format-BorderText ('+'+('-'*($w-2))+'+') 0 ($borderHeight-1) $border $true))
@@ -1187,30 +1197,29 @@ function Get-OnionProgressRows([string]$Stage,[string]$Detail='',
     $Unit=(Fit-Text $Unit 20).TrimEnd()
     $Completed=[Math]::Max(0,$Completed)
     if ($Total -ge 0) {$Completed=[Math]::Min($Completed,$Total)}
-    $count='Working...';$bar='';$basis='The total for this step is not known yet.'
-    $remaining='';$next='Progress is for this step, not the whole SD setup.'
+    $count='Working...';$bar='';$basis=('Current step: '+$Stage)
+    $next=switch ($Stage) {
+        'Preparing SD setup' {'Next: Read SD configuration files'}
+        'Reading config files' {'Next: Review file-type settings'}
+        'Preparing selected changes' {'Next: Check selected changes'}
+        'Checking selected changes' {'Next: Back up and save changes'}
+        'Saving config changes' {'Next: Review setup results'}
+        'SD setup finished' {'Next: Review setup results'}
+        default {''}
+    }
     if ($Total -ge 0) {
         $count=('{0} / {1} {2} complete' -f $Completed,$Total,$Unit)
         $percent=100.0;if ($Total -gt 0) {$percent=100.0*$Completed/$Total}
         $filled=[int][Math]::Floor(28*$percent/100)
         $bar='['+('#'*$filled)+('.'*(28-$filled))+('] {0:N0}%' -f $percent)
-        $basis='Current step: measured progress'
-        $remaining=('Remaining in this step: {0} {1}' -f ($Total-$Completed),$Unit)
-        if ($Completed -eq $Total) {$next='100% finishes this step only; SD setup may still be running.'}
     }
-    if ($Stage -eq 'Preparing selected changes') {
-        $basis='Systems processed in this setup pass'
-        $next='Preparing your On/Off choices in temporary config copies.'
-        if ($Total -ge 0) {$remaining=('Remaining in this pass: {0} {1}' -f ($Total-$Completed),$Unit)}
-    }
-    if ($Stage -eq 'SD setup finished') {$next='Review the results before returning to the main menu.'}
     $detailRows=@(Get-ProgressTextRows $Detail $Width 4)
     # Do not force four blank detail rows when the reported message is short.
     while ($detailRows.Count -gt 1 -and -not $detailRows[-1]) {$detailRows=@($detailRows[0..($detailRows.Count-2)])}
     $stageRows=@(Get-ProgressTextRows $Stage $Width 2)
     if (-not $stageRows[1]) {$stageRows=@($stageRows[0])}
     $rows=$stageRows+@('')+$detailRows+@('',$count,$bar)
-    if (-not $Compact) {$rows+=@($basis,$remaining,'',$next)}
+    if (-not $Compact) {$rows+=@($basis);if ($next) {$rows+=@($next)}}
     $rows+=@('','Games and emulator cores stay unchanged.')
     return @(Get-MenuRows $rows $Width)
 }
@@ -1501,13 +1510,11 @@ function Draw-DisplayPanel([switch]$Force) {
     )
     $stageIndex=3;$barIndex=5;$queueBarIndex=7
     if ($expanded) {
-        $basis='Current step: waiting for measured progress'
-        if ($script:UiPercent -ge 0) {$basis='Current step: measured progress'}
+        $basis=('Current step: '+$script:UiStage)
         $remaining=('Sets remaining: {0} (including current)' -f [Math]::Max(0,$script:Total-$script:Processed))
         if ($script:UiPreparing) {
-            $basis='Preparing the queue / total not known yet';$remaining='The batch starts after these checks finish.'
+            $basis=('Current check: '+$script:UiStage);$remaining='The batch starts after these checks finish.'
             if ($script:UiPreparationTotal -ge 0) {
-                $basis='Current check: measured progress'
                 $remaining=('Checks remaining: {0} {1}' -f [Math]::Max(0,$script:UiPreparationTotal-$script:UiPreparationCompleted),$script:UiPreparationUnit)
             }
         }

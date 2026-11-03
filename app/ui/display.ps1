@@ -815,7 +815,7 @@ function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0) {
     [Console]::Write($frame.ToString())
 }
 
-function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$SourceDefaults) {
+function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$SourceDefaults,[switch]$NoPathBreaks) {
     $rows=[System.Collections.Generic.List[string]]::new()
     $defaults=[System.Collections.Generic.List[bool]]::new()
     $sourceIndex=0
@@ -826,7 +826,12 @@ function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$So
         while ((Get-TextWidth $line) -gt $Width) {
             $prefix=Get-TextPrefix $line $Width
             $cut=$prefix.LastIndexOf(' ')
-            if ($cut -lt [int]($prefix.Length/2)) {$cut=$prefix.Length}
+            if ($cut -lt [int]($prefix.Length/2)) {
+                # Keep path components intact when a long token crosses the edge.
+                $separator=-1
+                if (-not $NoPathBreaks) {$separator=[Math]::Max($prefix.LastIndexOf('/'),$prefix.LastIndexOf('\'))}
+                if ($separator -ge [int]($prefix.Length/2)) {$cut=$separator+1} else {$cut=$prefix.Length}
+            }
             $rows.Add($line.Substring(0,$cut))
             $defaults.Add($isDefault)
             $line=$line.Substring($cut).TrimStart()
@@ -1144,7 +1149,7 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
         if ($i -lt $menuLayout.DefaultRows.Count -and $menuLayout.DefaultRows[$i]) {$rgb='255;221;144'}
         elseif ($warningRow) {$rgb='255;96;96'}
         elseif ($unverifiedRow) {$rgb='255;190;96'}
-        elseif ($text -match '^[A-Z]\.') {$rgb='107;216;245'}
+        elseif ($text -match '^[A-Z]\.\s') {$rgb='107;216;245'}
         $rightColumn=' '
         if ($menuLayout.ShowMio) {$rightColumn=(Color-Text ' | ' '91;104;151')+$right}
         $fitted=Fit-Text $text $left
@@ -1180,7 +1185,8 @@ function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
 function Get-ProgressTextRows([string]$Text,[int]$Width,[int]$Count) {
     # A path or tool message must not add terminal controls or new panel rows.
     $safe=$Text -replace '[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]',' '
-    $rows=@(Get-MenuRows @($safe) $Width)
+    # Fixed-height fields retain dense wrapping rather than spending a row on a path prefix.
+    $rows=@(Get-MenuRows @($safe) $Width -NoPathBreaks)
     if ($rows.Count -gt $Count) {
         $rows=@($rows[0..($Count-1)])
         $rows[$Count-1]=(Fit-Text $rows[$Count-1] ($Width-3)).TrimEnd()+'...'
@@ -1511,21 +1517,19 @@ function Draw-DisplayPanel([switch]$Force) {
     $stageIndex=3;$barIndex=5;$queueBarIndex=7
     if ($expanded) {
         $basis=('Current step: '+$script:UiStage)
-        $remaining=('Sets remaining: {0} (including current)' -f [Math]::Max(0,$script:Total-$script:Processed))
+        $progressNote=$eta
         if ($script:UiPreparing) {
-            $basis=('Current check: '+$script:UiStage);$remaining='The batch starts after these checks finish.'
-            if ($script:UiPreparationTotal -ge 0) {
-                $remaining=('Checks remaining: {0} {1}' -f [Math]::Max(0,$script:UiPreparationTotal-$script:UiPreparationCompleted),$script:UiPreparationUnit)
-            }
+            $basis=('Current check: '+$script:UiStage);$progressNote='Next: Process prepared games'
         }
         if ($script:UiDemo) {
             $basis='Sample step progress / no real files processed'
-            $remaining='Total bar tracks demo scenes, not game files.'
+            $progressNote='Total bar tracks demo scenes, not game files.'
         }
         $data=@($script:UiSystem)+@(Get-ProgressTextRows $setLine $left 2)+@('')+
               @(Get-ProgressTextRows $script:UiStage $left 2)+
               @(Get-ProgressTextRows $script:UiDetail $left 3)+
-              @($bar,$basis,'',$queue,$queueBar,$remaining,$navigation,$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock),$eta)
+              @($bar,$basis,'',$queue,$queueBar,$progressNote,$navigation,$resultsLine,'Source: SRC / Output: DST',('Elapsed '+$clock))
+        if ($script:UiDemo) {$data+=@($eta)}
         $stageIndex=4;$barIndex=9;$queueBarIndex=13
     }
     if ($compact) {

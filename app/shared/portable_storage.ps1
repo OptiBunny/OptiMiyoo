@@ -25,12 +25,16 @@ function Assert-OptiPortableDirectory([string]$Path) {
     return $full
 }
 
-function Open-OptiPortableTempScope([Parameter(Mandatory=$true)][string]$ApplicationRoot) {
+function Open-OptiPortableTempScope([Parameter(Mandatory=$true)][string]$ApplicationRoot,$ScopeOwner=$null) {
+    if($null -ne $ScopeOwner -and ($ScopeOwner -isnot [Management.Automation.PSReference] -or $null -ne $ScopeOwner.Value)){throw 'Portable temp cleanup requires an empty caller-owned scope reference.'}
     $scope=[pscustomobject]@{
         Temp=[Environment]::GetEnvironmentVariable('TEMP','Process')
         Tmp=[Environment]::GetEnvironmentVariable('TMP','Process')
         Path=$null;Lease=$null;Changed=$false;Closed=$false
     }
+    # Register cleanup before changing process state. Engine Stop can interrupt
+    # the return assignment after the scope has acquired its native lease.
+    if($ScopeOwner){$ScopeOwner.Value=$scope}
     $transferred=$false
     try {
         $application=Assert-OptiPortableDirectory $ApplicationRoot

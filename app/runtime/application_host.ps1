@@ -397,6 +397,7 @@ function Invoke-ApplicationHost {
         if ($Entry -eq 'SD') {$selectedOnionRoot=$originalArguments.OnionRoot}
         while ($again) {
             $again=$false;$session=$null;$broker=$null;$native=$null;$state=$null;$sd=$null;$sdResult=$null
+            $sdOwner=[pscustomobject]@{Session=$null}
             $approvedSelection=$nextBatchSelection;$nextBatchSelection=$null
             $menuOnly=($menu -and $Entry -ne 'SD' -and -not $approvedSelection)
             $preparationCancellation=$null
@@ -417,7 +418,7 @@ function Invoke-ApplicationHost {
                 }
                 if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {
                     $sdNavigation={Test-ApplicationPreparationNavigation $session}
-                    $sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress -CancellationCheck $sdNavigation
+                    $sd=New-ApplicationSdSession -OnionRoot $selectedOnionRoot -WorkRoot $session.WorkPath -Progress $sdProgress -CancellationCheck $sdNavigation -SessionOwner $sdOwner
                     if($originalArguments.SelectionOnly) {
                         $sdPlan=ConvertTo-ApplicationSdSelection -Session $sd -EnableSystems $originalArguments.EnableSystems -DisableSystems $originalArguments.DisableSystems
                     } elseif($originalArguments.ContainsKey('EnableSystems') -or $originalArguments.ContainsKey('DisableSystems')) {
@@ -564,7 +565,7 @@ function Invoke-ApplicationHost {
                     try {
                         if ($native) {Close-ApplicationJobBroker $native}
                         if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
-                        if ($sd) {Close-ApplicationSdSession -Session $sd}
+                        if ($sdOwner.Session) {Close-ApplicationSdSession -Session $sdOwner.Session}
                     } finally {
                         if ($session) {
                             $session.Dispose()

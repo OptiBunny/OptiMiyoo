@@ -691,9 +691,11 @@ function Remove-SourcePolicyFile([string]$Path,$Lease) {
 
 function Open-SourcePolicyOutputs {
     [CmdletBinding()]
-    param([object[]]$Outputs,[scriptblock]$Progress=$null,[switch]$ForPublication,[Collections.Generic.List[IDisposable]]$PublicationLocks=$null)
+    param([object[]]$Outputs,[scriptblock]$Progress=$null,[switch]$ForPublication,[Collections.Generic.List[IDisposable]]$PublicationLocks=$null,$OutputLocks=$null)
+    if($null -ne $OutputLocks -and ($ForPublication -or $OutputLocks -isnot [Collections.Generic.List[IDisposable]] -or $OutputLocks.Count -ne 0)){throw 'Output verification requires an empty caller-owned output lease collection outside publication mode.'}
     $outputCommand=$PSCmdlet
-    $locks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+    $locks=$OutputLocks
+    if($null -eq $locks){$locks=New-Object 'System.Collections.Generic.List[System.IDisposable]'}
     if($ForPublication){
         if($null -eq $PublicationLocks){throw 'Publication requires a caller-owned output lease collection.'}
         $locks=$PublicationLocks
@@ -773,8 +775,8 @@ function Open-SourcePolicyOutputs {
             }
         }
         $transferred=$true
-        # The caller already owns publication leases, including if engine Stop
-        # interrupts this return before the surrounding command completes.
+        # Publication and explicit non-publication sinks retain caller ownership
+        # even if engine Stop interrupts this return before assignment completes.
         if($ForPublication){return}
         return ,$locks
     } finally {
@@ -1042,7 +1044,8 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
     } finally {$memory.Dispose();$Stream.Position=0}
 }
 
-function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null) {
+function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null,$ContextOwner=$null) {
+    if($null -ne $ContextOwner -and ($ContextOwner -isnot [Management.Automation.PSReference] -or $null -ne $ContextOwner.Value)){throw 'Source cleanup requires an empty caller-owned context reference.'}
     if($Plan.Policy -ne 'Remove'){throw 'A cleanup context requires Remove policy.'}
     if($Plan.BlockReason){throw $Plan.BlockReason}
     $context=[pscustomobject]@{Plan=$Plan;InventoryGuard=$InventoryGuard;OwnsInventoryGuard=($null -eq $InventoryGuard);ReferenceLeases=([Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase));ProtectedPaths=(New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase));Disposed=$false}
@@ -1056,6 +1059,9 @@ function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$Inv
     }
     $transferred=$false
     try {
+        # Establish caller cleanup authority before acquiring native resources.
+        # Engine Stop can interrupt return after the helper marks a transfer.
+        if($ContextOwner){$ContextOwner.Value=$context}
         if(-not $context.InventoryGuard){$context.InventoryGuard=Open-SourcePolicyInventoryGuard $Plan.Root}
         Set-SourcePolicyCleanupEligibility $Plan
         Assert-SourcePolicyDescriptorBudget $Plan.Root $Plan.DescriptorSnapshot
@@ -1118,7 +1124,7 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
         try {
             # The host holds the complete context across its final snapshot.
             # Direct callers capture and own the same protection here.
-            if(-not $CleanupContext){$CleanupContext=Open-SourcePolicyCleanupContext $Plan $Progress -InventoryGuard $InventoryGuard;$ownsCleanupContext=$true}
+            if(-not $CleanupContext){$ownsCleanupContext=$true;$CleanupContext=Open-SourcePolicyCleanupContext $Plan $Progress -InventoryGuard $InventoryGuard -ContextOwner ([ref]$CleanupContext)}
             $InventoryGuard=$CleanupContext.InventoryGuard;$referenceLeases=$CleanupContext.ReferenceLeases
             Assert-SourcePolicyInventoryGuard $Plan $InventoryGuard
         } catch {
@@ -1160,12 +1166,12 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
                     foreach ($file in $candidates) {$file.State='Kept'; $file.Reason='A dependent original changed; complete source set kept.'}
                     continue
                 }
-                $owners=@{}; $outputs=New-Object 'System.Collections.Generic.List[object]'; $locks=$null; $leases=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $bad=$false
+                $owners=@{}; $outputs=New-Object 'System.Collections.Generic.List[object]'; $locks=New-Object 'Collections.Generic.List[IDisposable]'; $leases=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $bad=$false
                 foreach ($file in $candidates) {foreach ($id in $file.Owners) {$owners[$id]=$true}}
                 foreach ($id in $owners.Keys) {foreach ($output in $Plan.Jobs[$id].Outputs) {$outputs.Add($output)}}
                 try {
                     if ($outputs.Count -eq 0) {throw 'Verified outputs are missing; originals kept.'}
-                    $locks=Open-SourcePolicyOutputs $outputs $Progress
+                    $null=Open-SourcePolicyOutputs $outputs $Progress -OutputLocks $locks
                     Assert-SourcePolicyInventoryGuard $Plan $inventoryGuard
                     foreach ($file in $candidates) {
                         try {

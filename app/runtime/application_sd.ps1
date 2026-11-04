@@ -81,11 +81,19 @@ function Add-ApplicationSdSnapshotFile($State,[string]$Relative,[long]$Maximum,[
         $State.TotalBytes+=$lease.Stream.Length
         $State.Files[$Relative]=[pscustomobject]@{Path=$path;Relative=$Relative;Lease=$lease;Bytes=$bytes;Config=[bool]$Config;OriginalValid=$false;Expected=$null;Changed=$false;Folder='';Extensions=@()}
         $lease=$null
-    }finally{if($output){$output.Dispose()};if($lease){$lease.Dispose()}}
+    }finally{
+        # A failed staged flush can also fail during close; release the original
+        # even before it has been registered in the session snapshot.
+        try{if($output){$output.Dispose()}}finally{if($lease){$lease.Dispose()}}
+    }
 }
 
 function New-ApplicationSdSession {
-    param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[scriptblock]$Progress,[scriptblock]$CancellationCheck)
+    param([Parameter(Mandatory=$true)][string]$OnionRoot,[Parameter(Mandatory=$true)][string]$WorkRoot,[scriptblock]$Progress,[scriptblock]$CancellationCheck,$SessionOwner=$null)
+    if($null -ne $SessionOwner){
+        $slot=$SessionOwner.PSObject.Properties['Session']
+        if($null -eq $slot -or $slot.MemberType -ne [Management.Automation.PSMemberTypes]::NoteProperty -or $null -ne $slot.Value){throw 'SD startup requires a fresh caller-owned Session slot.'}
+    }
     Assert-ApplicationRootIdentity -Path $OnionRoot
     Initialize-ApplicationSdSupport
     $original=[IO.Path]::GetFullPath($OnionRoot);$work=[IO.Path]::GetFullPath($WorkRoot)
@@ -135,15 +143,22 @@ function New-ApplicationSdSession {
         if($Progress){$null=& $Progress 'Reading config files' 'Config files read and checked.' $profiles.Count $profiles.Count 'systems'}
         $handle=[pscustomobject]@{Id=([Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'));StagedRoot=$state.StagedRoot}
         $state.Handle=$handle;$script:ApplicationSdStates[$handle.Id]=$state
+        # Publish cleanup ownership before returning through a stoppable pipeline.
+        if($null -ne $SessionOwner){$SessionOwner.Session=$handle}
         $registered=$true
         return $handle
     }finally{
         try {
-            # Engine Stop bypasses catch; startup retains ownership until its
-            # complete state is registered for Close-ApplicationSdSession.
-            if(-not $registered){
-                foreach($file in $state.Files.Values){if($file.Lease){$file.Lease.Dispose();$file.Lease=$null}}
-                if($state.RootLease){$state.RootLease.Dispose();$state.RootLease=$null}
+            # Engine Stop can interrupt registration or the return assignment.
+            # A populated caller slot owns cleanup even before the flag is set.
+            $callerReceived=($null -ne $SessionOwner -and $null -ne $state.Handle -and [object]::ReferenceEquals($SessionOwner.Session,$state.Handle))
+            if(-not $registered -and -not $callerReceived){
+                try{
+                    foreach($file in $state.Files.Values){if($file.Lease){$file.Lease.Dispose();$file.Lease=$null}}
+                }finally{
+                    try{if($state.RootLease){$state.RootLease.Dispose();$state.RootLease=$null}}
+                    finally{if($state.Handle){$script:ApplicationSdStates.Remove($state.Handle.Id)}}
+                }
             }
         }finally{if($workLease){$workLease.Dispose()}}
     }
@@ -183,14 +198,15 @@ function Set-ApplicationSdSelection {
         [pscustomobject]@{Id=[string]$profile.Folder;Available=$available}
     })
     if($Items.Count -ne $known.Count){throw 'SD selection must include each installed system profile exactly once.'}
-    $seen=@{};$expected=@{};$enable=New-Object 'Collections.Generic.List[string]';$disable=New-Object 'Collections.Generic.List[string]'
+    # Checklist IDs and intents are protocol tokens, not linguistic text.
+    $seen=[Collections.Hashtable]::new([StringComparer]::Ordinal);$expected=@{};$enable=New-Object 'Collections.Generic.List[string]';$disable=New-Object 'Collections.Generic.List[string]'
     foreach($item in $Items) {
-        $id=[string]$item.Id;$match=@($known | Where-Object {$_.Id -ceq $id})
+        $id=[string]$item.Id;$match=@($known | Where-Object {[string]::Equals($_.Id,$id,[StringComparison]::Ordinal)})
         if($match.Count -ne 1 -or $seen.ContainsKey($id)){throw 'Unknown or duplicate SD selection.'}
         $seen[$id]=$true;$trusted=$match[0]
-        if($item.Available -isnot [bool] -or $item.Available -ne $trusted.Available -or $item.Intent -cnotin 'Keep','On','Off') {throw 'Invalid SD selection state.'}
+        if($item.Available -isnot [bool] -or $item.Available -ne $trusted.Available -or $item.Intent -isnot [string] -or (-not [string]::Equals($item.Intent,'Keep',[StringComparison]::Ordinal) -and -not [string]::Equals($item.Intent,'On',[StringComparison]::Ordinal) -and -not [string]::Equals($item.Intent,'Off',[StringComparison]::Ordinal))) {throw 'Invalid SD selection state.'}
         if(-not $trusted.Available -and $item.Intent -cne 'Keep'){throw 'Unavailable SD configs cannot be selected.'}
-        $profile=@($profiles | Where-Object {$_.Folder -ceq $id})[0]
+        $profile=@($profiles | Where-Object {[string]::Equals($_.Folder,$id,[StringComparison]::Ordinal)})[0]
         $folder=$profile.Folder;if($profile.EmuFolder){$folder=$profile.EmuFolder}
         $relative='Emu/'+$folder+'/config.json'
         if(-not $state.Files.ContainsKey($relative)){continue}
@@ -214,11 +230,11 @@ function Set-ApplicationSdSelection {
 
 function ConvertTo-ApplicationSdSelection {
     param([Parameter(Mandatory=$true)]$Session,[string[]]$EnableSystems=@(),[string[]]$DisableSystems=@())
-    $items=@(Get-ApplicationSdSelection $Session);$seen=@{}
+    $items=@(Get-ApplicationSdSelection $Session);$seen=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     foreach($intent in 'On','Off') {
         $ids=$EnableSystems;if($intent -eq 'Off'){$ids=$DisableSystems}
         foreach($id in $ids) {
-            $match=@($items | Where-Object {$_.Id -eq $id})
+            $match=@($items | Where-Object {[string]::Equals($_.Id,$id,[StringComparison]::OrdinalIgnoreCase)})
             if($match.Count -ne 1 -or $seen.ContainsKey($id)){throw 'Unknown, duplicate or conflicting SD selection.'}
             $seen[$id]=$true;$match[0].Intent=$intent
         }
@@ -332,7 +348,7 @@ function Complete-ApplicationSdSession {
                 $skipped++;$results.Add([pscustomobject]@{System=$file.Folder;State='Kept';FileTypeState=$before;Failed=$false});continue
             }
             $after=Get-ApplicationSdFileTypeState $file.Expected $file.Extensions
-            $writeLease=$null;$backupLease=$null;$backupDirectoryLease=$null;$writeStarted=$false;$restored=$false
+            $writeLease=$null;$backupLease=$null;$backupDirectoryLease=$null;$writeStarted=$false;$restored=$false;$writeFailure=$null
             try {
                 $file.Lease.Dispose();$file.Lease=$null
                 $writeLease=[OptiMiyoo.OnionPathLease]::Open($file.Path,$state.OriginalRoot,$false,$true,$false)
@@ -356,13 +372,14 @@ function Complete-ApplicationSdSession {
                 & $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'Updated config'} $writeLease.Stream $file.Expected
                 $changed++;$results.Add([pscustomobject]@{System=$file.Folder;State='Updated';FileTypeState=$after;Failed=$false})
             }catch {
+                $writeFailure=$_
                 $failed++
                 if($writeStarted -and $writeLease) {
                     try{& $script:ApplicationSdModule {param($stream,$bytes)Write-OnionBytesVerified $stream $bytes 'Restored config'} $writeLease.Stream $file.Bytes;$restored=$true}
                     catch{
-                        $recovery='SD restoration failed; restore '+(ConvertTo-SafeExternalText $file.Path)+' from verified backup '+(ConvertTo-SafeExternalText $backupPath)+' before using this card.'
+                        $recovery='SD restoration failed; restore '+$file.Path+' from verified backup '+$backupPath+' before using this card.'
                         $recovery+=' Completed config updates kept: '+$changed+'.'
-                        foreach($unverified in $state.UnverifiedBackups){$recovery+=' Do not restore from incomplete or unverified backup: '+(ConvertTo-SafeExternalText $unverified.Path)+'.'}
+                        foreach($unverified in $state.UnverifiedBackups){$recovery+=' Do not restore from incomplete or unverified backup: '+$unverified.Path+'.'}
                         throw $recovery
                     }
                 }
@@ -377,7 +394,20 @@ function Complete-ApplicationSdSession {
                     catch{$cleanupFailures.Add($_)}
                 }
             }
-            if($cleanupFailures.Count){throw $cleanupFailures[0]}
+            if($cleanupFailures.Count){
+                if($writeFailure){
+                    # Closing a failed buffered backup may fail too. Preserve
+                    # the write cause and the partial outcome the host must show.
+                    $message='SD config update failed for '+$file.Path+'.'
+                    if($restored){$message+=' Original settings were restored.'}
+                    else{$message+=' This config was not updated.'}
+                    $message+=' Completed config updates kept: '+$changed+'.'
+                    foreach($unverified in $state.UnverifiedBackups){$message+=' Do not restore from incomplete or unverified backup: '+$unverified.Path+'.'}
+                    $message+=' Write error: '+$writeFailure.Exception.Message
+                    throw [IO.IOException]::new($message,$writeFailure.Exception)
+                }
+                throw $cleanupFailures[0]
+            }
         }
         if(-not $cancelled){$cancelled=Test-ApplicationSdCancellation $ApplicationSession}
         if(-not $cancelled -and $Progress){$null=& $Progress 'SD setup finished' ('Updated: {0}; skipped: {1}; failed: {2}.' -f $changed,$skipped,$failed) $configs.Count $configs.Count 'systems'}

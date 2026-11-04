@@ -99,6 +99,10 @@ Keep CUE files, their tracks, and any matching SBI files together. A CUE file
 and its tracks count as one disc. Keep different editions of the same game in
 separate batches.
 
+CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
+mark. OptiMiyoo refuses invalid encoding without rewriting the original files.
+ZIP filenames declared as UTF-8 must also contain valid UTF-8.
+
 Choose your [system number](#systems-and-rom-folders), then
 [how to save the files](#choose-how-to-save). Numbered options keep the game
 files in their original formats; use **C** or **Z** separately for conversion.
@@ -106,6 +110,9 @@ files in their original formats; use **C** or **Z** separately for conversion.
 A game with multiple discs or tape sides gets one playlist. Its game files go
 in `DST/.hidden`, and the playlist stays outside that folder so it appears in
 Onion's game list. Games with one disc or tape side stay visible without a playlist.
+
+A generated playlist supports up to 16,383 entries and 1 MiB of UTF-8 text. Split
+larger sets into smaller groups; an oversized set leaves its existing output unchanged.
 
 ### Systems and ROM folders
 

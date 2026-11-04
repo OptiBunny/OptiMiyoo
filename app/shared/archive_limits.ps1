@@ -77,7 +77,14 @@ namespace OptiMiyoo {
                         int nameLength=U16(header,28),extraLength=U16(header,30),commentLength=U16(header,32);
                         if (nameLength>4096) throw new InvalidDataException("ZIP entry name exceeds the safe path-length limit.");
                         if (nameLength+extraLength+commentLength>directoryEnd-stream.Position) throw new InvalidDataException("Truncated ZIP entry metadata.");
-                        stream.Position+=nameLength;byte[] extra=Read(reader,extraLength);stream.Position+=commentLength;
+                        if ((U16(header,8)&0x0800)!=0) {
+                            byte[] name=Read(reader,nameLength);
+                            try {new System.Text.UTF8Encoding(false,true).GetCharCount(name);}
+                            catch (System.Text.DecoderFallbackException error) {
+                                throw new InvalidDataException("ZIP entry name contains invalid UTF-8; source kept.",error);
+                            }
+                        } else {stream.Position+=nameLength;}
+                        byte[] extra=Read(reader,extraLength);stream.Position+=commentLength;
                         ulong expanded=U32(header,24),compressed=U32(header,20),localOffset=U32(header,42);
                         bool needExpanded=expanded==0xffffffffU,needCompressed=compressed==0xffffffffU,needOffset=localOffset==0xffffffffU;
                         if (needExpanded || needCompressed || needOffset) {

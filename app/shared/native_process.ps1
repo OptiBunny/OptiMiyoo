@@ -49,10 +49,20 @@ namespace OptiMiyoo {
                     for (int i=0;i<take;i++) {
                         char c=buffer[i];
                         if (c=='\r' || c=='\n') Line(line);
-                        else {line.Append(c);if (line.Length==4096) Line(line);}
+                        else {
+                            line.Append(c);
+                            if (line.Length==4096) {
+                                // A queued record must not split a UTF-16 pair.
+                                if (Char.IsHighSurrogate(c)) {line.Length--;Line(line);line.Append(c);}
+                                else Line(line);
+                            }
+                        }
                     }
                     if (take<count) exceeded=true;
                 }
+                // A diagnostic limit can cut a valid pair after its high unit.
+                // Keep the truncation failure, but never send that half via RPC.
+                if (exceeded && line.Length>0 && Char.IsHighSurrogate(line[line.Length-1])) line.Length--;
                 Line(line);
             } catch (Exception error) {lock(gate) {failure=error.Message;}}
         }
@@ -118,6 +128,6 @@ function Close-NativeSandboxJob($Job) {
     if (-not $Job) {return}
     $Job.Dispose()
     if ($Job.CleanupWarning) {
-        Write-Warning ('Sandbox cleanup warning: '+(ConvertTo-SafeExternalText $Job.CleanupWarning))
+        Write-Warning ('Sandbox cleanup warning: '+(ConvertTo-SafeExternalLine $Job.CleanupWarning))
     }
 }

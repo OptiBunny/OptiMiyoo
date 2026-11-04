@@ -57,7 +57,9 @@ authentication boundary in this application.
    helpers. Compiled work-directory literals escape Unicode line separators and
    control characters without changing the path or its confinement scope. Application
    scratch lives under `data/temp`; process-local temporary environment changes are
-   restored when the scope closes.
+   restored when the scope closes. The entry caller receives cleanup ownership
+   before redirection starts, so an interrupted return cannot strand process
+   TEMP/TMP or the temporary-directory lease.
 2. **Application worker.** Menus and processing scripts run in a fresh,
    zero-capability Windows AppContainer. Staged code/control files are read-only
    to the worker; its disposable work area is writable. Original `SRC`/`DST`
@@ -100,6 +102,9 @@ require readable game collections. During approved batch preparation, the parent
 polls cancellation through both collection inventories, path checks, and file-copy
 chunks. Cancellation stops preparation before any processing worker starts or
 output is published; the session retains uncertain files if safe cleanup fails.
+Snapshot copy cleanup releases hashing and original read leases even if closing
+the staged output fails. Borrowed source leases retain caller ownership and are
+rewound after use.
 
 RPC has an operation allowlist, bounded frames and JSON depth, request sequencing,
 and time limits for incomplete messages. Batch policy grants must match the
@@ -131,19 +136,32 @@ Archive payload workers write numbered temporary files, not paths taken from
 member names. The parent validates reports and rehashes payloads before import.
 Member validation rejects traversal, rooted/stream syntax, reserved names,
 case-insensitive collisions, and file/directory overlaps, including empty-directory
-paths. Derived game paths and CUE/playlist references must remain within their
+paths. Central-directory member names marked as UTF-8 are strictly checked before
+entry materialization; malformed bytes cannot become replacement characters in
+member identity. Legacy names without that flag retain their existing decoding.
+Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
 Archive manifests, broker collection inventories and output member maps, parent
 source-ownership records, destination directory indexes, and conversion/playlist
-descriptor caches use ordinal, case-insensitive identity. Linguistic equality must not merge distinct
-Windows filenames, including composed and decomposed Unicode spellings. Newly
+descriptor caches use ordinal, case-insensitive identity. Playlist Auto member
+maps, preserved playlist destination maps, copied loose-file manifests and worker
+source hashes use the same identity. Conversion archive-member maps and ZIP/folder
+staging manifests also keep distinct ordinal names. Conversion ZIP entry cleanup
+closes the converted input stream even if finalizing compressed output fails.
+Exact CUE component spelling
+uses ordinal case-sensitive comparison. Linguistic
+equality must not merge distinct Windows filenames, including composed and
+decomposed Unicode spellings. Newly
 discovered CUE/playlist files require their own reference check; a cache entry for
 another spelling cannot authorize replacement of files they reference. These
 ownership checks also prevent an existing playlist's reference to one Unicode
 spelling from authorizing replacement or retirement of another. These identity
 checks do not override conservative media-group ambiguity checks;
-ambiguous loose titles can still be refused while unrelated jobs proceed.
+ambiguous loose titles can still be refused while unrelated jobs proceed. Auto
+conversion preserves distinct ordinal input paths and uses ordinal output-conflict
+indexes; it does not infer groups from loose titles. Refused groups also retain
+every distinct ordinal source path in ownership and kept-original accounting.
 Archive playlist ordering keeps natural disk-number sorting and uses an ordinal
 final tie-breaker for linguistically equal filenames, so the parent and its
 PowerShell 5.1 worker produce the same playlist bytes for those names.
@@ -151,7 +169,13 @@ PowerShell 5.1 worker produce the same playlist bytes for those names.
 Playlist dependency checks consider representable literal, right-trimmed, and
 fully trimmed spellings of each non-comment line. A space before `#` can belong
 to a filename; it does not make the original line a comment. Whitespace and
-archive-member interpretations share the same bounded candidate budget.
+archive-member interpretations share the same bounded candidate budget. Generated
+playlist text is checked before plan acceptance or destination writes against the
+same 1 MiB and 16,384 split-line limits as existing descriptors, including its
+final newline. Oversized sets cannot create output that these guards cannot reopen.
+Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
+Malformed bytes cannot become replacement characters that identify another file;
+valid replacement characters and original descriptor bytes remain unchanged.
 
 NIB/NBZ decoding validates bounded input and expanded sizes, track tables, and
 supported track numbers before native conversion. The trusted parent independently
@@ -183,6 +207,7 @@ for empty/noise tracks, unknown extension records, extended IMGE/TRCK/DATA
 metadata tails, and absent optional DATA checksums retain their existing handling.
 These checks do not establish complete track semantics or faithful conversion.
 
+G64 validation requires the exact, case-sensitive `GCR-1541` file signature.
 G64/DSK structure checks and parent-owned receipts bind accepted converted bytes
 to the batch, converter, input hash, output hash, and length. Passthrough files
 must match captured source bytes. A worker's successful exit or claimed checksum is insufficient evidence.
@@ -196,13 +221,19 @@ parent's trusted prompts or explicit supported caller policy, not worker output.
 Overwrite approval does not waive checks for foreign references or unrelated
 contents. The parent derives conflicts and allowed output names independently.
 
+The final source inventory before cleanup also polls cancellation between file
+reads. Cancellation retains remaining originals without falsely reporting that
+they changed; genuine I/O failures still block removal.
+
 Before publication, the parent polls cancellation while copying and hashing
 private output bytes, enumerating folder members, and at archive verification
-checkpoints. Cancellation releases unpublished staging and keeps the affected
-originals and prior output. Archive checks follow worker progress; this does not
-promise a fixed response time from a silent worker. Installation and rollback
-retain their uninterrupted transaction boundaries, and ordinary I/O failures
-remain failures even when cancellation is also requested.
+checkpoints. The batch caller owns the private-container claims and ancestor
+leases before sealing starts, so its cleanup does not depend on receiving the
+sealing function's return value. Cancellation releases unpublished staging and
+keeps the affected originals and prior output. Archive checks follow worker
+progress; this does not promise a fixed response time from a silent worker.
+Installation and rollback retain their uninterrupted transaction boundaries,
+and ordinary I/O failures remain failures even when cancellation is also requested.
 
 Before moving an existing output to its transaction backup, publication captures
 its Windows alternate filename through the same handle used for the rename.
@@ -251,6 +282,12 @@ retained CUE/playlist references before deleting through held source handles.
 Skipped, failed, changed, or still-referenced sources must not be removed just
 because another job succeeded. Ambiguous ownership must preserve the affected
 files. Preserve recovery data when rollback or safe cleanup cannot complete.
+The final descriptor context has a caller-owned cleanup reference before it
+acquires resources. Interrupted return cannot strand its native leases; disposing
+a context does not release a borrowed inventory guard. Installed cleanup and
+conversion callers also own their output-verification lease lists before calling
+the helper. Conversion batch cleanup holds that ownership across its save return;
+a standalone save releases its local list on failure before ownership transfer.
 
 ### SD-card settings
 
@@ -260,8 +297,27 @@ not authority to change other SD files or execute a card's `launch.sh`. SD path
 prompts preserve literal characters inside quotes, including when an invalid path
 is shown again for correction. Retrying must not select a normalized sibling.
 
+Optional explicit-SD core assessment is read-only. It parses launcher text as
+data, using ASCII shell blanks and literal `exec`/`-L` tokens; Unicode lookalikes
+do not establish a selected core. Existing CRLF text handling remains supported,
+while quoted values retain their exact characters. The config root must be one
+JSON object, with only JSON whitespace before it; singleton or nested arrays
+cannot establish support through property enumeration. The `launch` property
+must be a string naming `launch.sh`, allowing ordinary Windows filename case variants.
+The helpers never execute that launcher or prove its runtime success or gameplay.
+Current menus use default profiles, and this assessment grants no SD-edit authority.
+
+The host owns a cleanup slot before snapshot startup. Startup retains cleanup
+authority until the registered snapshot reaches that slot and removes incomplete
+registration on failure or interruption. Host cleanup does not depend on receiving
+the function return value. Snapshot startup also releases the original read lease
+if flushing or closing a staged config fails before registration.
+
 Selections begin with Keep. The parent validates fixed profile IDs and On/Off
 intentions and computes the exact permitted config bytes from captured originals.
+Checklist IDs and Keep/On/Off tokens use exact ordinal identity. Explicit caller
+IDs use ordinal case-insensitive matching, including for duplicate/conflict
+checks; malformed aliases are refused before selection finalization.
 Only the intended top-level `extlist` value may change; unrelated settings and
 bytes must be preserved. Config parsing rejects malformed UTF-8/JSON, ambiguous
 or duplicate properties, excessive nesting, invalid extension tokens, and files
@@ -278,14 +334,23 @@ restoration if the write fails. Current backups use
 distinguish verified backups from partial or unverified files. If restoration fails,
 the diagnostic identifies the affected config, its verified backup, and the count
 of earlier updates kept. A later stream-close error must not replace that advice;
-cleanup still attempts to release every held lease.
+cleanup still attempts to release every held lease. When a backup write and its
+buffered close both fail, the diagnostic retains the write cause and reports
+completed updates and incomplete backup paths without labelling them verified.
+Recovery paths retain their native characters until the host visibly escapes
+controls, so advice never silently drops characters from a recovery destination.
 
 ### Terminal output and diagnostics
 
 The terminal relay filters worker control sequences. Trusted prompts pause/drain
 worker output and take keyboard ownership so a child cannot answer its own policy
-question. Host prompt paths and result/log lines escape selected control and
-bidirectional characters; filesystem operations retain the original path identity.
+question. Host prompt paths, startup errors, retained-file cleanup warnings and
+result/log lines escape selected control and bidirectional characters; filesystem operations retain the original
+path identity. Startup errors use visible codepoint escapes even if shared output
+helpers could not load. Queued native diagnostic records keep UTF-16 pairs intact
+within the existing chunk and queue limits. If the capture limit cuts a pair, the
+queued half is omitted while the limit failure remains; response encoding must
+not fail on a character split introduced by the capture helper.
 
 CSV export protects formula-like string fields, including prefixed whitespace
 and full-width operator forms. CSV quoting alone is insufficient. Verified

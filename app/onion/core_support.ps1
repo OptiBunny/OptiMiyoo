@@ -61,7 +61,10 @@ function Get-LauncherCommands([string]$Launch) {
         if ($c -in '|','&','(',')' -or ($c -in '{','}' -and -not $started) -or ($c -eq '<' -and $i+1 -lt $text.Length -and $text[$i+1] -eq '<')) {
             throw 'Conditional, compound or redirected shell execution is unverified.'
         }
-        if ([char]::IsWhiteSpace($c) -or $c -eq ';') {
+        # Shell blanks are ASCII space/tab. Preserve the existing CRLF text
+        # convention outside quotes; other whitespace belongs to the word.
+        $crlf=([int][char]$c -eq 13 -and $i+1 -lt $Launch.Length -and [int]$text[$i+1] -eq 10)
+        if ([int][char]$c -in 9,10,32,59 -or $crlf) {
             if ($started) {
                 $tokens.Add([pscustomobject]@{Value=$word.ToString(); LiteralDollar=$literalDollar})
                 [void]$word.Clear(); $started=$false; $literalDollar=$false
@@ -99,7 +102,7 @@ function Get-SelectedRetroArchCore([string]$Launch) {
         if ($head -in 'if','then','elif','else','fi','case','esac','while','until','for','select','do','done','function','eval','.','source','alias','unalias','trap','exit','return','!') {
             throw 'Conditional or custom shell execution in launch.sh is unverified.'
         }
-        $wasExec=($head -ceq 'exec')
+        $wasExec=[StringComparer]::Ordinal.Equals($head,'exec')
         if ($wasExec) {$at++; if ($at -ge $words.Count) {throw 'Incomplete exec command in launch.sh.'}; $head=$words[$at].Value}
         $exePattern='^(?:retroarch|\./retroarch|/mnt/SDCARD/RetroArch/retroarch|(?:\$progdir|\$\{progdir\})/\.\./\.\./RetroArch/retroarch)$'
         if ($head -cnotmatch $exePattern) {
@@ -111,7 +114,7 @@ function Get-SelectedRetroArchCore([string]$Launch) {
         $coreArguments=New-Object 'System.Collections.Generic.List[object]'
         for ($j=$at+1; $j -lt $words.Count; $j++) {
             $value=$words[$j].Value
-            if ($value -ceq '-L') {
+            if ([StringComparer]::Ordinal.Equals($value,'-L')) {
                 $j++; if ($j -ge $words.Count) {throw 'Missing literal -L argument in launch.sh.'}
                 $coreArguments.Add($words[$j]); continue
             }
@@ -160,7 +163,7 @@ function Read-OptiBoundedText([IO.Stream]$Stream,[int]$MaximumBytes,[string]$Des
         throw ($Description+' exceeds its supported text size limit.')
     }
     $memory=New-Object IO.MemoryStream
-    $reader=$null; $buffer=New-Object byte[] 65536; [long]$total=0
+    $buffer=New-Object byte[] 65536; [long]$total=0
     try {
         while (($read=$Stream.Read($buffer,0,$buffer.Length)) -gt 0) {
             # Check actual bytes too: ZIP metadata can understate expanded data.
@@ -168,10 +171,17 @@ function Read-OptiBoundedText([IO.Stream]$Stream,[int]$MaximumBytes,[string]$Des
             $memory.Write($buffer,0,$read); $total+=$read
         }
         if ($ExpectedLength -ge 0 -and $total -ne $ExpectedLength) {throw ($Description+' text length does not match its declared size.')}
-        $memory.Position=0
-        $reader=New-Object IO.StreamReader($memory,$true)
-        return $reader.ReadToEnd()
-    } finally {if ($reader) {$reader.Dispose()}; $memory.Dispose()}
+        # Invalid bytes must not become replacement characters that identify a
+        # different native file. Select BOM encodings with strict fallbacks too.
+        $bytes=$memory.ToArray();$offset=0;$encoding=New-Object Text.UTF8Encoding($false,$true)
+        if($bytes.Length -ge 4 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254 -and $bytes[2] -eq 0 -and $bytes[3] -eq 0){$encoding=New-Object Text.UTF32Encoding($false,$false,$true);$offset=4}
+        elseif($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 254 -and $bytes[3] -eq 255){$encoding=New-Object Text.UTF32Encoding($true,$false,$true);$offset=4}
+        elseif($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191){$offset=3}
+        elseif($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254){$encoding=New-Object Text.UnicodeEncoding($false,$false,$true);$offset=2}
+        elseif($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255){$encoding=New-Object Text.UnicodeEncoding($true,$false,$true);$offset=2}
+        try{return $encoding.GetString($bytes,$offset,$bytes.Length-$offset)}
+        catch{throw ($Description+' contains invalid text encoding.')}
+    } finally {$memory.Dispose()}
 }
 
 function Open-OptiInputLease([string]$Path,[string]$Root) {
@@ -239,8 +249,11 @@ function Get-OnionCoreSupport($Profile,[string]$SdRoot,[string]$Extension,[switc
         if (-not (Test-Path -LiteralPath $result.ConfigPath -PathType Leaf)) {
             $result.Status='NOT INSTALLED'; $result.Reason='No system config.json found on this SD card.'; return $result
         }
-        $config=(Read-OptiTextFile $result.ConfigPath 1MB 'config.json' $SdRoot) | ConvertFrom-Json
-        if ($config.launch -ne 'launch.sh') {throw 'Custom launch filename; the selected core cannot be verified automatically.'}
+        $configText=Read-OptiTextFile $result.ConfigPath 1MB 'config.json' $SdRoot
+        # Property enumeration must not turn an array into an apparent config.
+        if ($configText -cnotmatch '\A[ \t\r\n]*\{') {throw 'SD config must contain one JSON object.'}
+        $config=$configText | ConvertFrom-Json
+        if ($config.launch -isnot [string] -or -not [StringComparer]::OrdinalIgnoreCase.Equals($config.launch,'launch.sh')) {throw 'Custom launch filename; the selected core cannot be verified automatically.'}
         $launch=Read-OptiTextFile $result.LaunchPath 256KB 'launch.sh' $SdRoot
         $result.Core=Get-SelectedRetroArchCore $launch
         if ($result.Core -notin @($Profile.SupportedCores)) {

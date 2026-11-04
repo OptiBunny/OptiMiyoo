@@ -211,7 +211,12 @@ function Get-ApplicationBrokerTree([string]$Root,[string]$CopyTo,[switch]$Requir
                         if($output){$output.Flush($true);$output.Dispose();$output=$null;[IO.File]::SetLastWriteTimeUtc($target,$entry.LastWriteTimeUtc)}
                         $files[$relative]=[pscustomobject]@{Hash=$hash;Length=$length;Links=$links;LastWriteTimeUtc=$entry.LastWriteTimeUtc}
                         $bytes+=$length
-                    } finally {if($output){$output.Dispose()};if($sha){$sha.Dispose()};if($borrowed){$lease.Stream.Position=0}else{$lease.Dispose()}}
+                    } finally {
+                        # Closing a failed staged write can throw again. Release
+                        # hashing and source ownership independently of that close.
+                        try{if($output){$output.Dispose()}}
+                        finally{try{if($sha){$sha.Dispose()}}finally{if($borrowed){$lease.Stream.Position=0}else{$lease.Dispose()}}}
+                    }
                 }
             } finally {$directoryLease.Dispose()}
         }
@@ -855,10 +860,15 @@ function Close-ApplicationBrokerPublicationContainer($Container,[switch]$Preserv
     }
 }
 
-function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null,[scriptblock]$CancellationCheck=$null) {
+function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$ReferenceIndex=$null,[scriptblock]$CancellationCheck=$null,$SealingResources=$null) {
     $dst=Join-Path $State.OriginalRoot 'DST';$workDst=Join-Path $State.WorkRoot 'DST'
     $items=New-Object 'System.Collections.Generic.List[object]';$owned=New-Object 'System.Collections.Generic.List[string]';$locks=New-Object 'System.Collections.Generic.List[IDisposable]'
     $containers=New-Object 'System.Collections.Generic.List[object]'
+    $callerOwnsResources=$null -ne $SealingResources
+    if($callerOwnsResources){
+        if($SealingResources.Containers -isnot [Collections.Generic.List[object]] -or $SealingResources.Locks -isnot [Collections.Generic.List[IDisposable]] -or $SealingResources.Containers.Count -ne 0 -or $SealingResources.Locks.Count -ne 0){throw 'Output sealing requires fresh caller-owned container and lease collections.'}
+        $containers=$SealingResources.Containers;$locks=$SealingResources.Locks
+    }
     $verifiedParents=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $resourcesTransferred=$false
     try {
@@ -950,11 +960,12 @@ function Copy-ApplicationBrokerOutput($State,$Batch,$Job,$ReceiptStore,$Referenc
         $resourcesTransferred=$true
         return $sealed
     } finally {
-        # Engine Stop bypasses catch. Before return, this function still owns
-        # every private copy and directory lease; the caller has no sealed set.
-        if(-not $resourcesTransferred){
+        # Batch callers own these collections before sealing starts, including
+        # when engine Stop interrupts this return. Standalone callers retain
+        # the existing success-return ownership and local failure cleanup.
+        if(-not $callerOwnsResources -and -not $resourcesTransferred){
             try {
-                foreach($claim in $containers){try{Close-ApplicationBrokerPublicationContainer $claim}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalText $claim.Path))}}
+                foreach($claim in $containers){try{Close-ApplicationBrokerPublicationContainer $claim}catch{Write-Warning ('Unpublished broker staging retained: '+(ConvertTo-SafeExternalLine $claim.Path))}}
             } finally {
                 foreach($claim in $containers){if($claim.Lease){$claim.Lease.Dispose();$claim.Lease=$null}}
                 foreach($lock in $locks){$lock.Dispose()}
@@ -1037,8 +1048,10 @@ function Complete-ApplicationBrokerBatch {
             if(& $checkCancellation){break}
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
             $publicationLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+            # Keep cleanup ownership outside the interruptible return assignment.
+            $sealingResources=[pscustomobject]@{Containers=(New-Object 'Collections.Generic.List[object]');Locks=(New-Object 'Collections.Generic.List[IDisposable]')}
             try {
-                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex -CancellationCheck $throwIfCancelled
+                $sealed=Copy-ApplicationBrokerOutput $state $batch $job $receiptIndex $referenceIndex -CancellationCheck $throwIfCancelled -SealingResources $sealingResources
                 Assert-ApplicationBrokerOwnership $batch $job $dst $referenceIndex
                 # Cancellation is safe before installation, while every old output
                 # remains untouched. Never interrupt installation or its rollback.
@@ -1079,20 +1092,21 @@ function Complete-ApplicationBrokerBatch {
             } finally {
                 if($results.Count -and $results[$results.Count-1].JobId -ceq $id){[void]$processedIds.Add($id)}
                 foreach($lock in $publicationLocks){$lock.Dispose()}
-                if($sealed){
+                if($sealingResources){
                     try {
-                        foreach($claim in $sealed.Containers){
+                        foreach($claim in $sealingResources.Containers){
                             $path=$claim.Path
-                            $preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path+'\',[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0
+                            $preserve=$false
+                            if($sealed){$preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path+'\',[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0}
                             try{Reset-ApplicationBrokerReferences $batch $referenceIndex @([pscustomobject]@{Destination=$path;Folder=$true})}
-                            catch{$preserve=$true;Write-Warning ('Broker reference cleanup failed; staging retained: '+(ConvertTo-SafeExternalText $path))}
-                            finally{try{Close-ApplicationBrokerPublicationContainer $claim -Preserve:$preserve}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalText $path))}}
+                            catch{$preserve=$true;Write-Warning ('Broker reference cleanup failed; staging retained: '+(ConvertTo-SafeExternalLine $path))}
+                            finally{try{Close-ApplicationBrokerPublicationContainer $claim -Preserve:$preserve}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalLine $path))}}
                         }
                     } finally {
                         # Even a reference reset or diagnostic failure must not
                         # strand the other exact directory leases in this set.
-                        foreach($claim in $sealed.Containers){if($claim.Lease){$claim.Lease.Dispose();$claim.Lease=$null}}
-                        foreach($lock in $sealed.Locks){$lock.Dispose()}
+                        foreach($claim in $sealingResources.Containers){if($claim.Lease){$claim.Lease.Dispose();$claim.Lease=$null}}
+                        foreach($lock in $sealingResources.Locks){$lock.Dispose()}
                     }
                 }
             }
@@ -1104,18 +1118,27 @@ function Complete-ApplicationBrokerBatch {
         if(-not $cancellation.Requested -and $batch.SourcePolicy -eq 'Remove' -and -not $batch.SourcePlan.BlockReason){
             try {
                 $sourceInventoryGuard=Open-SourcePolicyInventoryGuard $src
-                $sourceCleanupContext=& $batch.SourceModule {param($plan,$guard)Open-SourcePolicyCleanupContext $plan -InventoryGuard $guard} $batch.SourcePlan $sourceInventoryGuard
+                $sourceCleanupContext=& $batch.SourceModule {param($plan,$guard,$owner)Open-SourcePolicyCleanupContext $plan -InventoryGuard $guard -ContextOwner $owner} $batch.SourcePlan $sourceInventoryGuard ([ref]$sourceCleanupContext)
             } catch {$batch.SourcePlan.BlockReason='Source inventory or CUE descriptors could not be protected; all originals kept. '+$_.Exception.Message}
         }
         if(-not $cancellation.Requested -and -not $batch.SourcePlan.BlockReason){
             try {
                 $descriptorLeases=$null;if($sourceCleanupContext){$descriptorLeases=$sourceCleanupContext.ReferenceLeases}
-                Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src -BorrowedSourceLeases $descriptorLeases) 'Original source tree'
+                Assert-ApplicationBrokerSnapshot $state.SourceSnapshot (Get-ApplicationBrokerTree $src -BorrowedSourceLeases $descriptorLeases -CancellationCheck $throwIfCancelled) 'Original source tree'
             }
-            catch {$batch.SourcePlan.BlockReason='Original source inventory changed; all originals kept.'}
+            catch {
+                # Final verification can be cancelled without misreporting a
+                # changed source. Concurrent ordinary I/O failures still block removal.
+                $cancelledError=$false;$cause=$_.Exception
+                while($cause){
+                    if($cause -is [OperationCanceledException]){$cancelledError=$true;break}
+                    $cause=$cause.InnerException
+                }
+                if(-not ($cancellation.Requested -and $cancelledError)){$batch.SourcePlan.BlockReason='Original source inventory changed; all originals kept.'}
+            }
         }
         if($batch.SourcePlan.BlockReason -or -not (& $checkCancellation)){
-            & $batch.SourceModule {param($plan,$context,$cancel)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalText $message)}} -CleanupContext $context -CancellationCheck $cancel} $batch.SourcePlan $sourceCleanupContext $checkCancellation
+            & $batch.SourceModule {param($plan,$context,$cancel)Invoke-SourcePolicyCleanup $plan {param($label,$message)if($label -eq 'WARNING'){Write-Warning (ConvertTo-SafeExternalLine $message)}} -CleanupContext $context -CancellationCheck $cancel} $batch.SourcePlan $sourceCleanupContext $checkCancellation
         }
         # A cancellation deferred during the last connected deletion still
         # cancels the remaining UI flow, without undoing that completed set.

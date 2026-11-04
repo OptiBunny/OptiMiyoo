@@ -86,7 +86,7 @@ function Assert-G64([string]$Path,[IO.Stream]$InputStream=$null) {
         $stream.Position=0
         $reader=New-Object IO.BinaryReader($stream,[Text.Encoding]::ASCII,$true)
         if ($stream.Length -gt 64MB) {throw 'G64 output exceeds the supported image-size limit.'}
-        if ($stream.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)) -ne 'GCR-1541') { throw 'G64 image header is invalid.' }
+        if ($stream.Length -lt 12 -or -not [string]::Equals([Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)),'GCR-1541',[StringComparison]::Ordinal)) { throw 'G64 image header is invalid.' }
         if ($reader.ReadByte() -ne 0) { throw 'Unsupported G64 version.' }
         $tracks = [int]$reader.ReadByte()
         $maxLength = [int]$reader.ReadUInt16()

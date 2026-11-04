@@ -446,12 +446,21 @@ function Get-PlaylistLines([string[]]$DiskNames,[string]$RelativeStem,[bool]$Zip
         $line
     }
 }
+function Get-GeneratedPlaylistText([string[]]$Lines) {
+    # Include the final LF: generated output must remain readable by the
+    # existing-playlist ownership and source-dependency descriptor guards.
+    $text=($Lines -join "`n")+"`n"
+    if ([Text.Encoding]::UTF8.GetByteCount($text) -gt 1MB) {throw 'Generated playlist exceeds the supported 1 MiB text limit. Split this set into smaller playlists.'}
+    if ([regex]::Split($text,'\r\n|\r|\n').Count -gt 16384) {throw 'Generated playlist exceeds the supported 16,384-line limit. Split this set into smaller playlists.'}
+    return $text
+}
 function New-Playlist([string[]]$DiskNames,[string]$RelativeStem,[string]$Destination,[bool]$ZipMode,[bool]$LooseFiles=$false,[string[]]$OutputLines=$null) {
     $lines=@($OutputLines)
     if ($null -eq $OutputLines) {$lines=@(Get-PlaylistLines $DiskNames $RelativeStem $ZipMode $LooseFiles)}
     if ($lines.Count -lt 2) {throw 'A playlist requires at least two playable media files.'}
     if ($lines.Count -ne $DiskNames.Count) {throw 'Playlist paths do not match the planned media count.'}
-    [IO.File]::WriteAllText($Destination,(($lines -join "`n")+"`n"),(New-Object Text.UTF8Encoding($false)))
+    $text=Get-GeneratedPlaylistText $lines
+    [IO.File]::WriteAllText($Destination,$text,(New-Object Text.UTF8Encoding($false)))
     Write-Log ('PLAYLIST ORDER: '+($DiskNames -join ' -> '))
     Write-Event 'ORDER' ('{0} media file(s) in this playlist:' -f $DiskNames.Count)
     for ($i=0;$i -lt $DiskNames.Count;$i++) {Write-Event ('MEDIA '+($i+1)) $DiskNames[$i]}
@@ -757,7 +766,8 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
 
 function Get-PreservedMediaWrites($Job,$Media,[string]$SourceRoot,[string]$DestinationRoot) {
     $sourcePrefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-    $sources=@{}
+    # Distinct native names can share a linguistic Unicode spelling.
+    $sources=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($disk in $Job.Disks) {
         $members=@([pscustomobject]@{Name=$disk.Name;Path=$disk.Path})
         $parent=[IO.Path]::GetDirectoryName($disk.Path)
@@ -789,7 +799,7 @@ function Get-PreservedMediaWrites($Job,$Media,[string]$SourceRoot,[string]$Desti
 function Get-PreservedPlaylistLines([string[]]$DiskNames,[string]$Stem,[string]$Root,[object[]]$Writes,[string]$ZipPath='') {
     $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
     $depth=@($Stem.Split('/')).Count-1
-    $paths=@{};foreach ($write in $Writes) {if ($write.MemberName) {$paths[$write.MemberName]=$write.Destination}}
+    $paths=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);foreach ($write in $Writes) {if ($write.MemberName) {$paths[$write.MemberName]=$write.Destination}}
     foreach ($name in $DiskNames) {
         Assert-PlaylistName $name
         $path=$ZipPath
@@ -1015,7 +1025,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     if ($hasPlaylist) {
         if ($autoLayout) {$lines=@($preservedLines)}
         else {$lines=@(Get-PlaylistLines $Media.DiskNames $Job.Stem $zipMode $looseFiles)}
-        $playlistText=($lines -join "`n")+"`n"
+        $playlistText=Get-GeneratedPlaylistText $lines
     }
     $flatLines=@(Get-PlaylistLines $Media.DiskNames $Job.Stem $false $true)
     $writes=@($dataWrites)
@@ -1568,7 +1578,7 @@ function Assert-PlaylistOutputOwnership($Plan,[string[]]$ExpectedNames,$Referenc
 }
 
 function Copy-LooseSet($Job,[string]$Directory,[hashtable]$SourceHashes=@{}) {
-    $manifest=@{}
+    $manifest=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($disk in $Job.Disks) {
         Assert-PlaylistName $disk.Name
         Add-CopiedFile $disk.Path $disk.Name $Directory $manifest $SourceHashes
@@ -1633,7 +1643,7 @@ function Assert-CueTargets([string[]]$Names,[string]$Directory) {
             # Linux is case-sensitive; even Windows must verify the spelling.
             $partPath=[IO.Path]::GetDirectoryName($cue)
             foreach ($part in $track.Split('/')) {
-                if (@(Get-ChildItem -LiteralPath $partPath -Force | Where-Object {$_.Name -ceq $part}).Count -ne 1) {throw "CUE track spelling/case does not match: $track"}
+                if (@(Get-ChildItem -LiteralPath $partPath -Force | Where-Object {[string]::Equals($_.Name,$part,[StringComparison]::Ordinal)}).Count -ne 1) {throw "CUE track spelling/case does not match: $track"}
                 $partPath=Join-Path $partPath $part
             }
         }
@@ -1967,7 +1977,7 @@ try {
             if ($job.Error) {throw $job.Error}
             # Inspect names first, before reading/hashing image contents or asking
             # to replace anything. One playable image never needs a playlist.
-            $diskNames=@(); $contentNames=@(); $manifest=@{}; $dataHash=$null; $sourceHashes=@{}
+            $diskNames=@(); $contentNames=@(); $manifest=@{}; $dataHash=$null; $sourceHashes=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
             Show-Stage 'Inspecting game media' ($job.System+'/'+$job.Source)
             if ($job.Zip) {
                 $sourceLock=[IO.File]::Open($job.Zip,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)

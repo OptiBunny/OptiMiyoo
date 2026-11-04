@@ -170,7 +170,9 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
 function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
     if ($Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Choose Auto, ZIPs, a folder per game or loose files.'}
     if ($Items.Count -gt 100000) {throw 'Conversion batch exceeds the output member limit.'}
-    $prefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+'\';$groups=@{};$auto=$Storage -eq 'Auto'
+    $prefix=[IO.Path]::GetFullPath($SourceRoot).TrimEnd('\','/')+'\';$auto=$Storage -eq 'Auto'
+    # Auto keys are literal input paths; inferred game titles stay conservative.
+    $groups=@{};if($auto){$groups=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)}
     foreach ($item in $Items) {
         $full=[IO.Path]::GetFullPath($item.InputPath)
         if (-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Conversion source leaves SRC.'}
@@ -202,8 +204,11 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
     $result=@($groups.Values | Sort-Object Source)
     foreach ($group in $result) {
         $group.Items=@($group.Items | Sort-Object Name)
-        $group.Paths=@($group.Items | ForEach-Object {$_.InputPath} | Sort-Object -Unique)
-        $names=@{};$tags=@{}
+        # Reporting and source ownership need every distinct native spelling,
+        # including inputs in a conservatively refused inferred-title group.
+        $sourcePaths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        $group.Paths=@($group.Items | ForEach-Object {$_.InputPath} | Sort-Object | Where-Object {$sourcePaths.Add($_)})
+        $names=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$tags=@{}
         foreach ($item in $group.Items) {
             try {
                 Assert-ConversionRelativeName $item.Name
@@ -239,7 +244,7 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
         } else {$writes.Add([pscustomobject]@{Name=$relativeData;Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData));Folder=$folder;Role='Data';MemberName=$null})}
         $group.Plan=[pscustomobject]@{Destination=[IO.Path]::GetFullPath((Join-Path $DestinationRoot $relativeData));RelativeData=$relativeData;LooseFiles=$loose;DataWrites=$writes.ToArray()}
     }
-    $owners=@{}
+    $owners=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($group in $result) {
         # Skipped or invalid inputs cannot write outputs or claim their paths.
         if ($group.Error) {continue}
@@ -249,7 +254,7 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
     }
     # Keep the latest event per path, then visit each owner list once. Repeated
     # descendants must not repeatedly traverse every owner of a shared parent.
-    $marks=@{};$markState=[pscustomobject]@{Sequence=0L}
+    $marks=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$markState=[pscustomobject]@{Sequence=0L}
     $markOwners={param([string]$Path,[string]$Reason)
         $markState.Sequence++
         $marks[$Path]=[pscustomobject]@{Owners=$owners[$Path];Sequence=$markState.Sequence;Message=$Reason}
@@ -265,7 +270,7 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
             $parent=[IO.Path]::GetDirectoryName($parent)
         }
     }
-    $latest=@{}
+    $latest=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     foreach($mark in $marks.Values){
         foreach($group in $mark.Owners){
             if(-not $latest.ContainsKey($group.SourceKey) -or $mark.Sequence -gt $latest[$group.SourceKey].Sequence){
@@ -460,12 +465,12 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
 }
 
 function New-ConversionArchive([string]$Directory,[string]$Destination) {
-    $prefix=$Directory.TrimEnd('\','/')+'\';$expected=@{}
+    $prefix=$Directory.TrimEnd('\','/')+'\';$expected=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     $zip=[IO.Compression.ZipFile]::Open($Destination,[IO.Compression.ZipArchiveMode]::Create)
     try {foreach ($file in @(Get-ChildItem -LiteralPath $Directory -File -Recurse -Force | Sort-Object FullName)) {
         $name=$file.FullName.Substring($prefix.Length).Replace('\','/');Assert-ConversionRelativeName $name
         $entry=$zip.CreateEntry($name,[IO.Compression.CompressionLevel]::Optimal);$input=$null;$output=$null
-        try {$input=$file.OpenRead();$output=$entry.Open();$input.CopyTo($output)} finally {if ($output) {$output.Dispose()};if ($input) {$input.Dispose()}}
+        try {$input=$file.OpenRead();$output=$entry.Open();$input.CopyTo($output)} finally {try {if ($output) {$output.Dispose()}} finally {if ($input) {$input.Dispose()}}}
         $expected[$name]=[pscustomobject]@{Hash=(Get-SourcePolicyHash $file.FullName);Length=$file.Length}
     }} finally {$zip.Dispose()}
     $archive=Open-ArchiveWithBudget -Path $Destination -Profile Floppy
@@ -476,10 +481,12 @@ function New-ConversionArchive([string]$Directory,[string]$Destination) {
     } finally {$archive.Dispose()}
 }
 
-function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$DestinationRoot,[bool]$Overwrite,$DescriptorCache=$null) {
+function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$DestinationRoot,[bool]$Overwrite,$DescriptorCache=$null,$OutputLocks=$null) {
+    if($null -ne $OutputLocks -and ($OutputLocks -isnot [Collections.Generic.List[IDisposable]] -or $OutputLocks.Count -ne 0)){throw 'Conversion publication requires an empty caller-owned output lease collection.'}
+    $locks=$OutputLocks;if($null -eq $locks){$locks=New-Object 'Collections.Generic.List[IDisposable]'};$locksTransferred=$false
     $ownsCache=$false
     if(-not $DescriptorCache){$DescriptorCache=New-ConversionDescriptorCache $DestinationRoot;$ownsCache=$true}
-    $staged=New-Object 'System.Collections.Generic.List[object]';$backups=New-Object 'System.Collections.Generic.List[object]';$installed=New-Object 'System.Collections.Generic.List[object]';$locks=$null;$parents=New-Object 'System.Collections.Generic.List[IDisposable]'
+    $staged=New-Object 'System.Collections.Generic.List[object]';$backups=New-Object 'System.Collections.Generic.List[object]';$installed=New-Object 'System.Collections.Generic.List[object]';$parents=New-Object 'System.Collections.Generic.List[IDisposable]'
     try {
         Assert-ConversionGroupOwnership $Group $DestinationRoot $DescriptorCache
         foreach ($write in $Group.Plan.DataWrites) {
@@ -493,7 +500,7 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
             $output=[pscustomobject]@{Container=$container;Identity='';Staged=(Join-Path $container 'data');Destination=$write.Destination;Folder=$write.Folder;Hash=$null;Manifest=$null;Preserve=$false};$staged.Add($output)
             $containerLease=Open-SourcePolicyDirectoryLease $container;$parents.Add($containerLease);$output.Identity=$containerLease.DirectoryIdentity
             if ($write.Folder) {
-                [void][IO.Directory]::CreateDirectory($output.Staged);$manifest=@{}
+                [void][IO.Directory]::CreateDirectory($output.Staged);$manifest=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
                 foreach ($item in $Group.Items) {
                     $source=Join-Path $ConvertedDirectory $item.Name;$target=Join-Path $output.Staged $item.Name
                     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target));[IO.File]::Copy($source,$target)
@@ -518,9 +525,10 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
             Assert-ConversionGroupOwnership $Group $DestinationRoot $DescriptorCache -ProtectedPublication -CapturedTargets $capturedTargets -PrivateTargets $privateTargets
         }
         foreach ($output in $staged) {if ($output.Folder) {[IO.Directory]::Move($output.Staged,$output.Destination)} else {[IO.File]::Move($output.Staged,$output.Destination)};$installed.Add($output)}
-        # Preserve the returned List itself, not an array containing that List.
-        $locks=Open-SourcePolicyOutputs $staged.ToArray()
+        # Own verification leases before the helper can be interrupted at return.
+        $null=Open-SourcePolicyOutputs $staged.ToArray() -OutputLocks $locks
         foreach ($backup in $backups) {try {Remove-SourcePolicyOwnedPath -Path $backup.Path -Root $DestinationRoot} catch {Write-Notice 'WARNING' ('Could not remove previous output backup: '+$backup.Path)}}
+        $locksTransferred=$true
         return [pscustomobject]@{Outputs=$staged.ToArray();Locks=$locks;Replaced=($backups.Count -gt 0)}
     } catch {
         $message=$_.Exception.Message
@@ -539,6 +547,7 @@ function Save-ConversionGroup($Group,[string]$ConvertedDirectory,[string]$Destin
         throw $message
     } finally {
         try {
+        if(-not $locksTransferred -and $locks){foreach($lock in $locks){$lock.Dispose()}}
         Reset-ConversionDescriptorCacheTargets $DescriptorCache @($staged | ForEach-Object {[pscustomobject]@{Destination=$_.Container;Folder=$true}})
         foreach ($parent in $parents) {$parent.Dispose()}
         foreach ($output in $staged) {if (-not $output.Preserve -and $output.Identity -and (Test-Path -LiteralPath $output.Container)) {Remove-SourcePolicyOwnedPath -Path $output.Container -Root $DestinationRoot -Identity $output.Identity -MaximumEntries 400005}}
@@ -556,7 +565,7 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
     foreach ($group in $Groups) {
         Set-ApplicationCurrentJob $group.SourceKey
         $script:UiGame=$group.Source;$script:UiLastStage=''
-        $temp=$null;$tempOwned=$false;$tempIdentity='';$tempLease=$null;$commit=$null;$leases=New-Object 'System.Collections.Generic.List[IDisposable]';$hashes=@{}
+        $temp=$null;$tempOwned=$false;$tempIdentity='';$tempLease=$null;$commit=$null;$outputLocks=New-Object 'Collections.Generic.List[IDisposable]';$leases=New-Object 'System.Collections.Generic.List[IDisposable]';$hashes=@{}
         try {
             Write-Event 'GAME' ('{0}/{1} | {2}' -f ($script:Processed+1),$script:Total,$group.Source)
             if ($group.Error) {if ($group.Error -eq 'No supported disk images in this input.') {$script:Skipped++;Write-Notice 'SKIP' $group.Error;continue};throw $group.Error}
@@ -605,14 +614,14 @@ function Invoke-ConversionGroupBatch([object[]]$Groups,[string]$Root,[string]$So
             }
             foreach ($path in $group.Paths) {if ((Get-SourcePolicyHash $path) -ne $hashes[[IO.Path]::GetFullPath($path)]) {throw 'Source changed during conversion; original kept.'}}
             Show-Stage 'Checking prepared output' $group.Source
-            $commit=Save-ConversionGroup $group $convertedDir $destinationRoot $overwrite $descriptorCache
+            $commit=Save-ConversionGroup $group $convertedDir $destinationRoot $overwrite $descriptorCache -OutputLocks $outputLocks
             Complete-SourcePolicyJob $sourcePlan $group.SourceKey $hashes $commit.Outputs
             Complete-ApplicationCurrentJob
             $script:Ok++;Write-Notice 'READY' ($group.Source+' | prepared for final checks: '+$group.Plan.RelativeData)
         } catch {$script:Failed++;Write-Notice 'FAILED' ($group.Source+' | '+$_.Exception.Message);Write-Log ($_ | Out-String)}
         finally {
             foreach ($lease in $leases) {$lease.Dispose()}
-            if ($commit) {foreach ($lock in $commit.Locks) {$lock.Dispose()}}
+            foreach ($lock in $outputLocks) {$lock.Dispose()}
             if ($tempLease) {$tempLease.Dispose()}
             if ($tempOwned -and $tempIdentity -and (Test-Path -LiteralPath $temp)) {Remove-SourcePolicyOwnedPath -Path $temp -Root (Get-OptiScratchRoot) -Identity $tempIdentity -MaximumEntries 400005}
             $script:Processed++

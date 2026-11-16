@@ -31,7 +31,7 @@ $script:Total = 0
 $script:LogPath = $null; $script:LogWriter=$null
 $script:LogDisabled=$false
 $script:ReportProblem=$false
-$script:AppVersion='0.0.9'
+$script:AppVersion='0.9.0'
 $script:Processed=0; $script:Ok=0
 $script:Clock=[Diagnostics.Stopwatch]::StartNew()
 . (Join-Path (Split-Path -Parent $script:AppRoot) 'ui/display.ps1')

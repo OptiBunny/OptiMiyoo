@@ -13,7 +13,7 @@ if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry SD -Arguments $PSBoundParameters)
 }
 $exitCode=0
-$script:AppVersion='0.0.9'
+$script:AppVersion='0.9.0'
 $ScriptDir=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $ScriptDir 'onion/core_support.ps1')
 . (Join-Path $ScriptDir 'shared/compile_support.ps1')

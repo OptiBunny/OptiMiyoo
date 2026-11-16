@@ -69,7 +69,7 @@ namespace OptiMiyoo {
   private static void Attribute(IntPtr list,int id,IntPtr value,int bytes) {Check(UpdateProcThreadAttribute(list,0,new IntPtr(id),value,new IntPtr(bytes),IntPtr.Zero,IntPtr.Zero),"Update attribute "+id);}
   private static void Close(ref IntPtr handle) {if(handle!=IntPtr.Zero) {CloseHandle(handle);handle=IntPtr.Zero;}}
   internal static void Secure(string path,string package,bool write) {
-   string user=WindowsIdentity.GetCurrent().User.Value;
+   string user;using(WindowsIdentity identity=WindowsIdentity.GetCurrent()){user=identity.User.Value;}
    string rights=write?"0x1301bf":"0x1200a9";
    string sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;"+user+")(A;OICI;"+rights+";;;"+package+")"+(write?"S:(ML;OICI;NW;;;LW)":"");
    IntPtr sd;uint bytes;Check(ConvertStringSecurityDescriptorToSecurityDescriptor(sddl,1,out sd,out bytes),"Parse ACL");

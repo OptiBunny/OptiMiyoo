@@ -324,8 +324,8 @@ function Copy-FileVerified([string]$Source,[string]$Destination,[string]$Name) {
         Write-Event 'CHECK' ($Name+' / copy and source hashes match')
         return [pscustomobject]@{Hash=$hash; Length=$inputStream.Length}
     } finally {
-        if ($outputStream) { $outputStream.Dispose() }
-        if ($inputStream) { $inputStream.Dispose() }
+        try {if ($outputStream) { $outputStream.Dispose() }}
+        finally {if ($inputStream) { $inputStream.Dispose() }}
     }
 }
 function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
@@ -1609,9 +1609,9 @@ function New-PlaylistZip([string]$Directory,[string]$Destination,[hashtable]$Man
                 $output=$entry.Open()
                 $hash=Copy-Stream $source $output $source.Length $name
                 if($source.Length -ne $Manifest[$name].Length -or $hash -cne $Manifest[$name].Hash){throw 'Staged media changed while creating the ZIP.'}
-            } finally {if($output){$output.Dispose()};if($source){$source.Dispose()}}
+            } finally {try {if($output){$output.Dispose()}} finally {if($source){$source.Dispose()}}}
         }
-    } finally {if($archive){$archive.Dispose()};if($stream){$stream.Dispose()}}
+    } finally {try {if($archive){$archive.Dispose()}} finally {if($stream){$stream.Dispose()}}}
     $archive=Open-ArchiveWithBudget -Path $Destination -Profile Media
     try {
         $actual=Read-ZipContents $archive '' $Destination

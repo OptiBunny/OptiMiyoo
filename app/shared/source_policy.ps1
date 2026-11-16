@@ -413,7 +413,8 @@ namespace OptiMiyoo {
                 SafeFileHandle created = null; IntPtr descriptor = IntPtr.Zero, name = IntPtr.Zero, unicode = IntPtr.Zero;
                 bool parentHeld = false; SafeFileHandle parentHandle = parent.parents[parent.parents.Count - 1];
                 try {
-                    string sid = System.Security.Principal.WindowsIdentity.GetCurrent().User.Value; uint size;
+                    string sid; uint size;
+                    using (System.Security.Principal.WindowsIdentity identity = System.Security.Principal.WindowsIdentity.GetCurrent()) { sid = identity.User.Value; }
                     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + sid + ")", 1, out descriptor, out size))
                         throw new Win32Exception(Marshal.GetLastWin32Error());
                     name = Marshal.StringToHGlobalUni(leaf);

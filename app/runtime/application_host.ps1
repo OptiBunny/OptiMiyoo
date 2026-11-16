@@ -208,6 +208,12 @@ function Invoke-ApplicationHostLoop($State) {
     return $session.ExitCode
 }
 
+function New-ApplicationSessionCancellationCheck($ApplicationSession,[scriptblock]$Callback) {
+    # GetNewClosure copies its local scope. Keep this scope small so later
+    # batches do not retain earlier receipt, job, and result collections.
+    return {& $Callback $ApplicationSession}.GetNewClosure()
+}
+
 function Test-ApplicationBatchCancellation($ApplicationSession) {
     if(-not $ApplicationSession){return $false}
     if($ApplicationSession.Failure){throw $ApplicationSession.Failure}
@@ -469,7 +475,7 @@ function Invoke-ApplicationHost {
                     $session.NavigationEnabled=$true
                     $preparationSession=$session
                     $preparationTest=(Get-Command Test-ApplicationPreparationNavigation).ScriptBlock
-                    $preparationCancellation={& $preparationTest $preparationSession}.GetNewClosure()
+                    $preparationCancellation=New-ApplicationSessionCancellationCheck $preparationSession $preparationTest
                     & $preparationCancellation
                 }
                 if ($Entry -eq 'SD' -and $selectedOnionRoot -and -not $Arguments.Preview) {
@@ -576,7 +582,7 @@ function Invoke-ApplicationHost {
                     if($state.StopRequested){
                         $publicationSession=$session
                         $cancellationTest=(Get-Command Test-ApplicationBatchCancellation).ScriptBlock
-                        $completionOptions.CancellationCheck={& $cancellationTest $publicationSession}.GetNewClosure()
+                        $completionOptions.CancellationCheck=New-ApplicationSessionCancellationCheck $publicationSession $cancellationTest
                     }
                     $state.Result=Complete-ApplicationBrokerBatch -Session $broker @pending -ReceiptStore $receipts @completionOptions
                     $state.Completed=$true

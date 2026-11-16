@@ -187,8 +187,9 @@ fully trimmed spellings of each non-comment line. A space before `#` can belong
 to a filename; it does not make the original line a comment. Whitespace and
 archive-member interpretations share the same bounded candidate budget. Generated
 playlist text is checked before plan acceptance or destination writes against the
-same 1 MiB and 16,384 split-line limits as existing descriptors, including its
-final newline. Oversized sets cannot create output that these guards cannot reopen.
+numbered-playlist reader's 1 MiB byte limit and 16,384 split-line limit, including
+its final newline. Oversized sets cannot create output that this reader cannot
+reopen.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.
@@ -270,6 +271,12 @@ freeze every possible new directory entry or protect files after publication end
 The final removal check independently enumerates names while its verified file
 and ancestor leases are held. A path resolving through a Windows alternate
 filename does not prove that the planned directory layout was preserved.
+
+If safe removal of a captured previous output backup fails after installation,
+the parent records its exact retained path in the successful job's result details.
+Those details reach the final screen, CSV and log without changing publication
+or source-removal authority. Cleanup may already have removed verified obsolete
+members; a retained backup is not necessarily a complete copy of the old output.
 
 Path handling must preserve containment and object identity throughout reads,
 staging, replacement, rollback, and cleanup. Existing controls include pinned

@@ -209,6 +209,11 @@ returns to the main menu and **Q** exits. Long results use **> / <** to page
 through the complete details and report paths. The final results replace the
 preparation progress screen, including when no files were published.
 
+If the results report incomplete cleanup of a previous output backup, the new
+output was saved. Inspect the retained path before removing anything there: it
+may contain files that OptiMiyoo could not safely delete, and it may no longer
+contain the complete old output.
+
 While preparing or processing a batch, **B / Esc** stops and returns to settings;
 **Q** stops and quits. **Ctrl+C** also requests a stop and closes the app. An update
 already being saved may finish first. Stopping does not undo completed work: saved

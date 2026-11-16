@@ -103,6 +103,7 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
     # A playlist and its disk data are one replacement. Roll back both if either
     # install fails; never leave a new playlist pointing at missing/old data.
     $backups = New-Object 'System.Collections.Generic.List[object]'
+    $retainedBackups = New-Object 'System.Collections.Generic.List[string]'
     $installed = New-Object 'System.Collections.Generic.List[object]'
     $locks = New-Object 'System.Collections.Generic.List[System.IDisposable]'
     if($null -ne $PublicationLocks){
@@ -200,11 +201,12 @@ function Install-PlaylistSet([object[]]$Items, [bool]$Overwrite, [object[]]$Reti
         foreach ($item in $backups) {
             try {if($item.Guard){$item.Guard.Remove()}else{Remove-SourcePolicyOwnedPath $item.Backup ([IO.Path]::GetDirectoryName($item.Backup))}}
             catch {
+                $retainedBackups.Add([string]$item.Backup)
                 Write-Log ('Previous output backup could not be removed: ' + $item.Backup)
                 Write-Notice 'WARNING' ('Could not remove previous output backup: ' + $item.Backup)
             }
         }
-        $commitResult=[pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0) }
+        $commitResult=[pscustomobject]@{ Locks = $locks; Replaced = ($backups.Count -gt 0); RetainedBackups = $retainedBackups.ToArray() }
         $locksTransferred=$true
         return $commitResult
     } finally {

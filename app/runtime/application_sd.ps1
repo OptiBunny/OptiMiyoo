@@ -478,87 +478,23 @@ function Get-ApplicationSdResultLines {
 
 function Get-ApplicationSdResultModel {
     param([Parameter(Mandatory=$true)]$Result,[int]$Page=0,[long]$Anchor=-1)
-    $sourceLines=@(Get-ApplicationSdResultLines -Result $Result)
-    $title='Onion SD setup / results';$prompt='Enter / B / Esc: Main menu | Q: Exit'
-    # Let the shared renderer reclaim artwork or paragraph gaps before paging.
-    # Without an initialized viewport, retain the conservative minimum panel.
-    $textWidth=44;$pageSize=11
-    if($script:UiColumns -ge 44 -and $script:UiHeight -gt 0) {
-        $whole=Get-MenuLayout -Rows $sourceLines -Prompt $prompt
-        if($whole.Fits) {
-            return [pscustomobject]@{Title=$title;Lines=@($whole.Rows);Prompt=$prompt;Page=0;Pages=1;Anchor=0L;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
-        }
-        $empty=Get-MenuLayout -Rows @('')
-        $textWidth=$empty.TextWidth
-        $overhead=8
-        if($empty.ShowMio -and $script:UiHeight -ge 26){$overhead=14}
-        $wrappedCount=@(Get-MenuRows $sourceLines $textWidth).Count
-        $navigationRows=@(Get-MenuRows @(('Page {0}/{0} | > Next | < Previous' -f $wrappedCount)) $textWidth).Count
-        $pageSize=[Math]::Max(3,$script:UiHeight-$overhead-$navigationRows)
-    }
-    # Keep backup headings with their first data row. Logical character anchors
-    # retain the current part of a long report when resize changes its wrapping.
-    $pageRows=New-Object 'Collections.Generic.List[string]'
-    $pageList=New-Object 'Collections.Generic.List[object]'
-    $separator=$false;$offset=0L;$pageAnchor=0L
-    foreach ($line in $sourceLines) {
-        if (-not $line) {$separator=($pageRows.Count -gt 0);continue}
-        $wrapped=@(Get-MenuRows @($line) $textWidth)
-        $needed=1
-        if ($line -in @('Verified original config backups:','Incomplete or unverified backups; do not restore:')) {$needed=$wrapped.Count+1}
-        $gap=0;if ($separator -and $pageRows.Count) {$gap=1}
-        if ($pageRows.Count -and $pageRows.Count+$gap+$needed -gt $pageSize) {
-            $pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset
-        }
-        if ($separator -and $pageRows.Count) {$pageRows.Add('')}
-        $separator=$false
-        foreach ($row in $wrapped) {
-            if ($pageRows.Count -eq $pageSize) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset}
-            $pageRows.Add($row);$offset+=($row -replace '\s','').Length
-        }
-    }
-    if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor})}
-    $pages=$pageList.Count
-    $page=[Math]::Max(0,[Math]::Min($Page,$pages-1))
-    if($Anchor -ge 0) {
-        $page=0
-        for($index=1;$index -lt $pages -and $pageList[$index].Anchor -le $Anchor;$index++){$page=$index}
-    }
-    $lines=@($pageList[$page].Rows)
-    if ($pages -gt 1) {$lines+=('Page {0}/{1} | > Next | < Previous' -f ($page+1),$pages)}
-    [pscustomobject]@{Title=$title;Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages;Anchor=$pageList[$page].Anchor;TextWidth=$textWidth;PageSize=$pageSize}
+    Get-ApplicationResultModel -SourceLines @(Get-ApplicationSdResultLines $Result) -Title 'Onion SD setup / results' -Page $Page -Anchor $Anchor `
+        -SectionHeadings @('Verified original config backups:','Incomplete or unverified backups; do not restore:')
 }
 
 function Read-ApplicationSdResult {
     param([Parameter(Mandatory=$true)]$Result,[switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
-    $previousEffect=$script:DisplayEffect;$display=$false;$page=0;$anchor=-1L;$inputText=''
-    try {
-        $script:DisplayEffect=$DisplayEffect
-        Initialize-Display;$display=$true
-        while ($true) {
-            [void](Update-DisplaySize)
-            $model=Get-ApplicationSdResultModel -Result $Result -Page $page -Anchor $anchor
-            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText -EscapeValue 'B'
-            if($answer -isnot [string] -and $answer.Resized) {$page=$model.Page;if($anchor -lt 0){$anchor=$model.Anchor};$inputText=$answer.InputText;continue}
-            $inputText='';$anchor=-1L
-            if ($answer -in '', 'B') {return $true}
-            if ($answer -eq 'Q') {return $false}
-            if ($answer -eq '>') {$page=[Math]::Min($model.Page+1,$model.Pages-1)}
-            elseif ($answer -eq '<') {$page=[Math]::Max(0,$model.Page-1)}
-            else {$page=$model.Page}
-        }
-    }finally {
-        try {if ($display) {Restore-Display}}
-        finally {$script:DisplayEffect=$previousEffect}
-    }
+    Read-ApplicationResult -Lines @(Get-ApplicationSdResultLines $Result) -Title 'Onion SD setup / results' `
+        -SectionHeadings @('Verified original config backups:','Incomplete or unverified backups; do not restore:') `
+        -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
 }
 
 function Show-ApplicationSdResult {
     param([Parameter(Mandatory=$true)]$Result,[switch]$NoPause,[switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     if ($NoPause -or $Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-        foreach ($line in @(Get-ApplicationSdResultLines -Result $Result)) {Write-Host $line}
+        Write-ApplicationResultText -Lines @(Get-ApplicationSdResultLines -Result $Result)
         return $true
     }
     Read-ApplicationSdResult -Result $Result -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect

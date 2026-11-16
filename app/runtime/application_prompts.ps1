@@ -105,7 +105,7 @@ function Get-ApplicationPromptModel {
     return Get-ApplicationPreparedPromptModel $preparation -Page $Page -Invalid:$Invalid
 }
 
-function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='',[string]$EscapeValue='B') {
+function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='',[string]$EscapeValue='B',[string[]]$ImmediateChoices=@()) {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
@@ -148,6 +148,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
             }
             if($sparseIdle){$idleWatch.Restart();Reset-MioIdleInput;$script:UiIdlePoseOverride='idle';$dirty=$true}
             if($key.Key -eq [ConsoleKey]::Escape){return $EscapeValue}
+            if(-not $text.Length -and [string][char]::ToUpperInvariant($key.KeyChar) -in $ImmediateChoices){return ([string][char]::ToUpperInvariant($key.KeyChar))}
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
                 if($ReturnOnResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
                 $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt;$dirty=$true;continue
@@ -220,4 +221,102 @@ function Invoke-ApplicationPolicyPrompt {
     }
     # A failed resume/drain never releases a policy grant to the caller.
     return $result
+}
+
+# Final result pages belong to the parent after the worker relay has stopped.
+# Keep long paths and per-file results available through the same resize-aware
+# pager used by SD results, rather than printing over a retained worker frame.
+function Get-ApplicationResultModel {
+    param([Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$SourceLines,[Parameter(Mandatory=$true)][string]$Title,
+          [int]$Page=0,[long]$Anchor=-1,[string[]]$SectionHeadings=@())
+    $prompt='Enter / B / Esc: Main menu | Q: Exit'
+    # Let the shared renderer reclaim artwork or paragraph gaps before paging.
+    # Without an initialized viewport, retain the conservative minimum panel.
+    $textWidth=44;$pageSize=11
+    if($script:UiColumns -ge 44 -and $script:UiHeight -gt 0) {
+        $whole=Get-MenuLayout -Rows $sourceLines -Prompt $prompt
+        if($whole.Fits) {
+            return [pscustomobject]@{Title=$title;Lines=@($whole.Rows);Prompt=$prompt;Page=0;Pages=1;Anchor=0L;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
+        }
+        $empty=Get-MenuLayout -Rows @('')
+        $textWidth=$empty.TextWidth
+        $overhead=8
+        if($empty.ShowMio -and $script:UiHeight -ge 26){$overhead=14}
+        $wrappedCount=@(Get-MenuRows $sourceLines $textWidth).Count
+        $navigationRows=@(Get-MenuRows @(('Page {0}/{0} | > Next | < Previous' -f $wrappedCount)) $textWidth).Count
+        $pageSize=[Math]::Max(3,$script:UiHeight-$overhead-$navigationRows)
+    }
+    # Keep section headings with their first data row. Logical character anchors
+    # retain the current part of a long report when resize changes its wrapping.
+    $pageRows=New-Object 'Collections.Generic.List[string]'
+    $pageList=New-Object 'Collections.Generic.List[object]'
+    $separator=$false;$offset=0L;$pageAnchor=0L
+    foreach ($line in $sourceLines) {
+        if (-not $line) {$separator=($pageRows.Count -gt 0);continue}
+        $wrapped=@(Get-MenuRows @($line) $textWidth)
+        $needed=1
+        if ($line -in $SectionHeadings) {$needed=$wrapped.Count+1}
+        $gap=0;if ($separator -and $pageRows.Count) {$gap=1}
+        if ($pageRows.Count -and $pageRows.Count+$gap+$needed -gt $pageSize) {
+            $pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset
+        }
+        if ($separator -and $pageRows.Count) {$pageRows.Add('')}
+        $separator=$false
+        foreach ($row in $wrapped) {
+            if ($pageRows.Count -eq $pageSize) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset}
+            $pageRows.Add($row);$offset+=($row -replace '\s','').Length
+        }
+    }
+    if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor})}
+    $pages=$pageList.Count
+    $page=[Math]::Max(0,[Math]::Min($Page,$pages-1))
+    if($Anchor -ge 0) {
+        $page=0
+        for($index=1;$index -lt $pages -and $pageList[$index].Anchor -le $Anchor;$index++){$page=$index}
+    }
+    $lines=@($pageList[$page].Rows)
+    if ($pages -gt 1) {$lines+=('Page {0}/{1} | > Next | < Previous' -f ($page+1),$pages)}
+    [pscustomobject]@{Title=$title;Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages;Anchor=$pageList[$page].Anchor;TextWidth=$textWidth;PageSize=$pageSize}
+}
+
+function Read-ApplicationResult {
+    param([Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$Lines,[Parameter(Mandatory=$true)][string]$Title,
+          [string[]]$SectionHeadings=@(),[switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+    $previousEffect=$script:DisplayEffect;$display=$false;$page=0;$anchor=-1L;$inputText='';$previousControlC=$null
+    try {
+        if($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected){
+            $previousControlC=[Console]::TreatControlCAsInput;[Console]::TreatControlCAsInput=$true
+        }
+        $script:DisplayEffect=$DisplayEffect
+        Initialize-Display;$display=$true
+        while ($true) {
+            [void](Update-DisplaySize)
+            $model=Get-ApplicationResultModel -SourceLines $Lines -Title $Title -SectionHeadings $SectionHeadings -Page $page -Anchor $anchor
+            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText -EscapeValue 'B' -ImmediateChoices @('B','Q','>','<')
+            if($answer -isnot [string] -and $answer.Resized) {$page=$model.Page;if($anchor -lt 0){$anchor=$model.Anchor};$inputText=$answer.InputText;continue}
+            $inputText='';$anchor=-1L
+            if ($answer -in '', 'B') {return $true}
+            if ($answer -eq 'Q') {return $false}
+            if ($answer -eq '>') {$page=[Math]::Min($model.Page+1,$model.Pages-1)}
+            elseif ($answer -eq '<') {$page=[Math]::Max(0,$model.Page-1)}
+            else {$page=$model.Page}
+        }
+    }catch [OperationCanceledException] {
+        # At this point the batch is finished; Ctrl+C simply exits its results.
+        return $false
+    }finally {
+        try {if ($display) {Restore-Display}}
+        finally {
+            $script:DisplayEffect=$previousEffect
+            if($null -ne $previousControlC){[Console]::TreatControlCAsInput=$previousControlC}
+        }
+    }
+}
+
+function Write-ApplicationResultText {
+    param([Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$Lines)
+    # NoPause and redirected callers keep ordinary stream output and do not
+    # initialize a new interactive display or consume input.
+    foreach($line in $Lines){Write-Host $line}
 }

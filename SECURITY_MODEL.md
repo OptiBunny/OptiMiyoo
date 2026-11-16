@@ -354,7 +354,9 @@ not fail on a character split introduced by the capture helper.
 
 CSV export protects formula-like string fields, including prefixed whitespace
 and full-width operator forms. CSV quoting alone is insufficient. Verified
-reports use parent results and new, unique filenames. Logs and reports can contain
+reports use parent results and new, unique filenames. The interactive final-results
+screen replaces worker progress only after the relay has stopped, and uses
+parent-verified results and report-save status. Logs and reports can contain
 local paths, filenames, and processing details; they are not anonymized. Ordinary
 hostile text can still mislead a reader outside the trusted prompts.
 

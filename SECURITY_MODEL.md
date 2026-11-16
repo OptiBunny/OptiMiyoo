@@ -54,10 +54,13 @@ authentication boundary in this application.
    any inherited `ERRORLEVEL` variable, so exit status comes from the child process.
    These changes end with the batch launcher and do not change the caller's settings.
    The parent stages a fixed list of installed scripts and literal compiled
-   helpers. Compiled work-directory literals escape Unicode line separators and
-   control characters without changing the path or its confinement scope. Application
-   scratch lives under `data/temp`; process-local temporary environment changes are
-   restored when the scope closes. The entry caller receives cleanup ownership
+   helpers, including the fixed Unicode text-editing helper. The staged helper
+   compilation entry point refuses additional source; parent-owned prompts may
+   initialize that helper through the existing installed-code compiler path.
+   Compiled work-directory literals escape Unicode line separators and control
+   characters without changing the path or its confinement scope. Application
+   scratch lives under `data/temp`; process-local temporary environment changes
+   are restored when the scope closes. The entry caller receives cleanup ownership
    before redirection starts, so an interrupted return cannot strand process
    TEMP/TMP or the temporary-directory lease.
 2. **Application worker.** Menus and processing scripts run in a fresh,

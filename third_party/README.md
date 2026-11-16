@@ -1,7 +1,7 @@
 # Third-party components
 
-OptiMiyoo bundles these tools for Windows conversion. Each has its own authors
-and license; source archives and build details are linked below.
+OptiMiyoo includes conversion tools and Unicode data for text editing. Each has
+its own authors and license; source and build details are linked below.
 
 These component licenses do not define a license for OptiMiyoo's own code.
 
@@ -31,3 +31,10 @@ Solheim for FS-UAE. Bundled Windows versions: **5.1.3 x64** and **5.1fs3 x86**.
 Runtime libraries for x86 CAPSIMG, packaged by [MSYS2](https://github.com/msys2/MINGW-packages).
 
 [Package list](runtime/packages.json) · [Licenses and packages](runtime/SOURCE.txt)
+
+## [Unicode character data](https://www.unicode.org/)
+
+Unicode 15.0.0 property ranges support caret movement and text editing on the
+legacy Windows PowerShell runtime. They do not define terminal character widths.
+
+[License](unicode/LICENSE.txt) · [Data sources and notices](unicode/SOURCE.txt)

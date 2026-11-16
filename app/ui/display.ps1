@@ -491,7 +491,7 @@ namespace OptiMiyoo {
             return category == UnicodeCategory.NonSpacingMark || category == UnicodeCategory.EnclosingMark;
         }
 
-        private static bool SuppressedBoundary(string text, int offset) {
+        private static bool SuppressedBoundary(string text, int offset, int precedingIndicators) {
             if (offset <= 0 || offset >= text.Length) return false;
             int right = ScalarAt(text, offset), leftAt = PreviousScalar(text, offset);
             int left = ScalarAt(text, leftAt);
@@ -508,12 +508,16 @@ namespace OptiMiyoo {
                 return false;
             }
             if (left >= 0x1F1E6 && left <= 0x1F1FF && right >= 0x1F1E6 && right <= 0x1F1FF) {
-                int count = 0, scan = leftAt;
-                while (scan >= 0) {
-                    int code = ScalarAt(text, scan);
-                    if (code < 0x1F1E6 || code > 0x1F1FF) break;
-                    count++;
-                    scan = PreviousScalar(text, scan);
+                int count = precedingIndicators;
+                if (count < 0) {
+                    count = 0;
+                    int scan = leftAt;
+                    while (scan >= 0) {
+                        int code = ScalarAt(text, scan);
+                        if (code < 0x1F1E6 || code > 0x1F1FF) break;
+                        count++;
+                        scan = PreviousScalar(text, scan);
+                    }
                 }
                 return (count & 1) == 1;
             }
@@ -532,6 +536,31 @@ namespace OptiMiyoo {
             return false;
         }
 
+        public static int[] GetStarts(string text) {
+            if (text == null) text = String.Empty;
+            int[] starts = StringInfo.ParseCombiningCharacters(text);
+            if (!LegacyElements || !HasCandidate(text)) return starts;
+            // Count scalar RI runs once. Recounting each prefix would be quadratic.
+            // Non-RI scalars, including Extend and ZWJ, reset the run exactly as Move.
+            int[] precedingIndicators = new int[text.Length + 1];
+            int offset = 0, run = 0;
+            while (offset < text.Length) {
+                int code = ScalarAt(text, offset);
+                run = code >= 0x1F1E6 && code <= 0x1F1FF ? run + 1 : 0;
+                offset += code > 0xFFFF ? 2 : 1;
+                precedingIndicators[offset] = run;
+            }
+            int[] kept = new int[starts.Length];
+            int count = 0;
+            for (int i = 0; i < starts.Length; i++) {
+                int start = starts[i];
+                if (!SuppressedBoundary(text, start, precedingIndicators[start]))
+                    kept[count++] = start;
+            }
+            if (count == starts.Length) return starts;
+            Array.Resize(ref kept, count);
+            return kept;
+        }
         public static int Move(string text, int caret, int direction) {
             if (text == null) text = String.Empty;
             caret = Math.Max(0, Math.Min(text.Length, caret));
@@ -549,7 +578,7 @@ namespace OptiMiyoo {
             }
             if (LegacyElements && HasCandidate(text)) {
                 int step = direction > 0 ? 1 : -1;
-                while (at >= 0 && at < starts.Length && SuppressedBoundary(text, starts[at])) at += step;
+                while (at >= 0 && at < starts.Length && SuppressedBoundary(text, starts[at], -1)) at += step;
                 if (at < 0) return 0;
                 if (at >= starts.Length) return text.Length;
             }
@@ -563,6 +592,8 @@ namespace OptiMiyoo {
   if($null -eq $candidate){throw 'Expected pure text helper was not created.'}
   $method=$candidate.GetMethod('Move',[type[]]@([string],[int],[int]))
   if($null -eq $method -or -not $method.IsStatic -or $method.ReturnType -ne [int]){throw 'Unexpected pure text helper signature.'}
+  $startsMethod=$candidate.GetMethod('GetStarts',[type[]]@([string]))
+  if($null -eq $startsMethod -or -not $startsMethod.IsStatic -or $startsMethod.ReturnType -ne [int[]]){throw 'Unexpected pure text starts signature.'}
   $script:InputTextType=$candidate;$script:InputTextInitializationState=1
   return $candidate
  } catch {
@@ -591,58 +622,99 @@ function Get-InputCaretOffset([string]$Text,[int]$Caret,[int]$Direction) {
  }
  return $starts[$at]
 }
+function Get-InputTextStarts([string]$Text) {
+ if($script:InputTextLegacyElements -and $Text -match '[\u200C\u200D]|\uD83C[\uDDE6-\uDDFF\uDFFB-\uDFFF]'){
+  $textType=Initialize-InputText
+  return ,($textType::GetStarts($Text))
+ }
+ return ,([Globalization.StringInfo]::ParseCombiningCharacters($Text))
+}
+
+function Get-InputTextLayout([string]$Text) {
+ $starts=Get-InputTextStarts $Text
+ $widths=[int[]]::new($starts.Length);[long]$total=0
+ for($i=0;$i -lt $starts.Length;$i++){
+  $end=$Text.Length;if($i+1 -lt $starts.Length){$end=$starts[$i+1]}
+  $widths[$i]=Get-TextElementWidth $Text.Substring($starts[$i],$end-$starts[$i])
+  $total+=$widths[$i]
+ }
+ return [pscustomobject]@{Starts=$starts;Widths=$widths;Total=$total}
+}
+
+function Fit-InputText([string]$Text,[int]$Width) {
+ if($Width -le 0){return ''}
+ $Text=$Text -replace '[\x00-\x1f\x7f-\x9f]',' '
+ if($Text -notmatch '[^\x00-\x7F]'){return Fit-Text $Text $Width}
+ $layout=Get-InputTextLayout $Text
+ if($layout.Total -le $Width){return $Text+(' '*[int]($Width-$layout.Total))}
+ if($Width -le 3){return ('.'*$Width)}
+ [long]$used=0;$end=0;$budget=$Width-3
+ for($i=0;$i -lt $layout.Starts.Length;$i++){
+  if($used+$layout.Widths[$i] -gt $budget){break}
+  $used+=$layout.Widths[$i]
+  $end=$Text.Length;if($i+1 -lt $layout.Starts.Length){$end=$layout.Starts[$i+1]}
+ }
+ return $Text.Substring(0,$end)+'...'+(' '*[int]($Width-$used-3))
+}
+
 function Get-InputViewport([string]$Text,[int]$Caret,[int]$Width) {
-    $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
-    if ($Width -lt 1) {return [pscustomobject]@{Text='';Caret=0;CaretTextIndex=0}}
-    if ($Text -notmatch '[^\x00-\x7F]') {
-        $offset=[Math]::Max(0,$Caret-$Width+1)
-        return [pscustomobject]@{
-            Text=$Text.Substring($offset,[Math]::Min($Width,$Text.Length-$offset))
-            Caret=$Caret-$offset;CaretTextIndex=$Caret-$offset
-        }
-    }
-    $starts=[Globalization.StringInfo]::ParseCombiningCharacters($Text)
-    $at=$starts.Length
-    if ($Caret -lt $Text.Length) {
-        $at=[Array]::BinarySearch($starts,$Caret)
-        if ($at -lt 0) {$at=(-bnot $at)-1;$Caret=$starts[$at]}
-    }
-    # Work backward over visible elements once. A UTF-16 offset can otherwise
-    # drop the base of an accent, even when the whole input fits on screen.
-    $reserve=1
-    if ($Caret -lt $Text.Length) {$reserve=[Math]::Max(1,(Get-TextElementWidth ([Globalization.StringInfo]::GetNextTextElement($Text,$Caret))))}
-    $offset=$Caret;$cells=0
-    for ($index=$at-1;$index -ge 0;$index--) {
-        $end=$Text.Length;if ($index+1 -lt $starts.Length) {$end=$starts[$index+1]}
-        $element=$Text.Substring($starts[$index],$end-$starts[$index])
-        $widthOfElement=Get-TextElementWidth $element
-        if ($cells+$widthOfElement -gt $Width-$reserve) {break}
-        $cells+=$widthOfElement;$offset=$starts[$index]
-    }
-    return [pscustomobject]@{
-        Text=Get-TextPrefix $Text.Substring($offset) $Width
-        Caret=$cells;CaretTextIndex=$Caret-$offset
-    }
+ $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
+ if($Width -lt 1){return [pscustomobject]@{Text='';Caret=0;CaretTextIndex=0}}
+ if($Text -notmatch '[^\x00-\x7F]'){
+  $offset=[Math]::Max(0,$Caret-$Width+1)
+  return [pscustomobject]@{Text=$Text.Substring($offset,[Math]::Min($Width,$Text.Length-$offset));Caret=$Caret-$offset;CaretTextIndex=$Caret-$offset}
+ }
+ $starts=Get-InputTextStarts $Text;$at=$starts.Length
+ # Cache width+1 so zero denotes an unvisited cluster, including zero-width ones.
+ # Only the visible neighborhood needs PowerShell width calls on ordinary text.
+ $widths=[int[]]::new($starts.Length)
+ if($Caret -lt $Text.Length){
+  $at=[Array]::BinarySearch($starts,$Caret)
+  if($at -lt 0){$at=(-bnot $at)-1;$Caret=$starts[$at]}
+ }
+ $reserve=1
+ if($Caret -lt $Text.Length){
+  $elementEnd=$Text.Length;if($at+1 -lt $starts.Length){$elementEnd=$starts[$at+1]}
+  $widths[$at]=(Get-TextElementWidth $Text.Substring($starts[$at],$elementEnd-$starts[$at]))+1
+  $reserve=[Math]::Max(1,$widths[$at]-1)
+ }
+ if($reserve -gt $Width){return [pscustomobject]@{Text='';Caret=0;CaretTextIndex=0}}
+ $offset=$Caret;$offsetIndex=$at;[long]$cells=0
+ for($i=$at-1;$i -ge 0;$i--){
+  if($widths[$i] -eq 0){
+   $elementEnd=$Text.Length;if($i+1 -lt $starts.Length){$elementEnd=$starts[$i+1]}
+   $widths[$i]=(Get-TextElementWidth $Text.Substring($starts[$i],$elementEnd-$starts[$i]))+1
+  }
+  $cellsHere=$widths[$i]-1
+  if($cells+$cellsHere -gt $Width-$reserve){break}
+  $cells+=$cellsHere;$offset=$starts[$i];$offsetIndex=$i
+ }
+ [long]$used=0;$end=$offset
+ for($i=$offsetIndex;$i -lt $starts.Length;$i++){
+  if($widths[$i] -eq 0){
+   $elementEnd=$Text.Length;if($i+1 -lt $starts.Length){$elementEnd=$starts[$i+1]}
+   $widths[$i]=(Get-TextElementWidth $Text.Substring($starts[$i],$elementEnd-$starts[$i]))+1
+  }
+  $cellsHere=$widths[$i]-1
+  if($used+$cellsHere -gt $Width){break}
+  $used+=$cellsHere
+  $end=$Text.Length;if($i+1 -lt $starts.Length){$end=$starts[$i+1]}
+ }
+ return [pscustomobject]@{Text=$Text.Substring($offset,$end-$offset);Caret=$cells;CaretTextIndex=$Caret-$offset}
 }
 
 function Format-InputField($Viewport,[int]$Width,[bool]$ShowCaret=$true) {
-    $text=Fit-Text $Viewport.Text $Width
-    $visible=($ShowCaret -and $script:UiVT)
-    if (-not $visible -or $text.Length -eq 0) {return $text}
-    # Decorate one complete grapheme, or its padded end-space. UTF-16 caret
-    # offsets can fall inside a surrogate pair; never split it with escapes.
-    $index=[Math]::Max(0,[Math]::Min($text.Length-1,$Viewport.CaretTextIndex))
-    if ($text -notmatch '[^\x00-\x7F]') {
-        return ($text.Substring(0,$index)+$script:Esc+'[7m'+$text[$index]+$script:Esc+'[27m'+$text.Substring($index+1))
-    }
-    $elements=[Globalization.StringInfo]::GetTextElementEnumerator($text)
-    while ($elements.MoveNext()) {
-        $start=$elements.ElementIndex; $element=$elements.GetTextElement()
-        if ($index -lt $start+$element.Length) {
-            return ($text.Substring(0,$start)+$script:Esc+'[7m'+$element+$script:Esc+'[27m'+$text.Substring($start+$element.Length))
-        }
-    }
-    return $text
+ $text=Fit-InputText $Viewport.Text $Width
+ $visible=($ShowCaret -and $script:UiVT)
+ if(-not $visible -or $text.Length -eq 0){return $text}
+ $index=[Math]::Max(0,[Math]::Min($text.Length-1,$Viewport.CaretTextIndex))
+ if($text -notmatch '[^\x00-\x7F]'){
+  return ($text.Substring(0,$index)+$script:Esc+'[7m'+$text[$index]+$script:Esc+'[27m'+$text.Substring($index+1))
+ }
+ $starts=Get-InputTextStarts $text;$at=[Array]::BinarySearch($starts,$index)
+ if($at -lt 0){$at=(-bnot $at)-1}
+ $start=$starts[$at];$end=$text.Length;if($at+1 -lt $starts.Length){$end=$starts[$at+1]}
+ return ($text.Substring(0,$start)+$script:Esc+'[7m'+$text.Substring($start,$end-$start)+$script:Esc+'[27m'+$text.Substring($end))
 }
 function Clear-DisplayPanel {
     $script:UiIdleMenuCache=$null

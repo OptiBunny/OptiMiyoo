@@ -387,6 +387,12 @@ within the existing chunk and queue limits. If the capture limit cuts a pair, th
 queued half is omitted while the limit failure remains; response encoding must
 not fail on a character split introduced by the capture helper.
 
+Full-screen menu input uses the same limited text boundaries for caret movement,
+viewport selection, fitting and highlighting. Required legacy Unicode helper
+initialization failures produce the fixed diagnostic instead of fallback
+boundaries. These input-field rules do not change general text wrapping or
+establish terminal-cell widths, glyph shaping or complete Unicode conformance.
+
 Archive-service cleanup warnings are collected before the background runspace
 is disposed, including warnings raised while stopping it. A parent-owned buffer
 persists across batches within one host invocation and holds at most 64 escaped

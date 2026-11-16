@@ -47,8 +47,13 @@ cores can use the enabled files.
 
 After Apply, the results show what was enabled or disabled. **Already on/off**
 means no change was needed. A partly enabled system stays as it was unless you
-toggle it. **Enter / B / Esc** returns to the main menu; **Q** exits.
+toggle it. Use **> / <** to page through long results, including verified backup
+paths. **Enter / B / Esc** returns to the main menu; **Q** exits.
 [Refresh Onion's game list](#copy-to-your-miyoo) after making changes.
+
+To stop setup after choosing **Apply**, press **B / Esc** to return to the SD path,
+or **Q** / **Ctrl+C** to exit. A config update already being saved may finish first.
+Completed changes and backups remain; review the current settings before retrying.
 
 Changed configs are backed up on the card before they are replaced, in a dated
 folder such as `Backups/OptiMiyoo_2026-10-31-10-30-00/Emu`.

@@ -226,9 +226,9 @@ function Invoke-ApplicationPolicyPrompt {
 # Final result pages belong to the parent after the worker relay has stopped.
 # Keep long paths and per-file results available through the same resize-aware
 # pager used by SD results, rather than printing over a retained worker frame.
-function Get-ApplicationResultModel {
+function New-ApplicationResultLayout {
     param([Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$SourceLines,[Parameter(Mandatory=$true)][string]$Title,
-          [int]$Page=0,[long]$Anchor=-1,[string[]]$SectionHeadings=@())
+          [string[]]$SectionHeadings=@())
     $prompt='Enter / B / Esc: Main menu | Q: Exit'
     # Let the shared renderer reclaim artwork or paragraph gaps before paging.
     # Without an initialized viewport, retain the conservative minimum panel.
@@ -236,7 +236,7 @@ function Get-ApplicationResultModel {
     if($script:UiColumns -ge 44 -and $script:UiHeight -gt 0) {
         $whole=Get-MenuLayout -Rows $sourceLines -Prompt $prompt
         if($whole.Fits) {
-            return [pscustomobject]@{Title=$title;Lines=@($whole.Rows);Prompt=$prompt;Page=0;Pages=1;Anchor=0L;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
+            return [pscustomobject]@{Title=$title;PageList=@([pscustomobject]@{Rows=@($whole.Rows);Anchor=0L});Prompt=$prompt;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
         }
         $empty=Get-MenuLayout -Rows @('')
         $textWidth=$empty.TextWidth
@@ -268,6 +268,13 @@ function Get-ApplicationResultModel {
         }
     }
     if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor})}
+    return [pscustomobject]@{Title=$title;PageList=$pageList.ToArray();Prompt=$prompt;TextWidth=$textWidth;PageSize=$pageSize}
+}
+
+function Get-ApplicationResultPage {
+    param([Parameter(Mandatory=$true)]$Layout,[int]$Page=0,[long]$Anchor=-1)
+    $pageList=$Layout.PageList;$title=$Layout.Title;$prompt=$Layout.Prompt
+    $textWidth=$Layout.TextWidth;$pageSize=$Layout.PageSize
     $pages=$pageList.Count
     $page=[Math]::Max(0,[Math]::Min($Page,$pages-1))
     if($Anchor -ge 0) {
@@ -279,11 +286,19 @@ function Get-ApplicationResultModel {
     [pscustomobject]@{Title=$title;Lines=$lines;Prompt=$prompt;Page=$page;Pages=$pages;Anchor=$pageList[$page].Anchor;TextWidth=$textWidth;PageSize=$pageSize}
 }
 
+function Get-ApplicationResultModel {
+    param([Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$SourceLines,[Parameter(Mandatory=$true)][string]$Title,
+          [int]$Page=0,[long]$Anchor=-1,[string[]]$SectionHeadings=@())
+    $layout=New-ApplicationResultLayout -SourceLines $SourceLines -Title $Title -SectionHeadings $SectionHeadings
+    Get-ApplicationResultPage -Layout $layout -Page $Page -Anchor $Anchor
+}
+
 function Read-ApplicationResult {
     param([Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$Lines,[Parameter(Mandatory=$true)][string]$Title,
           [string[]]$SectionHeadings=@(),[switch]$NoAnimation,[switch]$NoColor,
           [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
     $previousEffect=$script:DisplayEffect;$display=$false;$page=0;$anchor=-1L;$inputText='';$previousControlC=$null
+    $resultLayout=$null;$layoutKey=$null
     try {
         if($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected){
             $previousControlC=[Console]::TreatControlCAsInput;[Console]::TreatControlCAsInput=$true
@@ -292,7 +307,14 @@ function Read-ApplicationResult {
         Initialize-Display;$display=$true
         while ($true) {
             [void](Update-DisplaySize)
-            $model=Get-ApplicationResultModel -SourceLines $Lines -Title $Title -SectionHeadings $SectionHeadings -Page $page -Anchor $anchor
+            $currentKey=('{0}|{1}|{2}' -f $script:UiColumns,$script:UiHeight,$script:UiWidth)
+            if($null -eq $resultLayout -or $currentKey -cne $layoutKey) {
+                # Retain only this active screen and viewport, never resize history.
+                $resultLayout=$null
+                $resultLayout=New-ApplicationResultLayout -SourceLines $Lines -Title $Title -SectionHeadings $SectionHeadings
+                $layoutKey=$currentKey
+            }
+            $model=Get-ApplicationResultPage -Layout $resultLayout -Page $page -Anchor $anchor
             $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText -EscapeValue 'B' -ImmediateChoices @('B','Q','>','<')
             if($answer -isnot [string] -and $answer.Resized) {$page=$model.Page;if($anchor -lt 0){$anchor=$model.Anchor};$inputText=$answer.InputText;continue}
             $inputText='';$anchor=-1L
@@ -308,6 +330,7 @@ function Read-ApplicationResult {
     }finally {
         try {if ($display) {Restore-Display}}
         finally {
+            $resultLayout=$null
             $script:DisplayEffect=$previousEffect
             if($null -ne $previousControlC){[Console]::TreatControlCAsInput=$previousControlC}
         }

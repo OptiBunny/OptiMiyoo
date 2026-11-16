@@ -360,7 +360,7 @@ function Invoke-ArchiveSandbox {
                             if($copied -ne $row.Length){throw 'Archive sandbox payload import was incomplete.'}
                             $output.Dispose();$output=$null
                             [IO.File]::SetLastWriteTimeUtc($target,$entry.LastWriteTime.UtcDateTime)
-                        } finally {if($output){$output.Dispose()};$targetParentLease.Dispose()}
+                        } finally {try {if($output){$output.Dispose()}} finally {$targetParentLease.Dispose()}}
                     }
                 } finally {$payloadLease.Dispose()}
             }

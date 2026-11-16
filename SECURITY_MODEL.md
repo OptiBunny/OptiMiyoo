@@ -154,6 +154,10 @@ member identity. Legacy names without that flag retain their existing decoding.
 Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
+Archive payload import releases its destination-parent directory lease even
+when an output write and the subsequent stream close both fail. This cleanup
+does not turn an incomplete import into a successful result.
+
 Archive manifests, broker collection inventories and output member maps, parent
 source-ownership records, destination directory indexes, and conversion/playlist
 descriptor caches use ordinal, case-insensitive identity. Playlist Auto member

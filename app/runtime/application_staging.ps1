@@ -87,6 +87,7 @@ function New-ApplicationStagedCode {
     $sources=New-Object Collections.Generic.List[string]
     foreach ($pair in @(
         @('app/ui/display.ps1','Initialize-Display'),@('app/ui/display.ps1','Initialize-FrameTimer'),
+        @('app/ui/display.ps1','Initialize-InputText'),
         @('app/shared/archive_limits.ps1','Initialize-ArchiveLimits'),@('app/shared/media_validation.ps1','Initialize-NibValidation'),
         @('app/shared/media_validation.ps1','Initialize-IpfValidation'),
         @('app/shared/native_process.ps1','Initialize-NativeTextCapture'))) {

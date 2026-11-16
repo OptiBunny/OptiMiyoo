@@ -10,6 +10,11 @@ at the main menu, they keep you there. Letters need **Enter** in selection
 menus; on results screens, during demo playback, or while processing, these keys
 work immediately.
 
+In full-screen selection prompts, **Left/Right** moves the caret and
+**Home/End** jumps to the start or end. **Backspace** deletes before the caret;
+**Delete** deletes after it. Plain text prompts, including the SD path, accept
+typing and **Backspace** at the end.
+
 To create playlists or convert files, [prepare your games](#prepare-a-batch) first.
 OptiMiyoo reads `SRC` and `DST` when you start a playlist or conversion batch.
 Opening the menu, viewing the demo, and SD setup do not read your game files.

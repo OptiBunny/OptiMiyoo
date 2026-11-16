@@ -336,23 +336,260 @@ function Fit-Text([string]$Text,[int]$Width) {
     }
     return $Text+(' '*[Math]::Max(0,$Width-(Get-TextWidth $Text)))
 }
+# Keep helper availability independent from console/VT initialization. The parent
+# also includes the literal helper in the precompiled isolated-worker assembly.
+if($null -eq $script:InputTextInitializationState){$script:InputTextInitializationState=0;$script:InputTextType=$null}
+$script:InputTextLegacyElements=([Globalization.StringInfo]::ParseCombiningCharacters((-join [char[]]@(0xD83C,0xDDEC,0xD83C,0xDDE7))).Length -ne 1)
+
+function Initialize-InputText {
+ if($script:InputTextInitializationState -eq 1){return $script:InputTextType}
+ if($script:InputTextInitializationState -eq -1){throw [InvalidOperationException]::new('Unicode input editing could not initialize. Restart OptiMiyoo and try again.')}
+ # Mark the attempt before invoking the compiler. Failure/reentry cannot cause
+ # another compilation per key. Retain no ErrorRecord or private error text.
+ $script:InputTextInitializationState=-1
+ try {
+  $candidate='OptiMiyoo.InputTextV1' -as [type]
+  if($null -eq $candidate){
+  Add-OptiMiyooType -TypeDefinition @'
+// Unicode 15.0 property subsets: see third_party/unicode/SOURCE.txt
+// and third_party/unicode/LICENSE.txt for provenance and permission.
+// This legacy caret adapter intentionally does not implement all of UAX29.
+using System;
+using System.Globalization;
+
+namespace OptiMiyoo {
+    public static class InputTextV1 {
+        private static readonly int[] PictographicRanges = new int[] { 0xA9, 0xA9,
+            0xAE, 0xAE,
+            0x203C, 0x203C,
+            0x2049, 0x2049,
+            0x2122, 0x2122,
+            0x2139, 0x2139,
+            0x2194, 0x2199,
+            0x21A9, 0x21AA,
+            0x231A, 0x231B,
+            0x2328, 0x2328,
+            0x2388, 0x2388,
+            0x23CF, 0x23CF,
+            0x23E9, 0x23F3,
+            0x23F8, 0x23FA,
+            0x24C2, 0x24C2,
+            0x25AA, 0x25AB,
+            0x25B6, 0x25B6,
+            0x25C0, 0x25C0,
+            0x25FB, 0x25FE,
+            0x2600, 0x2605,
+            0x2607, 0x2612,
+            0x2614, 0x2685,
+            0x2690, 0x2705,
+            0x2708, 0x2712,
+            0x2714, 0x2714,
+            0x2716, 0x2716,
+            0x271D, 0x271D,
+            0x2721, 0x2721,
+            0x2728, 0x2728,
+            0x2733, 0x2734,
+            0x2744, 0x2744,
+            0x2747, 0x2747,
+            0x274C, 0x274C,
+            0x274E, 0x274E,
+            0x2753, 0x2755,
+            0x2757, 0x2757,
+            0x2763, 0x2767,
+            0x2795, 0x2797,
+            0x27A1, 0x27A1,
+            0x27B0, 0x27B0,
+            0x27BF, 0x27BF,
+            0x2934, 0x2935,
+            0x2B05, 0x2B07,
+            0x2B1B, 0x2B1C,
+            0x2B50, 0x2B50,
+            0x2B55, 0x2B55,
+            0x3030, 0x3030,
+            0x303D, 0x303D,
+            0x3297, 0x3297,
+            0x3299, 0x3299,
+            0x1F000, 0x1F0FF,
+            0x1F10D, 0x1F10F,
+            0x1F12F, 0x1F12F,
+            0x1F16C, 0x1F171,
+            0x1F17E, 0x1F17F,
+            0x1F18E, 0x1F18E,
+            0x1F191, 0x1F19A,
+            0x1F1AD, 0x1F1E5,
+            0x1F201, 0x1F20F,
+            0x1F21A, 0x1F21A,
+            0x1F22F, 0x1F22F,
+            0x1F232, 0x1F23A,
+            0x1F23C, 0x1F23F,
+            0x1F249, 0x1F3FA,
+            0x1F400, 0x1F53D,
+            0x1F546, 0x1F64F,
+            0x1F680, 0x1F6FF,
+            0x1F774, 0x1F77F,
+            0x1F7D5, 0x1F7FF,
+            0x1F80C, 0x1F80F,
+            0x1F848, 0x1F84F,
+            0x1F85A, 0x1F85F,
+            0x1F888, 0x1F88F,
+            0x1F8AE, 0x1F8FF,
+            0x1F90C, 0x1F93A,
+            0x1F93C, 0x1F945,
+            0x1F947, 0x1FAFF,
+            0x1FC00, 0x1FFFD };
+        private static readonly int[] BarrierRanges = new int[] { 0x0, 0x1F,
+            0x7F, 0x9F,
+            0xAD, 0xAD,
+            0x61C, 0x61C,
+            0x180E, 0x180E,
+            0x200B, 0x200B,
+            0x200E, 0x200F,
+            0x2028, 0x202E,
+            0x2060, 0x206F,
+            0xFEFF, 0xFEFF,
+            0xFFF0, 0xFFFB,
+            0x13430, 0x1343F,
+            0x1BCA0, 0x1BCA3,
+            0x1D173, 0x1D17A,
+            0xE0000, 0xE001F,
+            0xE0080, 0xE00FF,
+            0xE01F0, 0xE0FFF };
+        private static readonly bool LegacyElements =
+            StringInfo.ParseCombiningCharacters("\uD83C\uDDEC\uD83C\uDDE7").Length != 1;
+
+        public static bool UsesLegacyElements { get { return LegacyElements; } }
+
+        private static bool Contains(int code, int[] ranges) {
+            int low = 0, high = ranges.Length / 2 - 1;
+            while (low <= high) {
+                int middle = low + (high - low) / 2, at = middle * 2;
+                if (code < ranges[at]) high = middle - 1;
+                else if (code > ranges[at + 1]) low = middle + 1;
+                else return true;
+            }
+            return false;
+        }
+
+        private static int ScalarAt(string text, int offset) {
+            char unit = text[offset];
+            if (Char.IsHighSurrogate(unit) && offset + 1 < text.Length && Char.IsLowSurrogate(text[offset + 1]))
+                return Char.ConvertToUtf32(text, offset);
+            return unit; // Preserve an isolated UTF-16 unit without throwing.
+        }
+
+        private static int PreviousScalar(string text, int offset) {
+            int at = offset - 1;
+            if (at > 0 && Char.IsLowSurrogate(text[at]) && Char.IsHighSurrogate(text[at - 1])) at--;
+            return at;
+        }
+
+        private static bool ExtendSubset(string text, int offset, int code) {
+            if (code == 0x200C || (code >= 0xFE00 && code <= 0xFE0F) ||
+                (code >= 0xE0100 && code <= 0xE01EF) || (code >= 0x1F3FB && code <= 0x1F3FF)) return true;
+            if (code >= 0xD800 && code <= 0xDFFF) return false;
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(text, offset);
+            return category == UnicodeCategory.NonSpacingMark || category == UnicodeCategory.EnclosingMark;
+        }
+
+        private static bool SuppressedBoundary(string text, int offset) {
+            if (offset <= 0 || offset >= text.Length) return false;
+            int right = ScalarAt(text, offset), leftAt = PreviousScalar(text, offset);
+            int left = ScalarAt(text, leftAt);
+            if ((right >= 0xD800 && right <= 0xDFFF) || (left >= 0xD800 && left <= 0xDFFF)) return false;
+            if (Contains(left, BarrierRanges) || Contains(right, BarrierRanges)) return false;
+            if (right == 0x200C || right == 0x200D || (right >= 0x1F3FB && right <= 0x1F3FF)) return true;
+            if (left == 0x200D && Contains(right, PictographicRanges)) {
+                int scan = PreviousScalar(text, leftAt);
+                while (scan >= 0) {
+                    int code = ScalarAt(text, scan);
+                    if (!ExtendSubset(text, scan, code)) return Contains(code, PictographicRanges);
+                    scan = PreviousScalar(text, scan);
+                }
+                return false;
+            }
+            if (left >= 0x1F1E6 && left <= 0x1F1FF && right >= 0x1F1E6 && right <= 0x1F1FF) {
+                int count = 0, scan = leftAt;
+                while (scan >= 0) {
+                    int code = ScalarAt(text, scan);
+                    if (code < 0x1F1E6 || code > 0x1F1FF) break;
+                    count++;
+                    scan = PreviousScalar(text, scan);
+                }
+                return (count & 1) == 1;
+            }
+            return false;
+        }
+
+        private static bool HasCandidate(string text) {
+            for (int i = 0; i < text.Length; i++) {
+                char unit = text[i];
+                if (unit == 0x200C || unit == 0x200D) return true;
+                if (unit == 0xD83C && i + 1 < text.Length) {
+                    int next = text[i + 1];
+                    if ((next >= 0xDDE6 && next <= 0xDDFF) || (next >= 0xDFFB && next <= 0xDFFF)) return true;
+                }
+            }
+            return false;
+        }
+
+        public static int Move(string text, int caret, int direction) {
+            if (text == null) text = String.Empty;
+            caret = Math.Max(0, Math.Min(text.Length, caret));
+            bool ascii = true;
+            for (int i = 0; i < text.Length; i++) if (text[i] > 0x7F) { ascii = false; break; }
+            if (ascii) return Math.Max(0, Math.Min(text.Length, caret + Math.Sign(direction)));
+            int[] starts = StringInfo.ParseCombiningCharacters(text);
+            int at = Array.BinarySearch(starts, caret);
+            if (direction > 0) {
+                at = at >= 0 ? at + 1 : ~at;
+                if (at >= starts.Length) return text.Length;
+            } else {
+                at = at >= 0 ? at - 1 : (~at) - 1;
+                if (at < 0) return 0;
+            }
+            if (LegacyElements && HasCandidate(text)) {
+                int step = direction > 0 ? 1 : -1;
+                while (at >= 0 && at < starts.Length && SuppressedBoundary(text, starts[at])) at += step;
+                if (at < 0) return 0;
+                if (at >= starts.Length) return text.Length;
+            }
+            return starts[at];
+        }
+    }
+}
+'@
+  $candidate='OptiMiyoo.InputTextV1' -as [type]
+ }
+  if($null -eq $candidate){throw 'Expected pure text helper was not created.'}
+  $method=$candidate.GetMethod('Move',[type[]]@([string],[int],[int]))
+  if($null -eq $method -or -not $method.IsStatic -or $method.ReturnType -ne [int]){throw 'Unexpected pure text helper signature.'}
+  $script:InputTextType=$candidate;$script:InputTextInitializationState=1
+  return $candidate
+ } catch {
+  $script:InputTextType=$null
+  throw [InvalidOperationException]::new('Unicode input editing could not initialize. Restart OptiMiyoo and try again.')
+ }
+}
+
 function Get-InputCaretOffset([string]$Text,[int]$Caret,[int]$Direction) {
-    $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
-    if ($Text -notmatch '[^\x00-\x7F]') {
-        return [Math]::Max(0,[Math]::Min($Text.Length,$Caret+[Math]::Sign($Direction)))
-    }
-    # Carets and deletions follow whole text elements, including surrogate pairs
-    # and combining accents. This runs only on a key press, never an idle poll.
-    $starts=[Globalization.StringInfo]::ParseCombiningCharacters($Text)
-    $at=[Array]::BinarySearch($starts,$Caret)
-    if ($Direction -gt 0) {
-        if ($at -ge 0) {$at++} else {$at=-bnot $at}
-        if ($at -ge $starts.Length) {return $Text.Length}
-    } else {
-        if ($at -ge 0) {$at--} else {$at=(-bnot $at)-1}
-        if ($at -lt 0) {return 0}
-    }
-    return $starts[$at]
+ $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
+ if($Text -notmatch '[^\x00-\x7F]'){return [Math]::Max(0,[Math]::Min($Text.Length,$Caret+[Math]::Sign($Direction)))}
+ if($script:InputTextLegacyElements -and $Text -match '[\u200C\u200D]|\uD83C[\uDDE6-\uDDFF\uDFFB-\uDFFF]') {
+  $textType=Initialize-InputText
+  return $textType::Move($Text,$Caret,$Direction)
+ }
+ # Modern runtimes and simple legacy Unicode retain the exact original route.
+ # They do not require a new compiler initialization, even after a failed attempt.
+ $starts=[Globalization.StringInfo]::ParseCombiningCharacters($Text)
+ $at=[Array]::BinarySearch($starts,$Caret)
+ if($Direction -gt 0) {
+  if($at -ge 0){$at++}else{$at=-bnot $at}
+  if($at -ge $starts.Length){return $Text.Length}
+ } else {
+  if($at -ge 0){$at--}else{$at=(-bnot $at)-1}
+  if($at -lt 0){return 0}
+ }
+ return $starts[$at]
 }
 function Get-InputViewport([string]$Text,[int]$Caret,[int]$Width) {
     $Caret=[Math]::Max(0,[Math]::Min($Text.Length,$Caret))
@@ -1317,7 +1554,7 @@ function Read-PlainMenuInput([string]$Prompt,[switch]$PromptShown) {
         if ($key.Key -eq [ConsoleKey]::Enter) {[Console]::WriteLine();return $text.Trim()}
         if ($key.Key -eq [ConsoleKey]::Backspace -and $text.Length) {
             $previous=Get-InputCaretOffset $text $text.Length -1
-            $width=Get-TextWidth $text.Substring($previous)
+            $width=Get-TextElementWidth $text.Substring($previous)
             $text=$text.Substring(0,$previous)
             [Console]::Write(("`b"*$width)+(' '*$width)+("`b"*$width))
         } elseif (-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 4096) {
@@ -1386,8 +1623,8 @@ function Read-DisplayInput([string]$Prompt,[string]$Title='Selection',
                     continue
                 }
                 if ($key.Key -eq [ConsoleKey]::Enter) {return $text.Trim()}
-                if ($key.Key -eq [ConsoleKey]::Backspace -and $caret -gt 0) {$previous=Get-InputCaretOffset $text $caret -1;$text=$text.Remove($previous,$caret-$previous);$caret=$previous}
-                elseif ($key.Key -eq [ConsoleKey]::Delete -and $caret -lt $text.Length) {$next=Get-InputCaretOffset $text $caret 1;$text=$text.Remove($caret,$next-$caret)}
+                if ($key.Key -eq [ConsoleKey]::Backspace -and $caret -gt 0) {$previous=Get-InputCaretOffset $text $caret -1;$next=Get-InputCaretOffset $text $previous 1;$text=$text.Remove($previous,$next-$previous);$caret=$previous}
+                elseif ($key.Key -eq [ConsoleKey]::Delete -and $caret -lt $text.Length) {$next=Get-InputCaretOffset $text $caret 1;$previous=Get-InputCaretOffset $text $next -1;$text=$text.Remove($previous,$next-$previous);$caret=$previous}
                 elseif ($key.Key -eq [ConsoleKey]::LeftArrow) {$caret=Get-InputCaretOffset $text $caret -1}
                 elseif ($key.Key -eq [ConsoleKey]::RightArrow) {$caret=Get-InputCaretOffset $text $caret 1}
                 elseif ($key.Key -eq [ConsoleKey]::Home) {$caret=0}

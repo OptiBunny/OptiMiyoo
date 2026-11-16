@@ -1,0 +1,54 @@
+Unicode 15.0.0 character data
+
+OptiMiyoo's legacy Windows PowerShell text-input compatibility helper derives
+limited property ranges from the Unicode Character Database and Emoji Data.
+The embedded OptiMiyoo.InputTextV1 helper in app/ui/display.ps1 uses:
+- Extended_Pictographic: 511 source rows, 3537 code points, merged into 78 ranges.
+- Grapheme_Cluster_Break Control, CR and LF: 28 source rows, 3895 code points,
+  merged into 17 ranges.
+
+These ranges support caret movement and editing. They do not provide a complete
+replacement for Unicode grapheme segmentation or define terminal cell widths.
+The original data files are available from the upstream URLs below; only the
+derived ranges are embedded in the application.
+
+Emoji Data, version 15.0.0
+Upstream versioned location:
+https://www.unicode.org/Public/15.0.0/ucd/emoji/emoji-data.txt
+Retrieved upstream repository copy:
+https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/15.0.0/emoji/emoji-data.txt
+SHA-256: 29071dba22c72c27783a73016afb8ffaeb025866740791f9c2d0b55cc45a3470
+
+Original header notices:
+# emoji-data.txt
+# Date: 2022-08-02, 00:26:10 GMT
+# © 2022 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use, see https://www.unicode.org/terms_of_use.html
+
+Grapheme Break Property, version 15.0.0
+Upstream versioned location:
+https://www.unicode.org/Public/15.0.0/ucd/auxiliary/GraphemeBreakProperty.txt
+Retrieved upstream repository copy:
+https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/15.0.0/auxiliary/GraphemeBreakProperty.txt
+SHA-256: 5a0f8748575432f8ff95e1dd5bfaa27bda1a844809e17d6939ee912bba6568a1
+
+Original header notices:
+# GraphemeBreakProperty-15.0.0.txt
+# Date: 2022-04-27, 17:07:38 GMT
+# © 2022 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use, see https://www.unicode.org/terms_of_use.html
+
+License
+LICENSE.txt is the unmodified Unicode License V3 retrieved on 2026-11-16 from:
+https://www.unicode.org/license.txt
+SHA-256: e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96
+The original 2022 data notices above remain alongside the current license text.
+
+Rule reference
+Unicode Standard Annex #29, revision 41 (Unicode 15.0.0):
+https://www.unicode.org/reports/tr29/tr29-41.html#Grapheme_Cluster_Boundary_Rules
+The compatibility additions concern emoji modifiers/ZWJ and regional-indicator
+pairing, with Control/CR/LF and malformed-surrogate barriers. Other boundaries
+remain based on the installed .NET StringInfo implementation.

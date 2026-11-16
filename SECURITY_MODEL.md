@@ -278,6 +278,11 @@ Those details reach the final screen, CSV and log without changing publication
 or source-removal authority. Cleanup may already have removed verified obsolete
 members; a retained backup is not necessarily a complete copy of the old output.
 
+The parent also appends paths from publication-staging cleanup warnings to the
+affected job's result detail, including rows produced after cancellation. This
+keeps the cleanup record in the result screen, CSV and log without changing job
+status or cleanup authority.
+
 Path handling must preserve containment and object identity throughout reads,
 staging, replacement, rollback, and cleanup. Existing controls include pinned
 ancestor/file handles, reparse-point rejection, hard-link checks where identity

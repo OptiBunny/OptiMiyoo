@@ -1025,6 +1025,7 @@ function Complete-ApplicationBrokerBatch {
     $batch.Completed=$true
     $src=Join-Path $state.OriginalRoot 'SRC';$dst=Join-Path $state.OriginalRoot 'DST'
     $results=New-Object 'System.Collections.Generic.List[object]'
+    $retainedStaging=[Collections.Hashtable]::new([StringComparer]::Ordinal)
     $processedIds=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $cancellation=[pscustomobject]@{Requested=$false}
     $checkCancellation={
@@ -1047,6 +1048,9 @@ function Complete-ApplicationBrokerBatch {
         foreach($id in $CompletedJobIds){
             if(& $checkCancellation){break}
             $job=$batch.Jobs[$id];$sealed=$null;$commit=$null
+            $retainedPaths=New-Object 'Collections.Generic.List[string]'
+            $retainedPathSet=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+            $retainedStaging[$id]=$retainedPaths
             $publicationLocks=New-Object 'System.Collections.Generic.List[System.IDisposable]'
             # Keep cleanup ownership outside the interruptible return assignment.
             $sealingResources=[pscustomobject]@{Containers=(New-Object 'Collections.Generic.List[object]');Locks=(New-Object 'Collections.Generic.List[IDisposable]')}
@@ -1103,8 +1107,8 @@ function Complete-ApplicationBrokerBatch {
                             $preserve=$false
                             if($sealed){$preserve=@($sealed.Items | Where-Object {$_.PreserveStaging -and $_.Staged.StartsWith($path+'\',[StringComparison]::OrdinalIgnoreCase)}).Count -gt 0}
                             try{Reset-ApplicationBrokerReferences $batch $referenceIndex @([pscustomobject]@{Destination=$path;Folder=$true})}
-                            catch{$preserve=$true;Write-Warning ('Broker reference cleanup failed; staging retained: '+(ConvertTo-SafeExternalLine $path))}
-                            finally{try{Close-ApplicationBrokerPublicationContainer $claim -Preserve:$preserve}catch{Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalLine $path))}}
+                            catch{$preserve=$true;if($retainedPathSet.Add($path)){$retainedPaths.Add($path)};Write-Warning ('Broker reference cleanup failed; staging retained: '+(ConvertTo-SafeExternalLine $path))}
+                            finally{try{Close-ApplicationBrokerPublicationContainer $claim -Preserve:$preserve}catch{if($retainedPathSet.Add($path)){$retainedPaths.Add($path)};Write-Warning ('Broker staging retained: '+(ConvertTo-SafeExternalLine $path))}}
                         }
                     } finally {
                         # Even a reference reset or diagnostic failure must not
@@ -1165,6 +1169,10 @@ function Complete-ApplicationBrokerBatch {
             }
         }
         foreach($result in $results){
+            # Cleanup can precede creation of a cancelled job's result row.
+            # Keep exact parent paths in capture order and append only once.
+            $retained=$retainedStaging[$result.JobId]
+            if($retained -and $retained.Count){$result.Detail+=' WARNING: Publication staging cleanup was incomplete; review retained paths: '+($retained -join ' | ')+'.'}
             $job=$batch.Jobs[$result.JobId];$playlist='';$destination='';$diskImages=0;$sourceName=$job.SourceKey
             if($batch.Operation -in 'Playlist','C64','ZX'){$sourceName=$job.SourceJob.Source}
             if($job.Plan){

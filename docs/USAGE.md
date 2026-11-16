@@ -214,6 +214,10 @@ output was saved. Inspect the retained path before removing anything there: it
 may contain files that OptiMiyoo could not safely delete, and it may no longer
 contain the complete old output.
 
+Cleanup warnings for temporary publication folders also include their locations
+in the output details and saved reports, even if a job failed or was cancelled.
+Review those locations before removing leftover files.
+
 While preparing or processing a batch, **B / Esc** stops and returns to settings;
 **Q** stops and quits. **Ctrl+C** also requests a stop and closes the app. An update
 already being saved may finish first. Stopping does not undo completed work: saved

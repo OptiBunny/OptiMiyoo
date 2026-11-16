@@ -1118,8 +1118,12 @@ function Complete-ApplicationBrokerBatch {
         if(-not $cancellation.Requested -and $batch.SourcePolicy -eq 'Remove' -and -not $batch.SourcePlan.BlockReason){
             try {
                 $sourceInventoryGuard=Open-SourcePolicyInventoryGuard $src
-                $sourceCleanupContext=& $batch.SourceModule {param($plan,$guard,$owner)Open-SourcePolicyCleanupContext $plan -InventoryGuard $guard -ContextOwner $owner} $batch.SourcePlan $sourceInventoryGuard ([ref]$sourceCleanupContext)
-            } catch {$batch.SourcePlan.BlockReason='Source inventory or CUE descriptors could not be protected; all originals kept. '+$_.Exception.Message}
+                $sourceCleanupContext=& $batch.SourceModule {param($plan,$guard,$owner,$cancel)Open-SourcePolicyCleanupContext $plan -InventoryGuard $guard -ContextOwner $owner -CancellationCheck $cancel} $batch.SourcePlan $sourceInventoryGuard ([ref]$sourceCleanupContext) $throwIfCancelled
+            } catch {
+                $cancelledError=$false;$cause=$_.Exception
+                while($cause){if($cause -is [OperationCanceledException]){$cancelledError=$true;break};$cause=$cause.InnerException}
+                if(-not ($cancellation.Requested -and $cancelledError)){$batch.SourcePlan.BlockReason='Source inventory or CUE descriptors could not be protected; all originals kept. '+$_.Exception.Message}
+            }
         }
         if(-not $cancellation.Requested -and -not $batch.SourcePlan.BlockReason){
             try {

@@ -785,19 +785,22 @@ function Open-SourcePolicyOutputs {
     }
 }
 
-function Get-SourcePolicyDescriptorPaths([string]$Root) {
+function Get-SourcePolicyDescriptorPaths([string]$Root,[scriptblock]$CancellationCheck=$null) {
     # One bounded inventory per planning/final-protection boundary, never per
     # candidate. Inspect directories as directories, regardless of their suffix.
+    if($CancellationCheck){& $CancellationCheck | Out-Null}
     $rootLease=Open-SourcePolicyReadDirectoryLease $Root
     $pending=New-Object 'System.Collections.Generic.Queue[string]'
     $paths=New-Object 'System.Collections.Generic.List[string]'
     $pending.Enqueue([IO.Path]::GetFullPath($Root));$entries=0
     try {
         while($pending.Count) {
+            if($CancellationCheck){& $CancellationCheck | Out-Null}
             $directory=$pending.Dequeue();$lease=Open-SourcePolicyReadDirectoryLease $directory
             try {
                 foreach($path in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
                     if(++$entries -gt 100000){throw 'Source descriptor inventory exceeds the 100,000-entry limit. Split the collection and retry; originals kept.'}
+                    if($CancellationCheck -and ($entries -band 63) -eq 0){& $CancellationCheck | Out-Null}
                     $entry=Get-Item -LiteralPath $path -Force -ErrorAction Stop
                     if($entry.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Source descriptor inventory contains a link; originals kept.'}
                     if($entry.PSIsContainer){$pending.Enqueue($entry.FullName)}
@@ -808,6 +811,7 @@ function Get-SourcePolicyDescriptorPaths([string]$Root) {
                 }
             } finally {$lease.Dispose()}
         }
+        if($CancellationCheck){& $CancellationCheck | Out-Null}
         return ,$paths.ToArray()
     } finally {$rootLease.Dispose()}
 }
@@ -1001,11 +1005,12 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
     }
 }
 
-function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Stream]$Stream) {
+function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Stream]$Stream,[scriptblock]$CancellationCheck=$null) {
     # Read only the already verified, held source descriptor. Never follow a
     # playlist to another filesystem root or change its bytes or job ownership.
     $memory=New-Object IO.MemoryStream
     try {
+        if($CancellationCheck){& $CancellationCheck | Out-Null}
         if($Stream.Length -gt 1048576){throw 'Source playlist exceeds the 1 MiB descriptor limit; originals kept.'}
         $Stream.Position=0;$Stream.CopyTo($memory);$bytes=$memory.ToArray()
         if($bytes.Length -ne $Stream.Length){throw 'Source playlist changed while reading; originals kept.'}
@@ -1021,8 +1026,10 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
         if($lines.Count -gt 16384){throw 'Source playlist exceeds the 16,384-line limit. Split the playlist and retry; originals kept.'}
         $parent=[IO.Path]::GetDirectoryName($Path)
         $prefix=[IO.Path]::GetFullPath($Plan.Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-        $referenceBudget=New-OptiPlaylistReferenceBudget
+        $referenceBudget=New-OptiPlaylistReferenceBudget;$lineNumber=0
         foreach($line in $lines) {
+            if($CancellationCheck -and ($lineNumber -band 31) -eq 0){& $CancellationCheck | Out-Null}
+            $lineNumber++
             if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
             if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
             foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
@@ -1042,10 +1049,11 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
                 if($Plan.Files.ContainsKey($full)){[void]$Context.ProtectedPaths.Add($full)}
             }
         }
+        if($CancellationCheck){& $CancellationCheck | Out-Null}
     } finally {$memory.Dispose();$Stream.Position=0}
 }
 
-function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null,$ContextOwner=$null) {
+function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$InventoryGuard=$null,$ContextOwner=$null,[scriptblock]$CancellationCheck=$null) {
     if($null -ne $ContextOwner -and ($ContextOwner -isnot [Management.Automation.PSReference] -or $null -ne $ContextOwner.Value)){throw 'Source cleanup requires an empty caller-owned context reference.'}
     if($Plan.Policy -ne 'Remove'){throw 'A cleanup context requires Remove policy.'}
     if($Plan.BlockReason){throw $Plan.BlockReason}
@@ -1063,35 +1071,43 @@ function Open-SourcePolicyCleanupContext($Plan,[scriptblock]$Progress=$null,$Inv
         # Establish caller cleanup authority before acquiring native resources.
         # Engine Stop can interrupt return after the helper marks a transfer.
         if($ContextOwner){$ContextOwner.Value=$context}
+        if($CancellationCheck){& $CancellationCheck | Out-Null}
         if(-not $context.InventoryGuard){$context.InventoryGuard=Open-SourcePolicyInventoryGuard $Plan.Root}
         Set-SourcePolicyCleanupEligibility $Plan
+        if($CancellationCheck){& $CancellationCheck | Out-Null}
         Assert-SourcePolicyDescriptorBudget $Plan.Root $Plan.DescriptorSnapshot
         $actual=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-        foreach($path in (Get-SourcePolicyDescriptorPaths $Plan.Root)){[void]$actual.Add($path)}
+        foreach($path in (Get-SourcePolicyDescriptorPaths $Plan.Root -CancellationCheck $CancellationCheck)){[void]$actual.Add($path)}
         if($actual.Count -ne $Plan.DescriptorSnapshot.Count){throw 'Source descriptor inventory changed since planning; retry with the updated source collection. Originals kept.'}
         foreach($path in @($Plan.DescriptorSnapshot.Keys | Sort-Object)) {
+            if($CancellationCheck){& $CancellationCheck | Out-Null}
             if(-not $actual.Contains($path)){throw 'Source descriptor inventory changed since planning; retry with the updated source collection. Originals kept.'}
             $record=$Plan.DescriptorSnapshot[$path]
             $removable=$Plan.Files.ContainsKey($path) -and $Plan.Files[$path].State -eq 'Ready'
-            $lease=Open-VerifiedSourcePolicyFile $path $record.Hash $Plan.Root $Progress -ReadOnly:(-not $removable)
+            $lease=Open-VerifiedSourcePolicyFile $path $record.Hash $Plan.Root $Progress -ReadOnly:(-not $removable) -CancellationCheck $CancellationCheck
             $context.ReferenceLeases[$path]=$lease
             if($lease.Stream.Length -ne $record.Length){throw 'Source descriptor length differs from its frozen baseline; originals kept.'}
         }
         # A retained or untracked descriptor is not automatically represented in
         # job ownership. Reject any overlooked dependency while its bytes are held.
         foreach($path in $context.ReferenceLeases.Keys) {
+            if($CancellationCheck){& $CancellationCheck | Out-Null}
             if($Plan.Files.ContainsKey($path) -and $Plan.Files[$path].State -eq 'Ready'){continue}
             if([IO.Path]::GetExtension($path) -in @('.m3u','.m3u8')){
-                Add-SourcePolicyPlaylistProtection $Plan $context $path $context.ReferenceLeases[$path].Stream
+                Add-SourcePolicyPlaylistProtection $Plan $context $path $context.ReferenceLeases[$path].Stream -CancellationCheck $CancellationCheck
                 continue
             }
             if(-not (Get-Command Get-CueFiles -ErrorAction SilentlyContinue)){throw 'CUE reference validation is unavailable; originals kept.'}
+            $referenceNumber=0
             foreach($name in @(Get-CueFiles $path)) {
+                if($CancellationCheck -and ($referenceNumber -band 31) -eq 0){& $CancellationCheck | Out-Null}
+                $referenceNumber++
                 $reference=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($path)) $name))
                 if($Plan.Files.ContainsKey($reference) -and $Plan.Files[$reference].State -eq 'Ready'){throw 'A retained or untracked CUE still references an original selected for removal; include its complete source set before retrying. Originals kept.'}
             }
         }
         Assert-SourcePolicyInventoryGuard $Plan $context.InventoryGuard
+        if($CancellationCheck){& $CancellationCheck | Out-Null}
         $transferred=$true
         return $context
     } finally {
@@ -1120,18 +1136,30 @@ function Invoke-SourcePolicyCleanup($Plan,[scriptblock]$Report,[scriptblock]$Pro
         }
         return
     }
-    $referenceLeases=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $ownsCleanupContext=$false; $cleanupCancelled=$false
+    $referenceLeases=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase); $ownsCleanupContext=$false; $cleanupCancelled=$false; $contextCancellation=$null
     try {
         try {
             # The host holds the complete context across its final snapshot.
             # Direct callers capture and own the same protection here.
-            if(-not $CleanupContext){$ownsCleanupContext=$true;$CleanupContext=Open-SourcePolicyCleanupContext $Plan $Progress -InventoryGuard $InventoryGuard -ContextOwner ([ref]$CleanupContext)}
+            if(-not $CleanupContext){
+                $ownsCleanupContext=$true;$contextCancellation=[pscustomobject]@{Requested=$false};$contextCheck=$null
+                if($CancellationCheck){
+                    $cleanupCallback=$CancellationCheck
+                    $contextCheck={
+                        if(& $cleanupCallback){$contextCancellation.Requested=$true;throw [OperationCanceledException]::new('Source cleanup cancelled; originals kept.')}
+                    }.GetNewClosure()
+                }
+                $CleanupContext=Open-SourcePolicyCleanupContext $Plan $Progress -InventoryGuard $InventoryGuard -ContextOwner ([ref]$CleanupContext) -CancellationCheck $contextCheck
+            }
             $InventoryGuard=$CleanupContext.InventoryGuard;$referenceLeases=$CleanupContext.ReferenceLeases
             Assert-SourcePolicyInventoryGuard $Plan $InventoryGuard
         } catch {
-            if (-not $Plan.BlockReason) {$Plan.BlockReason='Source inventory or CUE descriptors could not be protected; remaining originals kept. '+$_.Exception.Message}
+            $cancelledError=$false;$cause=$_.Exception
+            while($cause){if($cause -is [OperationCanceledException]){$cancelledError=$true;break};$cause=$cause.InnerException}
+            if($contextCancellation -and $contextCancellation.Requested -and $cancelledError){$cleanupCancelled=$true}
+            elseif(-not $Plan.BlockReason){$Plan.BlockReason='Source inventory or CUE descriptors could not be protected; remaining originals kept. '+$_.Exception.Message}
         }
-        if (-not $Plan.BlockReason) {
+        if (-not $Plan.BlockReason -and -not $cleanupCancelled) {
             # Validate connected ownership components together. A changed source
             # must not leave a retained CUE without its unchanged tracks. Independent
             # games use bounded sets of source/output handles, not whole-batch locks.

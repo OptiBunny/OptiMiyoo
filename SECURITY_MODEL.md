@@ -123,6 +123,13 @@ Low Privilege AppContainer (LPAC); HxC x86 uses regular AppContainer. All use
 zero capability SIDs, process/resource limits, and independent wall timers.
 Keep these distinct isolation modes explicit when reviewing fallback paths.
 
+The parent retains at most 200,000 successful native conversion receipts per
+session. This allows retry headroom above the 100,000 planned output-member
+limit, including members inside ZIPs. A full receipt store refuses another
+conversion before startup and refuses output acceptance before hashing or export.
+Polling a completed task does not add another receipt. Informational native
+requests do not produce conversion receipts.
+
 Regular AppContainer is not LPAC, and neither is a hermetic virtual machine.
 Resources accessible under Windows policy may remain accessible; do not infer
 that only OptiMiyoo's staged paths can ever be read. Workers receive no network
@@ -293,6 +300,10 @@ a context does not release a borrowed inventory guard. Installed cleanup and
 conversion callers also own their output-verification lease lists before calling
 the helper. Conversion batch cleanup holds that ownership across its save return;
 a standalone save releases its local list on failure before ownership transfer.
+Final source protection also polls cancellation during descriptor inventory,
+verification, and retained-reference parsing. Cancellation releases that context
+and keeps remaining originals; ordinary I/O failures remain failures. These
+checkpoints are outside publication and connected source-removal transactions.
 
 ### SD-card settings
 

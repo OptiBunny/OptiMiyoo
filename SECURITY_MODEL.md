@@ -395,6 +395,12 @@ Raw-message clipping bounds the temporary escaping step as well. These diagnosti
 do not enter worker RPC or verification receipts. The host displays them on exit
 after relay and screen cleanup attempts, without promoting them to processing failures.
 
+During batch cleanup, the host attempts each independent service owner's close
+before rethrowing the first service-close error. A caller's terminating warning
+policy remains effective. Existing enclosing cleanup still attempts application
+session and console disposal; an attempted close does not guarantee that every
+underlying resource was released.
+
 CSV export protects formula-like string fields, including prefixed whitespace
 and full-width operator forms. CSV quoting alone is insufficient. Verified
 reports use parent results and new, unique filenames. The interactive final-results

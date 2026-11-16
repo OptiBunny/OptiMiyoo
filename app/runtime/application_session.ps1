@@ -481,7 +481,9 @@ namespace OptiMiyoo {
    Close(ref process);Close(ref job);if(sid!=IntPtr.Zero){FreeSid(sid);sid=IntPtr.Zero;}if(profile!=null){int hr=DeleteAppContainerProfile(profile);for(int retry=0;hr<0 && retry<3;retry++){Thread.Sleep(50*(1<<retry));hr=DeleteAppContainerProfile(profile);}if(hr<0)CleanupWarning="Application profile cleanup failed ("+hr.ToString("X8")+").";profile=null;}
    try{Cleanup();}catch(Exception e){CleanupWarning=(CleanupWarning==null?"":CleanupWarning+" ")+e.Message+" Retained application scratch: "+RootPath;}finally{foreach(SafeFileHandle pin in pins)pin.Dispose();pins.Clear();if(rootLease!=null){rootLease.Dispose();rootLease=null;}if(parentLease!=null){parentLease.Dispose();parentLease=null;}}
    if(consoleSaved){lock(consoleGate){
-    try{WriteTerminal("\x1b[0m\x1b[r\x1b[?25h");}catch{}
+    // Resetting the scroll region homes the cursor. Keep the final position
+    // while restoring full-screen scrolling for the parent's result output.
+    try{WriteTerminal("\x1b[0m\x1b"+"7\x1b[r\x1b"+"8\x1b[?25h");}catch{}
     // The ANSI reset selects terminal defaults, not the caller's native colors.
     try{Console.ForegroundColor=previousForeground;Console.BackgroundColor=previousBackground;}catch{}
     try{Console.CursorVisible=previousCursor;Console.TreatControlCAsInput=previousControlC;Console.Title=previousTitle;SetConsoleMode(GetStdHandle(-10),previousInputMode);SetConsoleMode(GetStdHandle(-11),previousOutputMode);}catch{}

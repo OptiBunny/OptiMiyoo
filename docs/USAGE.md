@@ -204,7 +204,9 @@ the displayed files.
 When processing finishes, review the saved, skipped, and failed outputs, along
 with the counts of originals removed or kept. The CSV report and log are saved
 beside `SRC` and `DST`; their paths appear in the results. **Enter / B / Esc**
-returns to the main menu and **Q** exits.
+returns to the main menu and **Q** exits. Long results use **> / <** to page
+through the complete details and report paths. The final results replace the
+preparation progress screen, including when no files were published.
 
 While preparing or processing a batch, **B / Esc** stops and returns to settings;
 **Q** stops and quits. **Ctrl+C** also requests a stop and closes the app. An update

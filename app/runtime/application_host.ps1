@@ -286,7 +286,7 @@ exit $code
     [IO.File]::WriteAllText((Join-Path $Session.CodePath 'boot.ps1'),($boot -replace '\r?\n',"`r`n"),$encoding)
 }
 
-function Write-ApplicationVerifiedReport([string]$Root,$Result) {
+function Write-ApplicationVerifiedReport([string]$Root,$Result,[switch]$PassThru) {
     $lease=$null;$csvStream=$null;$logStream=$null;$csvWriter=$null;$logWriter=$null
     $reportError=$null
     $stamp=(Get-Date -Format 'yyyyMMdd_HHmmss_fff')+'_'+[Guid]::NewGuid().ToString('N').Substring(0,8)
@@ -308,8 +308,10 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
         }
         foreach ($row in $Result.Results) {$logWriter.WriteLine((ConvertTo-SafeExternalLine ($row.Source+': '+$row.Result+' / '+$row.Original+' / '+$row.Detail)))}
         $csvWriter.Flush();$csvStream.Flush($true);$logWriter.Flush();$logStream.Flush($true)
-        Write-Host ('Report: '+(ConvertTo-SafeExternalLine $csv))
-        Write-Host ('Log: '+(ConvertTo-SafeExternalLine $log))
+        if(-not $PassThru){
+            Write-Host ('Report: '+(ConvertTo-SafeExternalLine $csv))
+            Write-Host ('Log: '+(ConvertTo-SafeExternalLine $log))
+        }
     } catch {$reportError=$_.Exception.Message}
     finally {
         # A failed writer flush must not leave another report or the root locked.
@@ -320,7 +322,61 @@ function Write-ApplicationVerifiedReport([string]$Root,$Result) {
             }
         }
     }
+    if($PassThru){return [pscustomobject]@{Csv=$csv;Log=$log;Error=$reportError}}
     if ($null -ne $reportError) {Write-Warning ('Could not save the verified result report: '+(ConvertTo-SafeExternalLine $reportError))}
+}
+
+function Get-ApplicationBatchResultLines {
+    param([Parameter(Mandatory=$true)]$Result,$ReportInfo)
+    if($Result.Cancelled){'Batch cancelled. Completed outputs were kept; remaining originals were kept.'}
+    else {'Batch finished.'}
+    $skipped=@($Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
+    'Published: {0} | Skipped: {1} | Failed: {2}' -f $Result.Written,$skipped,$Result.Failed
+    if(-not $Result.Written){'No files were published.'}
+    if($Result.Failed){'Some outputs could not be published. Review the details below.'}
+    ''
+    'Source policy: '+(ConvertTo-SafeExternalLine ([string]$Result.SourcePolicy).ToUpperInvariant())
+    'Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $Result.Removed,$Result.Kept,$Result.RemovalFailures
+    if($Result.RemovalFailures){'Some originals could not be removed. Review the details below.'}
+    foreach($reason in @($Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)){
+        'Originals kept: '+(ConvertTo-SafeExternalLine $reason)
+    }
+    if($ReportInfo){
+        ''
+        if($null -ne $ReportInfo.Error){'Could not save the verified result report: '+(ConvertTo-SafeExternalLine $ReportInfo.Error)}
+        else {
+            'Report: '+(ConvertTo-SafeExternalLine $ReportInfo.Csv)
+            'Log: '+(ConvertTo-SafeExternalLine $ReportInfo.Log)
+        }
+    }
+    if($Result.Results){
+        ''
+        'Output details:'
+        foreach($item in $Result.Results){ConvertTo-SafeExternalLine ($item.Source+': '+$item.Result+' / '+$item.Detail)}
+    }
+}
+
+function Get-ApplicationBatchResultModel {
+    param([Parameter(Mandatory=$true)]$Result,$ReportInfo,[int]$Page=0,[long]$Anchor=-1)
+    Get-ApplicationResultModel -SourceLines @(Get-ApplicationBatchResultLines $Result $ReportInfo) -Title 'Batch results' `
+        -Page $Page -Anchor $Anchor -SectionHeadings @('Output details:')
+}
+
+function Read-ApplicationBatchResult {
+    param([Parameter(Mandatory=$true)]$Result,$ReportInfo,[switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+    Read-ApplicationResult -Lines @(Get-ApplicationBatchResultLines $Result $ReportInfo) -Title 'Batch results' `
+        -SectionHeadings @('Output details:') -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
+}
+
+function Show-ApplicationBatchResult {
+    param([Parameter(Mandatory=$true)]$Result,$ReportInfo,[switch]$NoPause,[switch]$NoAnimation,[switch]$NoColor,
+          [ValidateSet('CRT','Smooth')][string]$DisplayEffect='CRT')
+    if($NoPause -or $Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected){
+        Write-ApplicationResultText -Lines @(Get-ApplicationBatchResultLines $Result $ReportInfo)
+        return $true
+    }
+    Read-ApplicationBatchResult -Result $Result -ReportInfo $ReportInfo -NoAnimation:$NoAnimation -NoColor:$NoColor -DisplayEffect $DisplayEffect
 }
 
 function Initialize-ApplicationVersion([string]$ApplicationRoot) {
@@ -585,28 +641,16 @@ function Invoke-ApplicationHost {
             if ($state -and $state.Result) {
                 $resultCancelled=$false
                 if($null -ne $state.Result.PSObject.Properties['Cancelled']){$resultCancelled=[bool]$state.Result.Cancelled}
-                if($resultCancelled){Write-Host 'Cancelled. Completed outputs were kept; remaining originals were kept.'}
-                $skipped=@($state.Result.Results | Where-Object {$_.Result -eq 'Skipped'}).Count
-                Write-Host ('Published: {0}; skipped: {1}; failed: {2}.' -f $state.Result.Written,$skipped,$state.Result.Failed)
-                foreach ($result in $state.Result.Results) {Write-Host (ConvertTo-SafeExternalLine ($result.Source+': '+$result.Result+' / '+$result.Detail))}
-                Write-Host ''
-                Write-Host ('  Source policy: '+$state.Result.SourcePolicy.ToUpperInvariant())
-                Write-Host ('  Originals in this batch: {0} removed | {1} kept | {2} removal failures' -f $state.Result.Removed,$state.Result.Kept,$state.Result.RemovalFailures)
-                foreach ($reason in @($state.Result.Sources | Where-Object {$_.State -ne 'Removed' -and $_.Reason} | ForEach-Object {$_.Reason} | Sort-Object -Unique)) {
-                    Write-Host ('  Originals kept: '+(ConvertTo-SafeExternalLine $reason))
-                }
-                Write-Host ''
-                Write-ApplicationVerifiedReport $originalRoot $state.Result
+                # Save reports before drawing. The final page is based only on
+                # parent-verified results, after Dispose has stopped the relay.
+                $reportInfo=Write-ApplicationVerifiedReport $originalRoot $state.Result -PassThru
                 if($resultCancelled){$again=$false;if($exitCode -ne 1){$exitCode=137}}
                 if ($state.Result.Failed -or $state.Result.RemovalFailures) {$exitCode=1}
-                if (-not $resultCancelled -and -not $navigation -and $menu -and -not $originalArguments.NoPause -and -not [Console]::IsInputRedirected) {
-                    Write-Host ''
-                    $controlWidth=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
-                    Write-Host ('  '+(Format-RightAlignedText 'Enter / B / Esc: Main menu | Q: Exit' $controlWidth))
-                    do {$key=[Console]::ReadKey($true)} while ($key.Key -notin [ConsoleKey]::Enter,[ConsoleKey]::B,[ConsoleKey]::Escape,[ConsoleKey]::Q)
-                    $again=($key.Key -ne [ConsoleKey]::Q)
-                    if ($again) {$startPage='Main'}
-                }
+                $pauseForResults=(-not $resultCancelled -and -not $navigation -and $menu -and -not $originalArguments.NoPause -and
+                    $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected)
+                $returnToMenu=Show-ApplicationBatchResult -Result $state.Result -ReportInfo $reportInfo -NoPause:(-not $pauseForResults) `
+                    -NoAnimation:$originalArguments.NoAnimation -NoColor:$originalArguments.NoColor -DisplayEffect $displayEffect
+                if($pauseForResults){$again=$returnToMenu;if($again){$startPage='Main'}}
             }
             if ($sdResult) {
                 if ($sdResult.Cancelled) {$exitCode=137}

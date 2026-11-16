@@ -627,9 +627,18 @@ function Invoke-ApplicationHost {
                 finally {
                     $script:DisplayEffect=$previousEffect
                     try {
-                        if ($native) {Close-ApplicationJobBroker $native}
-                        if ($broker) {Close-ApplicationArchiveSession $broker;Close-ApplicationBrokerSession $broker}
-                        if ($sdOwner.Session) {Close-ApplicationSdSession -Session $sdOwner.Session}
+                        # Attempt every independent service owner before propagating
+                        # the first service-close error, including a terminating warning.
+                        $serviceCleanupFailure=$null
+                        try {if ($native) {Close-ApplicationJobBroker $native}}
+                        catch {$serviceCleanupFailure=$_}
+                        try {if ($broker) {Close-ApplicationArchiveSession $broker}}
+                        catch {if ($null -eq $serviceCleanupFailure) {$serviceCleanupFailure=$_}}
+                        try {if ($broker) {Close-ApplicationBrokerSession $broker}}
+                        catch {if ($null -eq $serviceCleanupFailure) {$serviceCleanupFailure=$_}}
+                        try {if ($sdOwner.Session) {Close-ApplicationSdSession -Session $sdOwner.Session}}
+                        catch {if ($null -eq $serviceCleanupFailure) {$serviceCleanupFailure=$_}}
+                        if ($null -ne $serviceCleanupFailure) {throw $serviceCleanupFailure}
                     } finally {
                         if ($session) {
                             $session.Dispose()

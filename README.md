@@ -3,6 +3,8 @@
 Create multi-disc playlists or convert C64 and ZX Spectrum disk images for
 **Onion OS on Miyoo Mini Plus**.
 
+**Development version: 0.9.0.** See [version labels](docs/USAGE.md#version-labels).
+
 [**Download for Windows**](https://github.com/OptiBunny/OptiMiyoo/archive/refs/heads/main.zip)
 · [**User guide**](docs/USAGE.md)
 

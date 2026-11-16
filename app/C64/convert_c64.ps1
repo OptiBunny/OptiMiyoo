@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 if (-not (Test-ApplicationWorker)) {
     exit (Enter-ApplicationHost -ApplicationRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -Entry C64 -Arguments $PSBoundParameters)
 }
-$script:AppVersion = '0.0.9'
+$script:AppVersion = '0.9.0'
 
 $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $NibConv = Join-Path $ScriptDir 'C64/tools/nibconv.exe'

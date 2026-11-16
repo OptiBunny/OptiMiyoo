@@ -91,6 +91,11 @@ Cleanup releases the claim, then verifies its recorded identity before deletion;
 it must not adopt a replacement directory after startup failure or cancellation. Defaults include 1 GiB of memory and 1,800 CPU seconds;
 the latter is not a wall-clock timeout.
 
+ACL construction releases temporary Windows identity handles after capturing
+the current user's SID. Preparation and completion cancellation callbacks capture
+only their session and check function, avoiding closure chains that retain earlier
+job, receipt, and result metadata across batches.
+
 Menu-only sessions have no collection broker or native-job broker. They can ask
 for a parent-owned policy choice, hand off that matching selection, choose SD
 setup, or change the display preference. An accepted processing handoff stops

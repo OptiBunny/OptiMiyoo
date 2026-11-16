@@ -290,7 +290,7 @@ namespace OptiMiyoo {
    return full.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+full.Substring(2):@"\\?\"+full;
   }
   private static void Secure(string path,string package,bool write){
-   string user=WindowsIdentity.GetCurrent().User.Value;
+   string user;using(WindowsIdentity identity=WindowsIdentity.GetCurrent()){user=identity.User.Value;}
    string sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;"+user+")(A;OICI;"+(write?"0x1301bf":"0x1200a9")+";;;"+package+")"+(write?"S:(ML;OICI;NW;;;LW)":"");
    IntPtr sd;uint size;Check(ConvertStringSecurityDescriptorToSecurityDescriptor(sddl,1,out sd,out size),"Prepare application ACL");
    try{bool present,defaulted;IntPtr dacl,sacl;Check(GetSecurityDescriptorDacl(sd,out present,out dacl,out defaulted),"Read application DACL");Check(GetSecurityDescriptorSacl(sd,out present,out sacl,out defaulted),"Read application SACL");uint status=SetNamedSecurityInfo(NativePath(path),1,0x80000004u|(write?0x10u:0u),IntPtr.Zero,IntPtr.Zero,dacl,sacl);if(status!=0)throw new Win32Exception((int)status,"Protect application staging");}finally{LocalFree(sd);}

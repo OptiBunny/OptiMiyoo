@@ -7,7 +7,8 @@ Press **Enter** on its own to use the default shown at the prompt.
 
 **Q** quits the app. **B** or **Esc** goes back to the previous screen;
 at the main menu, they keep you there. Letters need **Enter** in selection
-menus; during demo playback or processing, these keys work immediately.
+menus; on results screens, during demo playback, or while processing, these keys
+work immediately.
 
 To create playlists or convert files, [prepare your games](#prepare-a-batch) first.
 OptiMiyoo reads `SRC` and `DST` when you start a playlist or conversion batch.
@@ -213,6 +214,18 @@ While preparing or processing a batch, **B / Esc** stops and returns to settings
 already being saved may finish first. Stopping does not undo completed work: saved
 outputs stay saved, and originals already removed are not restored.
 
+### Privacy and sharing reports
+
+Reports and logs can include game filenames, local folder paths, and error details.
+They stay in the batch folder; OptiMiyoo does not upload them for you. Before
+sharing a report, log, or screenshot, review it for personal information and share
+only the relevant details. Work from a copy when redacting a saved report.
+
+Temporary processing files live under the app's `data/temp` folder. If cleanup
+reports retained files, keep them until you have checked the results and any
+recovery instructions. SD config backups stay on the selected card in `Backups`.
+These files can also contain private data; they are not part of a bug report by default.
+
 ## Copy to your Miyoo
 
 Copy the contents of `DST`, including `.hidden` when present, to the system's
@@ -257,9 +270,9 @@ folder with `.\OptiMiyoo.bat -NoAnimation`.
 
 ## Exit
 
-In selection menus, press **Q**, then **Enter**, to quit. During a demo or while
-processing files, press **Q** on its own. The app may finish a file operation
-already in progress before closing.
+In selection menus, press **Q**, then **Enter**, to quit. On results screens,
+during a demo, or while processing files, press **Q** on its own. The app may
+finish a file operation already in progress before closing.
 
 ## Version labels
 

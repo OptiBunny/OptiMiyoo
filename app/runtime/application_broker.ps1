@@ -1078,7 +1078,11 @@ function Complete-ApplicationBrokerBatch {
                 $commit=& $batch.SourceModule {param($items,$overwrite,$retired,$validator,$publicationValidator,$publicationLocks)Install-PlaylistSet $items $overwrite $retired -ValidateBackup $validator -ValidatePublication $publicationValidator -PublicationLocks $publicationLocks} $sealed.Items ($job.Decision -eq 'Overwrite') $job.Retired $validateBackup $validatePublication $publicationLocks
                 & $batch.SourceModule {param($plan,$job,$items)Complete-SourcePolicyJob $plan $job.JobId $job.SourceHashes $items} $batch.SourcePlan $job $sealed.Items
                 $writtenResult='Written';if($commit.Replaced){$writtenResult='Overwritten'}
-                $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail='Output independently verified and published.'})
+                $detail='Output independently verified and published.'
+                if($commit.RetainedBackups.Count){
+                    $detail+=' WARNING: Previous output backup cleanup was incomplete; review retained paths: '+($commit.RetainedBackups -join ' | ')+'.'
+                }
+                $results.Add([pscustomobject]@{JobId=$id;SourceKey=$job.SourceKey;Result=$writtenResult;Detail=$detail})
             } catch {
                 # Callback cancellation can be wrapped by a native hash delegate.
                 # A concurrent ordinary I/O failure must still remain a failure.

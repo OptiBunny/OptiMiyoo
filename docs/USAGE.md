@@ -221,8 +221,9 @@ They stay in the batch folder; OptiMiyoo does not upload them for you. Before
 sharing a report, log, or screenshot, review it for personal information and share
 only the relevant details. Work from a copy when redacting a saved report.
 
-Temporary processing files live under the app's `data/temp` folder. If cleanup
-reports retained files, keep them until you have checked the results and any
+Temporary processing files live under the app's `data/temp` folder. Warnings about
+retained archive-helper files can appear when you close OptiMiyoo. If cleanup reports
+retained files, keep them until you have checked the results and any
 recovery instructions. SD config backups stay on the selected card in `Backups`.
 These files can also contain private data; they are not part of a bug report by default.
 

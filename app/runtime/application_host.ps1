@@ -158,7 +158,7 @@ function Invoke-ApplicationHostRequest {
             }
         }
         {$_ -in 'Archive.Start','Archive.Read','Archive.Stop'} {
-            return (Invoke-ApplicationArchiveRequest -BrokerSession $State.Broker -Operation $Request.Operation -Payload $payload -ReceiptStore $State.Receipts)
+            return (Invoke-ApplicationArchiveRequest -BrokerSession $State.Broker -Operation $Request.Operation -Payload $payload -ReceiptStore $State.Receipts -WarningSink $State.ArchiveWarningSink)
         }
         default {throw 'The application requested an unsupported broker operation.'}
     }
@@ -443,6 +443,8 @@ function Invoke-ApplicationHost {
     $consoleScreen=$null;$session=$null
     $deferredFailures=New-Object 'System.Collections.Generic.List[string]'
     $deferredWarnings=New-Object 'System.Collections.Generic.List[string]'
+    # One bounded diagnostic sink survives archive tasks and batch navigation.
+    $archiveWarningSink=New-ApplicationArchiveWarningSink
     try {
         if (($menu -or $Arguments.Preview) -and $Host.Name -eq 'ConsoleHost' -and
             -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
@@ -516,7 +518,7 @@ function Invoke-ApplicationHost {
                     $native=New-ApplicationJobBroker -ApplicationRoot $application -ReceiptStore $receipts
                 }
                 $existing='Ask';if ($originalArguments.Existing) {$existing=[string]$originalArguments.Existing}
-                $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;ResumeSelection=$null;StopRequested=$false;NextOnionRoot=$null;MenuOnly=$menuOnly;NextBatchSelection=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
+                $state=[pscustomobject]@{Session=$session;Broker=$broker;Native=$native;Receipts=$receipts;ArchiveWarningSink=$archiveWarningSink;Existing=$existing;Grant=$null;Completed=$false;Result=$null;Pending=$null;BatchView=$null;ResumeSelection=$null;StopRequested=$false;NextOnionRoot=$null;MenuOnly=$menuOnly;NextBatchSelection=$null;DisplayEffect=$displayEffect;NoAnimation=[bool]$Arguments.NoAnimation;NoColor=[bool]$Arguments.NoColor}
                 $worker=@{Root=$session.WorkPath;Existing=$existing;SourcePolicy='Keep';DisplayEffect=$displayEffect}
                 foreach ($key in 'NoAnimation','NoColor','Preview') {if ($Arguments.ContainsKey($key)) {$worker[$key]=[bool]$Arguments[$key]}}
                 if ($Entry -eq 'Playlist' -and $Arguments.Preview -and $Arguments.PreviewSection) {$worker.PreviewSection=[string]$Arguments.PreviewSection}
@@ -693,8 +695,16 @@ function Invoke-ApplicationHost {
         finally {
             try {if ($consoleScreen) {$consoleScreen.Dispose()}}
             finally {
-                foreach ($message in $deferredFailures) {Write-Host $message -ForegroundColor Red}
-                foreach ($message in $deferredWarnings) {Write-Warning $message}
+                try {
+                    foreach ($message in $deferredFailures) {Write-Host $message -ForegroundColor Red}
+                    foreach ($message in $deferredWarnings) {Write-Warning $message}
+                } finally {
+                    # Archive diagnostics are already escaped. Show them only
+                    # after relay and primary-screen cleanup have been attempted.
+                    foreach ($message in @(Get-ApplicationArchiveWarningLines $archiveWarningSink)) {
+                        Write-Warning $message -WarningAction Continue
+                    }
+                }
             }
         }
     }

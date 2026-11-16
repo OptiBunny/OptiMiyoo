@@ -50,6 +50,9 @@ function Invoke-ApplicationNativeRequest {
     [CmdletBinding()]
     param($State,$BrokerSession,[ValidateSet('Native.Start','Native.Read','Native.Stop')][string]$Operation,$Payload,[scriptblock]$CancellationCheck)
     $nativeRequestCommand=$PSCmdlet
+    # Conversion planning allows 100,000 output members, including ZIP members.
+    # Allow retry headroom while bounding trusted-parent receipt retention.
+    $maximumNativeReceipts=200000
     $checkCancellation={
         if($CancellationCheck){$null=& $CancellationCheck}
         if($nativeRequestCommand.Stopping){throw [OperationCanceledException]::new('Application cancelled.')}
@@ -82,6 +85,9 @@ function Invoke-ApplicationNativeRequest {
                 if (-not $job.Failure) {
                     if ($job.LimitExceeded) {$job.Failure='Native diagnostic-output limit exceeded.'}
                     elseif ($job.CaptureFailed) {$job.Failure='Native diagnostic capture failed or did not finish.'}
+                }
+                if ($job.ExitCode -eq 0 -and -not $job.Failure -and $job.Destination -and $State.ReceiptStore.NativeReceipts.Count -ge $maximumNativeReceipts) {
+                    $job.Failure='Native conversion receipt limit reached. Split the collection into smaller batches; originals kept.'
                 }
                 if ($job.ExitCode -eq 0 -and -not $job.Failure -and $job.Destination) {
                     # Hash the inaccessible native output BEFORE giving any copy
@@ -141,6 +147,9 @@ function Invoke-ApplicationNativeRequest {
     if ($kind -notin @('Nib','HxcX64','HxcX86') -or $mode -notin @('Convert','Modules','Info') -or
         ($kind -eq 'Nib' -and $mode -ne 'Convert')) {throw 'Unknown native operation.'}
     if (($batch.Operation -eq 'C64') -ne ($kind -eq 'Nib')) {throw 'Native converter does not match the active batch.'}
+    if ($mode -eq 'Convert' -and $State.ReceiptStore.NativeReceipts.Count -ge $maximumNativeReceipts) {
+        throw 'Native conversion receipt limit reached. Split the collection into smaller batches; originals kept.'
+    }
     $job=[pscustomobject]@{Id=[Guid]::NewGuid().ToString('N');BatchId=[string]$batch.BatchId;Native=$null;
         Out=$null;Err=$null;InputLease=$null;ParentLease=$null;InputHash=$null;Destination=$null;
         ReceiptKind=$(if($kind -eq 'Nib'){'Nib'}else{'HxC'});Timer=[Diagnostics.Stopwatch]::StartNew();

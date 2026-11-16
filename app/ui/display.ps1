@@ -822,9 +822,11 @@ function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$So
     foreach ($text in $Lines) {
         $line=($text -replace '[\x00-\x1f\x7f-\x9f]',' ').TrimStart()
         $isDefault=($line -match '^(?:\d+|[A-Z])\..*\(default\)')
-        if ($SourceDefaults -and $sourceIndex -lt $SourceDefaults.Count) {$isDefault=$SourceDefaults[$sourceIndex]}
-        while ((Get-TextWidth $line) -gt $Width) {
+        if ($null -ne $SourceDefaults -and $sourceIndex -lt $SourceDefaults.Count) {$isDefault=$SourceDefaults[$sourceIndex]}
+        # Measure each bounded prefix once instead of rescanning the whole remainder.
+        while ($true) {
             $prefix=Get-TextPrefix $line $Width
+            if ($prefix.Length -eq $line.Length) {break}
             $cut=$prefix.LastIndexOf(' ')
             if ($cut -lt [int]($prefix.Length/2)) {
                 # Keep path components intact when a long token crosses the edge.
@@ -869,7 +871,7 @@ function Get-MenuControlParts([string[]]$Rows,[bool[]]$DefaultRows) {
     for($i=0;$i -lt $Rows.Count;$i++) {
         $line=$Rows[$i].Trim()
         $isDefault=($line -match '^(?:\d+|[A-Z])\..*\(default\)')
-        if($DefaultRows -and $i -lt $DefaultRows.Count){$isDefault=$DefaultRows[$i]}
+        if($null -ne $DefaultRows -and $i -lt $DefaultRows.Count){$isDefault=$DefaultRows[$i]}
         # Match control legends, not explanations or numbered choices.
         $isControl=$line -match '^(?:B\s*/\s*Esc(?:[.:]|\s+Back\b)|Q[.:]\s*(?:Exit|Quit)\b|A(?:\.|\s*/\s*Enter:)\s*Apply\b|Y Overwrite\s*\||A Overwrite all\s*\||Page \d+/\d+\s*\||Enter\s*/\s*B\s*/\s*Esc:|Space:\s*pause\b|N\s*/\s*Right\s*/\s*Enter:|P\s*/\s*Left:|R:\s*restart\b|E:\s*turn the CRT effect\b)'
         if($isControl){$controls.Add($line);$controlDefaults.Add($isDefault)}
@@ -1189,7 +1191,7 @@ function Get-ProgressTextRows([string]$Text,[int]$Width,[int]$Count) {
     $rows=@(Get-MenuRows @($safe) $Width -NoPathBreaks)
     if ($rows.Count -gt $Count) {
         $rows=@($rows[0..($Count-1)])
-        $rows[$Count-1]=(Fit-Text $rows[$Count-1] ($Width-3)).TrimEnd()+'...'
+        $rows[$Count-1]=(Get-TextPrefix $rows[$Count-1] ($Width-3)).TrimEnd()+'...'
     }
     while ($rows.Count -lt $Count) {$rows+=@('')}
     return $rows

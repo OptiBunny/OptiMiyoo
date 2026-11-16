@@ -372,6 +372,14 @@ within the existing chunk and queue limits. If the capture limit cuts a pair, th
 queued half is omitted while the limit failure remains; response encoding must
 not fail on a character split introduced by the capture helper.
 
+Archive-service cleanup warnings are collected before the background runspace
+is disposed, including warnings raised while stopping it. A parent-owned buffer
+persists across batches within one host invocation and holds at most 64 escaped
+messages of 8,192 UTF-16 units each, with explicit truncation and omission notices.
+Raw-message clipping bounds the temporary escaping step as well. These diagnostics
+do not enter worker RPC or verification receipts. The host displays them on exit
+after relay and screen cleanup attempts, without promoting them to processing failures.
+
 CSV export protects formula-like string fields, including prefixed whitespace
 and full-width operator forms. CSV quoting alone is insufficient. Verified
 reports use parent results and new, unique filenames. The interactive final-results

@@ -1,8 +1,86 @@
 ﻿# Parent archive service and confined-client adapter. The wire protocol carries
 # bounded data and scoped relative paths, never executable names or commands.
 . (Join-Path $PSScriptRoot '../shared/source_policy.ps1')
+. (Join-Path $PSScriptRoot '../shared/output_safety.ps1')
 if(-not (Get-Variable ApplicationArchiveTasks -Scope Script -ErrorAction SilentlyContinue)){$script:ApplicationArchiveTasks=@{}}
 $script:ApplicationArchiveCodeRoot=Split-Path -Parent $PSScriptRoot
+
+function New-ApplicationArchiveWarningSink {
+    # The host shares one sink across batches. It contains only bounded strings
+    # and counters, never tasks, runspaces, receipts, sessions or callbacks.
+    return [pscustomobject]@{Messages=(New-Object 'Collections.Generic.List[string]');
+        Omitted=[long]0;Truncated=[long]0;BookkeepingFailed=$false}
+}
+
+function Add-ApplicationArchiveWarning($Sink,[string]$Message) {
+    if($Sink.Messages.Count -ge 64) {
+        if($Sink.Omitted -lt [long]::MaxValue){$Sink.Omitted++}
+        return
+    }
+    # Bound the temporary escaped allocation to 49,152 UTF-16 units, then
+    # keep at most 8,192 safe units including any explicit truncation marker.
+    $truncated=$Message.Length -gt 8192
+    $length=[Math]::Min(8192,$Message.Length)
+    if($length -gt 0 -and $length -lt $Message.Length -and [char]::IsHighSurrogate($Message[$length-1]) -and [char]::IsLowSurrogate($Message[$length])){$length--}
+    $line=ConvertTo-SafeExternalLine $Message.Substring(0,$length)
+    if($truncated -or $line.Length -gt 8192) {
+        $suffix=' [warning truncated]'
+        $length=[Math]::Min($line.Length,8192-$suffix.Length)
+        if($length -gt 0 -and $length -lt $line.Length -and [char]::IsHighSurrogate($line[$length-1]) -and [char]::IsLowSurrogate($line[$length])){$length--}
+        # Do not leave half a visible escape at the truncation boundary.
+        $tailStart=[Math]::Max(0,$length-5)
+        $partial=[regex]::Match($line.Substring($tailStart,$length-$tailStart),'\\(?:u[0-9A-F]{0,3})?$')
+        if($partial.Success){$length=$tailStart+$partial.Index}
+        $line=$line.Substring(0,$length)+$suffix
+        if($Sink.Truncated -lt [long]::MaxValue){$Sink.Truncated++}
+    }
+    $Sink.Messages.Add($line)
+}
+
+function Get-ApplicationArchiveWarningLines($Sink) {
+    if(-not $Sink){return}
+    # Already escaped and bounded at collection. Reading does not consume or
+    # duplicate messages; only the trusted host decides when to display them.
+    foreach($message in $Sink.Messages){$message}
+    if($Sink.Omitted -or $Sink.Truncated) {
+        'Archive cleanup warnings: {0} additional message(s) omitted; {1} message(s) truncated.' -f $Sink.Omitted,$Sink.Truncated
+    }
+    if($Sink.BookkeepingFailed){'Some archive cleanup warnings could not be retained.'}
+}
+
+function Save-ApplicationArchiveWarnings($Task) {
+    $sink=$null
+    try {
+        $property=$Task.PSObject.Properties['WarningSink']
+        if($property){$sink=$property.Value}
+        if(-not $sink) {
+            $sink=New-ApplicationArchiveWarningSink
+            if($property){$Task.WarningSink=$sink}
+            else {$Task | Add-Member NoteProperty WarningSink $sink}
+        }
+        $warnings=$Task.PowerShell.Streams.Warning
+        for($index=0;$index -lt $warnings.Count;$index++) {
+            if($sink.Messages.Count -ge 64) {
+                $remaining=[long]$warnings.Count-$index
+                $sink.Omitted+=[Math]::Min($remaining,[long]::MaxValue-$sink.Omitted)
+                break
+            }
+            Add-ApplicationArchiveWarning $sink ([string]$warnings[$index].Message)
+        }
+    } catch {
+        # Diagnostics must not mask Stop/EndInvoke errors or bypass native
+        # cleanup. Keep a bounded notice if collection itself was unavailable.
+        try {
+            if($sink -and $sink.Messages -is [Collections.Generic.List[string]]){$sink.BookkeepingFailed=$true}
+            else {
+                $fallback=New-ApplicationArchiveWarningSink;$fallback.BookkeepingFailed=$true
+                if($Task.PSObject.Properties['WarningSink']){$Task.WarningSink=$fallback}
+                else {$Task | Add-Member NoteProperty WarningSink $fallback}
+            }
+        } catch {}
+    }
+}
+
 
 function New-ApplicationReceiptStore {
     $archives=New-Object Collections.ArrayList
@@ -47,7 +125,7 @@ function Close-ApplicationArchiveTask($Task) {
         if($hashCancellation){$hashCancellation.Cancel()}
         if($Task.PowerShell) {
             try {if($Task.Async -and -not $Task.Async.IsCompleted){$Task.PowerShell.Stop()}}
-            finally {$Task.PowerShell.Dispose();$Task.PowerShell=$null}
+            finally {try {Save-ApplicationArchiveWarnings $Task} finally {$Task.PowerShell.Dispose();$Task.PowerShell=$null}}
         }
     } finally {
         try {
@@ -110,7 +188,7 @@ function Complete-ApplicationArchiveTask($Task,$ReceiptStore) {
 function Invoke-ApplicationArchiveRequest {
     param([Parameter(Mandatory=$true)]$BrokerSession,
           [Parameter(Mandatory=$true)][ValidateSet('Archive.Start','Archive.Read','Archive.Stop')][string]$Operation,
-          [Parameter(Mandatory=$true)]$Payload,[Parameter(Mandatory=$true)]$ReceiptStore)
+          [Parameter(Mandatory=$true)]$Payload,[Parameter(Mandatory=$true)]$ReceiptStore,$WarningSink=$null)
     $state=Get-ApplicationBrokerState $BrokerSession
     if(-not $state.Batch -or $state.Batch.Completed){throw 'An active authorized batch is required for archive work.'}
     if($Operation -eq 'Archive.Start') {
@@ -139,7 +217,7 @@ function Invoke-ApplicationArchiveRequest {
         $task=[pscustomobject]@{Session=$BrokerSession;BatchId=$batchId;TaskId=[Guid]::NewGuid().ToString('N');Operation=$Payload.ArchiveOperation;
             InputRelativePath=$Payload.ZipRelativePath;DestinationRelativePath=$Payload.DestinationRelativePath;RootLease=$null;InputLease=$null;DestinationLease=$null;
             PowerShell=$null;Async=$null;HashCancellation=$null;Queue=(New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]');Clock=[Diagnostics.Stopwatch]::StartNew();
-            Rows=@();Bytes=$null;Offset=0;Completed=$false;Closed=$false;Error=$null;ReceiptId=$null}
+            Rows=@();Bytes=$null;Offset=0;Completed=$false;Closed=$false;Error=$null;ReceiptId=$null;WarningSink=$WarningSink}
         $taskRegistered=$false
         try {
             $task.HashCancellation=New-Object Threading.CancellationTokenSource

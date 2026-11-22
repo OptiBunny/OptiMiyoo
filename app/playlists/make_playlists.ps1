@@ -485,11 +485,12 @@ function Get-TapeGrouping([string]$Title) {
 function Get-PlaylistMediaIdentity([string]$Relative,[switch]$ArchiveMember) {
     $parent=([string][IO.Path]::GetDirectoryName($Relative.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     $title=[IO.Path]::GetFileNameWithoutExtension($Relative);$tag='';$tagged=$false;$usedFolderTitle=$false;$errorText=$null
-    $allowBareLabel=[bool]$parent
-    if ($ArchiveMember -and -not $parent) {
-        # Without a game folder, words such as Disco and Taper are titles.
-        # Compact numbers and SideA/SideB are clear labels; other letters
-        # need a separator. Check each marker in compound tape labels too.
+    $allowBareLabel=([bool]$parent -or $ArchiveMember)
+    if ($allowBareLabel) {
+        # A folder can be a collection, not proof that an ordinary title
+        # such as Disco or Taper is a disc/tape label. Compact numbers and
+        # SideA/SideB are clear labels; other letters need a separator.
+        # Check each marker in compound tape labels too.
         $joinedWord='(?i)\b(?:(?:disc|disk|tape|cassette)[a-z]|side[c-z])'
         $allowBareLabel=-not [regex]::IsMatch($title,$joinedWord,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
     }

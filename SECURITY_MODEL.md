@@ -334,7 +334,10 @@ is shown again for correction. Retrying must not select a normalized sibling.
 
 Optional explicit-SD core assessment is read-only. It parses launcher text as
 data, using ASCII shell blanks and literal `exec`/`-L` tokens; Unicode lookalikes
-do not establish a selected core. Existing CRLF text handling remains supported,
+do not establish a selected core. Unquoted shell redirections remain unverified:
+their filename operands must not be mistaken for core-selection arguments.
+Quoted and escaped redirection characters remain literal data.
+Existing CRLF text handling remains supported,
 while quoted values retain their exact characters. The config root must be one
 JSON object, with only JSON whitespace before it; singleton or nested arrays
 cannot establish support through property enumeration. The `launch` property

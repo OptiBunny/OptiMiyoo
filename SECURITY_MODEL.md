@@ -193,6 +193,12 @@ playlist text is checked before plan acceptance or destination writes against th
 numbered-playlist reader's 1 MiB byte limit and 16,384 split-line limit, including
 its final newline. Oversized sets cannot create output that this reader cannot
 reopen.
+For profiles with supported ZIP-member playlists, multi-disc Auto planning also
+requires a preserved archive name ending in ordinal lowercase `.zip`. The
+standard core readers recognize that exact archive-member marker. An incompatible
+name is refused before a write plan succeeds; explicit ZIP storage supplies its
+existing lowercase output name without changing Auto's filename-preservation
+contract. Single-game ZIPs and retained ownership candidates are unchanged.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

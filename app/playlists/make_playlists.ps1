@@ -669,8 +669,9 @@ function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
     foreach ($line in $Lines) {
         if ($line.Length -gt 8192) {throw "CUE line exceeds 8,192 characters: $CuePath"}
         # Match ASCII command letters independently of the Windows culture.
-        # Filename captures stay literal, including Unicode and leading spaces.
-        if ($line -cmatch '^\s*[Ff][Ii][Ll][Ee]\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$') {
+        # Unquoted fields use ASCII separators so Unicode spaces stay in filenames.
+        # Keep the existing quoted-field syntax and its literal captures.
+        if ($line -cmatch '^\s*[Ff][Ii][Ll][Ee](?:\s+"([^"]+)"\s+|[ \t\r\n\f\v]+([^ \t\r\n\f\v]+)[ \t\r\n\f\v]+)\S+\s*$') {
             $name=$Matches[1]; if (-not $name) {$name=$Matches[2]}
             # Paths are copied unchanged. Backslashes and parent traversal are
             # rejected because the target is a Linux handheld.

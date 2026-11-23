@@ -170,6 +170,8 @@ staging manifests also keep distinct ordinal names. Conversion ZIP entry cleanup
 closes the converted input stream even if finalizing compressed output fails.
 CUE `FILE` command matching uses ASCII letter case independently of the host
 culture. This recognition preserves the literal captured filenames.
+Unquoted CUE filename fields use ASCII separators; non-ASCII whitespace remains
+part of the literal filename.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and

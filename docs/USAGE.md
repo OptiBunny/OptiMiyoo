@@ -112,6 +112,9 @@ separate batches.
 
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.
+An existing playlist with a UTF-8 byte-order mark cannot prove which output files
+it owns, because some cores read that mark as part of the first filename. Use a
+separate DST when such a playlist would need to authorize replacing existing output.
 ZIP filenames declared as UTF-8 must also contain valid UTF-8.
 
 Choose your [system number](#systems-and-rom-folders), then

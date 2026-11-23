@@ -157,7 +157,9 @@ function Assert-PlainOnionPath([string]$Path,[string]$Root) {
     }
 }
 
-function Read-OptiBoundedText([IO.Stream]$Stream,[int]$MaximumBytes,[string]$Description,[long]$ExpectedLength=-1) {
+function Read-OptiBoundedText([IO.Stream]$Stream,[int]$MaximumBytes,[string]$Description,[long]$ExpectedLength=-1,$Utf8Preamble=$null) {
+    if($null -ne $Utf8Preamble -and $Utf8Preamble -isnot [Management.Automation.PSReference]){throw 'UTF-8 preamble metadata requires a caller-owned reference.'}
+    if($null -ne $Utf8Preamble){$Utf8Preamble.Value=$false}
     if ($MaximumBytes -lt 1) {throw 'Invalid text size limit.'}
     if ($ExpectedLength -gt $MaximumBytes -or ($Stream.CanSeek -and $Stream.Length-$Stream.Position -gt $MaximumBytes)) {
         throw ($Description+' exceeds its supported text size limit.')
@@ -179,8 +181,12 @@ function Read-OptiBoundedText([IO.Stream]$Stream,[int]$MaximumBytes,[string]$Des
         elseif($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191){$offset=3}
         elseif($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254){$encoding=New-Object Text.UnicodeEncoding($false,$false,$true);$offset=2}
         elseif($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255){$encoding=New-Object Text.UnicodeEncoding($true,$false,$true);$offset=2}
-        try{return $encoding.GetString($bytes,$offset,$bytes.Length-$offset)}
+        try{$text=$encoding.GetString($bytes,$offset,$bytes.Length-$offset)}
         catch{throw ($Description+' contains invalid text encoding.')}
+        # A playlist consumer may treat the UTF-8 preamble as filename data.
+        # Preserve that provenance without changing ordinary decoded text.
+        if($null -ne $Utf8Preamble){$Utf8Preamble.Value=($offset -eq 3)}
+        return $text
     } finally {$memory.Dispose()}
 }
 
@@ -194,12 +200,13 @@ function Open-OptiInputLease([string]$Path,[string]$Root) {
     return [OptiMiyoo.SourceRemovalLeaseV128]::OpenRead($Path)
 }
 
-function Read-OptiTextFile([string]$Path,[int]$MaximumBytes,[string]$Description,[string]$Root) {
+function Read-OptiTextFile([string]$Path,[int]$MaximumBytes,[string]$Description,[string]$Root,$Utf8Preamble=$null) {
+    if($null -ne $Utf8Preamble -and $Utf8Preamble -isnot [Management.Automation.PSReference]){throw 'UTF-8 preamble metadata requires a caller-owned reference.'}
     $lease=$null; $stream=$null
     try {
         if ($Root) {$lease=Open-OptiInputLease $Path $Root; $stream=$lease.Stream}
         else {$stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)}
-        return Read-OptiBoundedText $stream $MaximumBytes $Description $stream.Length
+        return Read-OptiBoundedText $stream $MaximumBytes $Description $stream.Length -Utf8Preamble $Utf8Preamble
     } finally {if ($lease) {$lease.Dispose()} elseif ($stream) {$stream.Dispose()}}
 }
 

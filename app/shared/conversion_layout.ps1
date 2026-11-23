@@ -23,7 +23,7 @@ function Resolve-ConversionDescriptorTarget([string]$DescriptorName,[string]$Ref
     $reference=$Reference.Replace('\','/')
     # Only references within this archive can name one of its converted members.
     # Normalize its virtual namespace without opening paths or following aliases.
-    if($reference.StartsWith('/') -or $reference.Contains(':')){return $null}
+    if($reference.StartsWith('/',[StringComparison]::Ordinal) -or $reference.Contains(':')){return $null}
     $parts=New-Object 'Collections.Generic.List[string]'
     $slash=$DescriptorName.LastIndexOf('/')
     if($slash -ge 0){foreach($part in $DescriptorName.Substring(0,$slash).Split('/')){$parts.Add($part)}}
@@ -37,14 +37,15 @@ function Resolve-ConversionDescriptorTarget([string]$DescriptorName,[string]$Ref
     return ($parts.ToArray() -join '/')
 }
 
-function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorName,$RenamedNames) {
+function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorName,$RenamedNames,[switch]$Utf8Preamble) {
     if(-not $RenamedNames -or -not $RenamedNames.Count){return}
     $cue=[IO.Path]::GetExtension($DescriptorName) -ieq '.cue'
     if(-not $cue -and [IO.Path]::GetExtension($DescriptorName) -notin '.m3u','.m3u8'){return}
     if($Text.Length -gt 1MB -or $Text.IndexOf([char]0) -ge 0){throw ('Supplied conversion descriptor exceeds its text limit or contains invalid text: '+$DescriptorName)}
-    $lines=[regex]::Split($Text,'\r\n|\r|\n');$references=0;$referenceBudget=New-OptiPlaylistReferenceBudget
+    $lines=[regex]::Split($Text,'\r\n|\r|\n');$references=0;$referenceBudget=New-OptiPlaylistReferenceBudget;$lineNumber=0
     if($lines.Count -gt 16384){throw ('Supplied conversion descriptor exceeds its line limit: '+$DescriptorName)}
     foreach($line in $lines){
+        $literalPreamble=$Utf8Preamble -and $lineNumber -eq 0;$lineNumber++
         if($line.Length -gt 8192){throw ('Supplied conversion descriptor contains an overlong line: '+$DescriptorName)}
         if($cue){
             if($line -notmatch '^\s*FILE\b'){continue}
@@ -53,8 +54,7 @@ function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorNam
             if(++$references -gt 1024){throw ('Supplied conversion descriptor exceeds its reference limit: '+$DescriptorName)}
             $candidates=@($reference)
         }else{
-            if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
-            $candidates=@(Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)
+            $candidates=@(Get-OptiPlaylistGuardCandidates -Reference $line -Budget $referenceBudget -Utf8Preamble:$literalPreamble)
         }
         foreach($candidate in $candidates){
             $target=Resolve-ConversionDescriptorTarget $DescriptorName $candidate
@@ -84,7 +84,7 @@ function Assert-ConversionDescriptorStream([IO.Stream]$Stream,[long]$Length,[str
         elseif($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254){$encoding=New-Object Text.UnicodeEncoding($false,$false,$true);$offset=2}
         elseif($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255){$encoding=New-Object Text.UnicodeEncoding($true,$false,$true);$offset=2}
         try{$text=$encoding.GetString($bytes,$offset,$bytes.Length-$offset)}catch{throw ('Supplied conversion descriptor has invalid text encoding: '+$DescriptorName)}
-        Assert-ConversionDescriptorTargets $text $DescriptorName $RenamedNames
+        Assert-ConversionDescriptorTargets $text $DescriptorName $RenamedNames -Utf8Preamble:($offset -eq 3)
     } finally {$Stream.Position=$position}
 }
 
@@ -315,23 +315,26 @@ function Reset-ConversionDescriptorCacheTargets($Cache,[object[]]$Targets) {
     }
 }
 
-function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Description,$Cache=$null,[switch]$RequireHeld) {
+function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Description,$Cache=$null,[switch]$RequireHeld,$Utf8Preamble=$null) {
+    if($null -ne $Utf8Preamble -and $Utf8Preamble -isnot [Management.Automation.PSReference]){throw 'UTF-8 preamble metadata requires a caller-owned reference.'}
+    if($null -ne $Utf8Preamble){$Utf8Preamble.Value=$false}
     if($RequireHeld -and (-not $Cache -or $Cache.Disabled -or $Cache.Closed)){throw 'Conversion ownership could not remain protected through publication. Use a smaller or separate DST; previous output kept.'}
-    if(-not $Cache){return Read-OptiTextFile $Path 1MB $Description $Root}
+    if(-not $Cache){return Read-OptiTextFile $Path 1MB $Description $Root -Utf8Preamble $Utf8Preamble}
     if($Cache.Closed -or -not $Cache.Root.Equals([IO.Path]::GetFullPath($Root).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)){throw 'Conversion descriptor cache is closed or belongs to another output root.'}
-    if($Cache.Disabled){return Read-OptiTextFile $Path 1MB $Description $Root}
+    if($Cache.Disabled){return Read-OptiTextFile $Path 1MB $Description $Root -Utf8Preamble $Utf8Preamble}
     $pathFull=[IO.Path]::GetFullPath($Path)
     if($Cache.Entries.ContainsKey($pathFull)){
         $entry=$Cache.Entries[$pathFull]
         # A cached value is usable only while its original file and ancestors
         # remain pinned. Never turn an unexpectedly disposed lease into a hit.
         if(-not $entry.Lease.Stream -or -not $entry.Lease.Stream.CanRead){throw 'Conversion descriptor lease was released unexpectedly.'}
+        if($null -ne $Utf8Preamble){$Utf8Preamble.Value=[bool]$entry.Utf8Preamble}
         return $entry.Text
     }
     if($Cache.Entries.Count -ge $Cache.MaximumDescriptors){
         if($RequireHeld){throw 'Conversion ownership exceeds its protected descriptor budget. Use a smaller or separate DST; previous output kept.'}
         Clear-ConversionDescriptorCache $Cache;$Cache.Disabled=$true
-        return Read-OptiTextFile $Path 1MB $Description $Root
+        return Read-OptiTextFile $Path 1MB $Description $Root -Utf8Preamble $Utf8Preamble
     }
     $lease=$null
     try {
@@ -339,15 +342,16 @@ function Read-ConversionDescriptorText([string]$Path,[string]$Root,[string]$Desc
         # File content stays immutable, while publication-compatible ancestor
         # sharing permits unrelated sibling outputs to move during this batch.
         $lease=[OptiMiyoo.SourceRemovalLeaseV128]::OpenReadForPublication($pathFull)
-        $text=Read-OptiBoundedText $lease.Stream 1MB $Description $lease.Stream.Length
+        $hasUtf8Preamble=$false;$text=Read-OptiBoundedText $lease.Stream 1MB $Description $lease.Stream.Length -Utf8Preamble ([ref]$hasUtf8Preamble)
         [long]$characters=$pathFull.Length+$text.Length
         if($characters -gt $Cache.MaximumCharacters-$Cache.Characters){
             if($RequireHeld){throw 'Conversion ownership exceeds its protected descriptor text budget. Use a smaller or separate DST; previous output kept.'}
             Clear-ConversionDescriptorCache $Cache;$Cache.Disabled=$true
         }else{
-            $Cache.Entries[$pathFull]=[pscustomobject]@{Text=$text;Lease=$lease;Characters=$characters}
+            $Cache.Entries[$pathFull]=[pscustomobject]@{Text=$text;Utf8Preamble=$hasUtf8Preamble;Lease=$lease;Characters=$characters}
             $Cache.Characters+=$characters;$lease=$null
         }
+        if($null -ne $Utf8Preamble){$Utf8Preamble.Value=$hasUtf8Preamble}
         return $text
     } finally {if($lease){$lease.Dispose()}}
 }
@@ -440,15 +444,16 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
         if ($entry.Extension -notin '.m3u','.m3u8') {continue}
         # A descriptor supplied by this exact output set is replaced with it.
         if(Test-ConversionReferenceTarget $entry.FullName $targets){continue}
-        $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache -RequireHeld:$ProtectedPublication
-        $referenceBudget=New-OptiPlaylistReferenceBudget
+        $utf8Preamble=$false
+        $text=Read-ConversionDescriptorText $entry.FullName $DestinationRoot 'Existing playlist' $DescriptorCache -RequireHeld:$ProtectedPublication -Utf8Preamble ([ref]$utf8Preamble)
+        $referenceBudget=New-OptiPlaylistReferenceBudget;$lineNumber=0
         foreach ($line in @($text -split '\r\n|\r|\n')) {
-            if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {continue}
-            foreach($candidate in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
+            $literalPreamble=$utf8Preamble -and $lineNumber -eq 0;$lineNumber++
+            foreach($candidate in (Get-OptiPlaylistGuardCandidates -Reference $line -Budget $referenceBudget -Utf8Preamble:$literalPreamble)) {
                 $reference=$candidate.Replace('/','\')
                 if($reference.StartsWith('\\?\',[StringComparison]::Ordinal) -or $reference.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 $colon=$reference.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $reference.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
-                if($reference.StartsWith('\') -and -not $reference.StartsWith('\\')){$reference=[IO.Path]::Combine([IO.Path]::GetPathRoot($entry.DirectoryName),$reference.TrimStart('\'))}
+                if($reference.StartsWith('\',[StringComparison]::Ordinal) -and -not $reference.StartsWith('\\',[StringComparison]::Ordinal)){$reference=[IO.Path]::Combine([IO.Path]::GetPathRoot($entry.DirectoryName),$reference.TrimStart('\'))}
                 elseif(-not [IO.Path]::IsPathRooted($reference)){$reference=Join-Path $entry.DirectoryName $reference}
                 $reference=[IO.Path]::GetFullPath($reference)
                 $references=New-Object 'System.Collections.Generic.List[string]';$references.Add($reference)

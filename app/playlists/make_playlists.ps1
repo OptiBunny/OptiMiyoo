@@ -714,8 +714,8 @@ function Assert-GameOutputFolder([string]$Directory,[string[]]$ExpectedNames) {
     }
 }
 
-function Read-PlaylistLines([string]$Path) {
-    $text=Read-OptiTextFile $Path 1MB 'Existing playlist'
+function Read-PlaylistLines([string]$Path,$Utf8Preamble=$null) {
+    $text=Read-OptiTextFile $Path 1MB 'Existing playlist' -Utf8Preamble $Utf8Preamble
     $lines=[regex]::Split($text,'\r\n|\r|\n')
     if ($lines.Count -gt 16384) {throw 'Existing playlist exceeds the supported line count; output left alone.'}
     foreach ($line in $lines) {
@@ -724,7 +724,7 @@ function Read-PlaylistLines([string]$Path) {
     return ,$lines
 }
 
-function Assert-OwnedPlaylist([string]$Path,[string]$Stem,[string[]]$Lines=$null,[string[]]$FlatLines=@()) {
+function Assert-OwnedPlaylist([string]$Path,[string]$Stem,[string[]]$Lines=$null,[string[]]$FlatLines=@(),[switch]$Utf8Preamble) {
     # Only retire a playlist generated for this exact game's hidden media.
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {return}
     $depth=@($Stem.Split('/')).Count-1
@@ -732,7 +732,11 @@ function Assert-OwnedPlaylist([string]$Path,[string]$Stem,[string[]]$Lines=$null
     $count=0
     $flatSet=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach($flatLine in $FlatLines){[void]$flatSet.Add($flatLine)}
-    if ($null -eq $Lines) {$Lines=Read-PlaylistLines $Path}
+    if ($null -eq $Lines) {
+        $detectedPreamble=$false;$Lines=Read-PlaylistLines $Path -Utf8Preamble ([ref]$detectedPreamble)
+        if($detectedPreamble){$Utf8Preamble=$true}
+    }
+    if($Utf8Preamble){throw 'Existing playlist has a UTF-8 byte-order mark and cannot establish output ownership. Output left alone; use a separate DST.'}
     foreach ($line in $Lines) {
         if ([string]::IsNullOrWhiteSpace($line)) {continue}
         if ($line.StartsWith($prefix+'/',[StringComparison]::Ordinal)) {$member=$line.Substring($prefix.Length+1)}
@@ -1082,7 +1086,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
 function Get-PlaylistOwnedMedia([string]$Path,[string]$Stem,[string]$Root,$Plan=$null) {
     $owned=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {return $owned}
-    $lines=Read-PlaylistLines $Path
+    $utf8Preamble=$false;$lines=Read-PlaylistLines $Path -Utf8Preamble ([ref]$utf8Preamble)
     $depth=@($Stem.Split('/')).Count-1
     $prefix=('../'*$depth)+'.hidden/'+$Stem
     $references=New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
@@ -1102,7 +1106,7 @@ function Get-PlaylistOwnedMedia([string]$Path,[string]$Stem,[string]$Root,$Plan=
             }
         }
     }
-    Assert-OwnedPlaylist $Path $Stem $lines @($references.Keys)
+    Assert-OwnedPlaylist $Path $Stem $lines @($references.Keys) -Utf8Preamble:$utf8Preamble
     $looseMedia=New-Object 'System.Collections.Generic.List[object]'
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) {continue}
@@ -1316,15 +1320,15 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
     try {
         Assert-PlaylistReferenceCapacity $Index 1
         $entry.Descriptor=Open-PlaylistReferenceDescriptor $Path $Index.Root
-        $referenceBudget=New-OptiPlaylistReferenceBudget
-        foreach($line in (Read-PlaylistLines $Path)){
-            if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
-            foreach($candidate in (Get-OptiPlaylistReferenceCandidates $line $referenceBudget)){
+        $referenceBudget=New-OptiPlaylistReferenceBudget;$utf8Preamble=$false;$lineNumber=0
+        foreach($line in (Read-PlaylistLines $Path -Utf8Preamble ([ref]$utf8Preamble))){
+            $literalPreamble=$utf8Preamble -and $lineNumber -eq 0;$lineNumber++
+            foreach($candidate in (Get-OptiPlaylistGuardCandidates $line $referenceBudget -Utf8Preamble:$literalPreamble)){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                 if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
                 try {
-                    if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$candidate.TrimStart('\')))}
+                    if($candidate.StartsWith('\',[StringComparison]::Ordinal) -and -not $candidate.StartsWith('\\',[StringComparison]::Ordinal)){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$candidate.TrimStart('\')))}
                     elseif([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
                     else{$full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $candidate))}
                 } catch {throw ('Cannot verify an existing playlist reference: '+$Path)}
@@ -1478,15 +1482,15 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                 continue
             }
             if ($file.Extension -notin '.m3u','.m3u8' -or $file.FullName.Equals($Plan.M3uPath,[StringComparison]::OrdinalIgnoreCase)) {continue}
-            $referenceBudget=New-OptiPlaylistReferenceBudget
-            foreach ($line in (Read-PlaylistLines $file.FullName)) {
-                if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {continue}
-                foreach($candidate in (Get-OptiPlaylistReferenceCandidates $line $referenceBudget)){
+            $referenceBudget=New-OptiPlaylistReferenceBudget;$utf8Preamble=$false;$lineNumber=0
+            foreach ($line in (Read-PlaylistLines $file.FullName -Utf8Preamble ([ref]$utf8Preamble))) {
+                $literalPreamble=$utf8Preamble -and $lineNumber -eq 0;$lineNumber++
+                foreach($candidate in (Get-OptiPlaylistGuardCandidates $line $referenceBudget -Utf8Preamble:$literalPreamble)){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                     if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                     $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
                     try {
-                        if($candidate.StartsWith('\') -and -not $candidate.StartsWith('\\')){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($file.DirectoryName),$candidate.TrimStart('\')))}
+                        if($candidate.StartsWith('\',[StringComparison]::Ordinal) -and -not $candidate.StartsWith('\\',[StringComparison]::Ordinal)){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($file.DirectoryName),$candidate.TrimStart('\')))}
                         elseif ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}
                         else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $candidate))}
                     } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}

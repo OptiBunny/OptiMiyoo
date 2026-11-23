@@ -965,7 +965,7 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
     $seen=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach($spelling in @($Reference,$Reference.TrimEnd(),$trimmed)){
         if(-not $spelling -or -not $seen.Add($spelling)){continue}
-        if(-not [StringComparer]::Ordinal.Equals($spelling,$Reference) -and $spelling.StartsWith('#')){continue}
+        if(-not [StringComparer]::Ordinal.Equals($spelling,$Reference) -and $spelling.StartsWith('#',[StringComparison]::Ordinal)){continue}
         if(-not [StringComparer]::Ordinal.Equals($spelling,$trimmed)){
             # Indentation tabs and a padded drive/URI cannot be literal Windows
             # names. Let their trimmed interpretation reach the existing URI,
@@ -1005,6 +1005,46 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
     }
 }
 
+function Get-OptiPlaylistGuardCandidates([string]$Reference,[hashtable]$Budget,[switch]$Utf8Preamble) {
+    if(-not $Utf8Preamble){
+        if([string]::IsNullOrWhiteSpace($Reference) -or $Reference.StartsWith('#',[StringComparison]::Ordinal)){return}
+        Get-OptiPlaylistReferenceCandidates $Reference $Budget
+        return
+    }
+    # Some cores read EF BB BF as a literal first filename character. Protect
+    # both interpretations, including a marker before an empty/comment record.
+    # These candidates can deny a write/removal; they never establish ownership.
+    if($Reference.Length -ge 8192){throw 'Playlist literal preamble interpretation exceeds its 8,192-character line limit.'}
+    $literal=([string][char]0xFEFF)+$Reference
+    $null=Get-OptiPlaylistReferenceCandidates '' $Budget
+    $working=@{Count=[long]$Budget['Count'];Characters=[long]$Budget['Characters']}
+    $initialCount=$working['Count'];$values=New-Object 'Collections.Generic.List[string]'
+    $spellings=@($Reference,$literal)
+    for($interpretation=0;$interpretation -lt $spellings.Count;$interpretation++){
+        $spelling=$spellings[$interpretation]
+        if([string]::IsNullOrWhiteSpace($spelling) -or $spelling.StartsWith('#',[StringComparison]::Ordinal)){continue}
+        $candidates=@(Get-OptiPlaylistReferenceCandidates $spelling $working)
+        if($working['Count']-$initialCount -gt 128){throw 'Playlist reference expansion exceeds its 128-candidate line budget.'}
+        foreach($candidate in $candidates){
+            if($interpretation -eq 1){
+                # The derived literal must be representable on Windows. Its
+                # leading marker cannot form a drive prefix; do not turn a
+                # decoded absolute path or indentation tab into a false refusal.
+                if($candidate -match '[<>:"|?*\x00-\x1f]'){continue}
+                $representable=$true
+                foreach($part in $candidate.Replace('/','\').Split('\')){
+                    if($part -notin '.','..' -and ($part.EndsWith(' ') -or $part.EndsWith('.'))){$representable=$false;break}
+                }
+                if(-not $representable){continue}
+            }
+            $values.Add($candidate)
+        }
+    }
+    # Commit the shared budget and emit only after both interpretations fit.
+    $Budget['Count']=$working['Count'];$Budget['Characters']=$working['Characters']
+    $values.ToArray()
+}
+
 function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Stream]$Stream,[scriptblock]$CancellationCheck=$null) {
     # Read only the already verified, held source descriptor. Never follow a
     # playlist to another filesystem root or change its bytes or job ownership.
@@ -1031,8 +1071,7 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
             if($CancellationCheck -and ($lineNumber -band 31) -eq 0){& $CancellationCheck | Out-Null}
             $lineNumber++
             if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
-            if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
-            foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
+            foreach($name in (Get-OptiPlaylistGuardCandidates -Reference $line -Budget $referenceBudget -Utf8Preamble:($offset -eq 3 -and $lineNumber -eq 1))) {
                 if($name.StartsWith('file://',[StringComparison]::OrdinalIgnoreCase)){throw 'Source playlist has an unsupported local file URI; originals kept.'}
                 if($name -match '^[A-Za-z][A-Za-z0-9+.-]+://'){continue}
                 $relative=$name.Replace('/',[IO.Path]::DirectorySeparatorChar).Replace('\',[IO.Path]::DirectorySeparatorChar)

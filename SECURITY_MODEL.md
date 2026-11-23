@@ -228,6 +228,8 @@ metadata tails, and absent optional DATA checksums retain their existing handlin
 These checks do not establish complete track semantics or faithful conversion.
 
 G64 validation requires the exact, case-sensitive `GCR-1541` file signature.
+A nonzero track offset must describe at least one stored byte; offset-zero absent
+tracks retain their separate handling.
 G64/DSK structure checks and parent-owned receipts bind accepted converted bytes
 to the batch, converter, input hash, output hash, and length. Passthrough files
 must match captured source bytes. A worker's successful exit or claimed checksum is insufficient evidence.

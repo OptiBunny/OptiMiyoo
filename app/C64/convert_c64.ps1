@@ -100,7 +100,7 @@ function Assert-G64([string]$Path,[IO.Stream]$InputStream=$null) {
             if ($offsets[$i] -lt $dataStart -or ($offsets[$i] + 2) -gt $stream.Length) { throw 'Invalid G64 track offset.' }
             $stream.Position = $offsets[$i]
             $length = [int]$reader.ReadUInt16()
-            if ($length -gt $maxLength -or ($offsets[$i] + 2 + $length) -gt $stream.Length) { throw 'Truncated G64 track.' }
+            if ($length -lt 1 -or $length -gt $maxLength -or ($offsets[$i] + 2 + $length) -gt $stream.Length) { throw 'Truncated G64 track.' }
             if ($speeds[$i] -gt 3 -and ($speeds[$i] -lt $dataStart -or
                     ($speeds[$i] + [Math]::Ceiling($length / 4.0)) -gt $stream.Length)) { throw 'Invalid G64 speed map.' }
         }

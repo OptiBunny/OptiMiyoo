@@ -729,6 +729,16 @@ function Read-PlayStationCueText([string]$Path,[IO.Compression.ZipArchive]$Archi
             if ($line -cmatch '^\s*([Ff][Ii][Ll][Ee])\b' -and $Matches[1] -cne 'FILE') {
                 throw ('PlayStation CUE FILE commands must use uppercase FILE for PCSX ReARMed: '+$name+'. Uppercase the FILE command without changing filename spelling, then retry. Original files kept.')
             }
+            if ($line -cmatch '^\s*FILE\b') {
+                # The core tokenizes commands at literal spaces before scanf.
+                # Preserve literal filenames and harmless spacing after a quote.
+                $indent=[regex]::Match($line,'^\s*').Value
+                $quotedGap=[regex]::Match($line,'^ *FILE(\s+)"')
+                if ($indent -cmatch '[^ ]' -or $line -cnotmatch '^ *FILE ' -or
+                    ($quotedGap.Success -and $quotedGap.Groups[1].Value -cmatch '[^ \t\f\v]')) {
+                    throw ('PlayStation CUE FILE commands require compatible ASCII spacing for PCSX ReARMed: '+$name+'. Use spaces before FILE and after the keyword, with ASCII whitespace before quoted filenames; keep filename spelling unchanged. Original files kept.')
+                }
+            }
         }
         return $text
     } finally {if ($stream) {$stream.Dispose()}}

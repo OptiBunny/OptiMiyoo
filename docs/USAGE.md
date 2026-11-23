@@ -123,6 +123,10 @@ the CUE or depend on the core finding a same-named image as a fallback.
 Use uppercase `FILE` commands for PlayStation CUEs: PCSX ReARMed ignores
 lowercase or mixed-case spellings such as `file` and `FiLe`. If refused, change
 only the command to `FILE`, keeping the referenced filename spelling intact.
+Indent `FILE` with ordinary spaces and put an ordinary space immediately after
+the keyword. Tabs may follow that space before a quoted filename. Non-ASCII
+spacing around the command can hide its track from the core; if refused, change
+only the command spacing and keep every character inside the filename intact.
 
 PlayStation CUE output names must use the lowercase `.cue` extension. PCSX
 ReARMed can keep a `.CUE` or mixed-case descriptor selected as image data even

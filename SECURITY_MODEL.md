@@ -203,8 +203,9 @@ interpretations, even before an empty or comment record, within the same line an
 descriptor candidate budgets. Cached descriptor text retains this provenance.
 Comment and rooted-path prefix checks, and derived filename suffix checks, use
 ordinal comparison so literal marker characters do not disappear during path
-classification. This expansion only protects dependencies; it cannot grant
-ownership. A playlist with a UTF-8 preamble cannot establish ownership for
+classification. Relative M3U references use literal path combination before
+full-path normalization. This expansion only protects dependencies; it cannot
+grant ownership. A playlist with a UTF-8 preamble cannot establish ownership for
 replacement or retirement of existing output. Generic decoding and original
 descriptor bytes stay unchanged; UTF-16/UTF-32 preambles and later literal markers
 are not expanded this way.

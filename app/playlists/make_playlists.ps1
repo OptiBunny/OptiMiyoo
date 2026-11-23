@@ -1330,7 +1330,7 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
                 try {
                     if($candidate.StartsWith('\',[StringComparison]::Ordinal) -and -not $candidate.StartsWith('\\',[StringComparison]::Ordinal)){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($Path),$candidate.TrimStart('\')))}
                     elseif([IO.Path]::IsPathRooted($candidate)){$full=[IO.Path]::GetFullPath($candidate)}
-                    else{$full=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($Path)) $candidate))}
+                    else{$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetDirectoryName($Path),$candidate))}
                 } catch {throw ('Cannot verify an existing playlist reference: '+$Path)}
                 Add-PlaylistReferenceKey $Index $entry Exact $full
                 if([IO.Path]::GetExtension($full) -eq '.cue'){
@@ -1492,7 +1492,7 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
                     try {
                         if($candidate.StartsWith('\',[StringComparison]::Ordinal) -and -not $candidate.StartsWith('\\',[StringComparison]::Ordinal)){$full=[IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetPathRoot($file.DirectoryName),$candidate.TrimStart('\')))}
                         elseif ([IO.Path]::IsPathRooted($candidate)) {$full=[IO.Path]::GetFullPath($candidate)}
-                        else {$full=[IO.Path]::GetFullPath((Join-Path $file.DirectoryName $candidate))}
+                        else {$full=[IO.Path]::GetFullPath([IO.Path]::Combine($file.DirectoryName,$candidate))}
                     } catch {throw ('Cannot verify an existing playlist reference: '+$file.FullName)}
                     $references=@($full)
                     if([IO.Path]::GetExtension($full) -eq '.cue'){

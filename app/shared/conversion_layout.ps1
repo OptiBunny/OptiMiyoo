@@ -454,7 +454,7 @@ function Assert-ConversionGroupOwnership($Group,[string]$DestinationRoot,$Descri
                 if($reference.StartsWith('\\?\',[StringComparison]::Ordinal) -or $reference.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 $colon=$reference.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $reference.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
                 if($reference.StartsWith('\',[StringComparison]::Ordinal) -and -not $reference.StartsWith('\\',[StringComparison]::Ordinal)){$reference=[IO.Path]::Combine([IO.Path]::GetPathRoot($entry.DirectoryName),$reference.TrimStart('\'))}
-                elseif(-not [IO.Path]::IsPathRooted($reference)){$reference=Join-Path $entry.DirectoryName $reference}
+                elseif(-not [IO.Path]::IsPathRooted($reference)){$reference=[IO.Path]::Combine($entry.DirectoryName,$reference)}
                 $reference=[IO.Path]::GetFullPath($reference)
                 $references=New-Object 'System.Collections.Generic.List[string]';$references.Add($reference)
                 if ([IO.Path]::GetExtension($reference) -ieq '.cue') {

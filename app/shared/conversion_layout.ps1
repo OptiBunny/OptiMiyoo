@@ -119,9 +119,12 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
             }
         }
         elseif ($found.Count -gt 1) {$errorText='Multiple disk labels in one filename; separate the input sets.'}
-        elseif ($allowBareLabel -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
-            $usedFolderTitle=$true
-            $tag=$Matches[1].ToLowerInvariant();$title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+        elseif ($allowBareLabel) {
+            $bareLabel=[regex]::Match($title,'^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$',[Text.RegularExpressions.RegexOptions]::CultureInvariant)
+            if ($bareLabel.Success) {
+                $usedFolderTitle=$true
+                $tag=$bareLabel.Groups[1].Value.ToLowerInvariant();$title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+            }
         }
     }
     if (-not $Archive -and -not $usedFolderTitle -and $parent -and $title.Equals([IO.Path]::GetFileName($parent),[StringComparison]::OrdinalIgnoreCase)) {

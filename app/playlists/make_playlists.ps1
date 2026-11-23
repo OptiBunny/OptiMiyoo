@@ -514,8 +514,11 @@ function Get-PlaylistMediaIdentity([string]$Relative,[switch]$ArchiveMember) {
         $tag=$found[0].Groups[1].Value.ToLowerInvariant();$tagged=$true
         $title=[regex]::Replace($title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant).Trim()
         $title=[regex]::Replace($title,'\s{2,}',' ')
-    } elseif ($allowBareLabel -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
-        $tag=$Matches[1].ToLowerInvariant();$tagged=$true;$title=''
+    } elseif ($allowBareLabel) {
+        $bareLabel=[regex]::Match($title,'^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$',[Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        if ($bareLabel.Success) {
+            $tag=$bareLabel.Groups[1].Value.ToLowerInvariant();$tagged=$true;$title=''
+        }
     }
     if ($tagged -and -not $title -and $parent) {
         # Bare and bracketed labels inherit their game folder. At the root

@@ -116,6 +116,10 @@ these entries, so OptiMiyoo refuses entries such as `Tracks/Track.bin`. Put the
 CUE and its tracks together and update the entries before retrying. The game
 folder itself can still be inside a collection. OptiMiyoo leaves the CUE and
 track bytes unchanged.
+PlayStation CUEs must also use UTF-8 **without a byte-order mark**. PCSX ReARMed
+reads CUE commands as bytes; a different encoding can hide the track references.
+If refused, save the CUE in that encoding and retry. OptiMiyoo does not transcode
+the CUE or depend on the core finding a same-named image as a fallback.
 
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.

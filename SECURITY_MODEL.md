@@ -178,6 +178,15 @@ file beside the CUE. This applies to loose and archived source CUEs before a
 successful output plan. It preserves basename references in nested game folders
 and leaves generic CUE dependency/ownership parsing unchanged. Descriptors and
 track names are never rewritten or flattened to pass this check.
+PlayStation preparation also requires CUE text to be UTF-8 without a BOM.
+The core reads byte-oriented commands; BOM-marked text can hide FILE/TRACK
+commands even when the common decoder reads it successfully. This conservative
+policy also refuses BOM files that might work with an ignored first line or
+a same-stem raw-image fallback. The PS reader checks the original prefix in
+one owned read-only file stream or bounded sandbox-returned ZIP byte stream,
+then rewinds that same stream for strict decoding. It does not infer encoding
+from the generic decoded ZIP cache. Other-system CUE parsing and generic
+foreign-reference/ownership readers retain UTF-8 and BOM UTF-16/UTF-32 support.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and

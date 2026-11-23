@@ -293,8 +293,16 @@ function Get-TextElementWidth([string]$Element) {
     # supplementary symbols conservatively; never split surrogate pairs.
     if ($code -ge 0x10000 -or $Element.Contains([string][char]0xFE0F) -or
         ($code -ge 0x1100 -and $code -le 0x115F) -or
+        ($code -ge 0x231A -and $code -le 0x231B) -or
         ($code -ge 0x2329 -and $code -le 0x232A) -or
+        ($code -ge 0x23E9 -and $code -le 0x23EC) -or
+        $code -eq 0x23F0 -or
+        $code -eq 0x23F3 -or
+        ($code -ge 0x25FD -and $code -le 0x25FE) -or
         ($code -ge 0x2600 -and $code -le 0x27BF) -or
+        ($code -ge 0x2B1B -and $code -le 0x2B1C) -or
+        $code -eq 0x2B50 -or
+        $code -eq 0x2B55 -or
         ($code -ge 0x2E80 -and $code -le 0xA4CF) -or
         ($code -ge 0xAC00 -and $code -le 0xD7A3) -or
         ($code -ge 0xF900 -and $code -le 0xFAFF) -or

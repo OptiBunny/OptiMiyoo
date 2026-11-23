@@ -122,8 +122,10 @@ A game with multiple discs or tape sides gets one playlist. Its game files go
 in `DST/.hidden`, and the playlist stays outside that folder so it appears in
 Onion's game list. Games with one disc or tape side stay visible without a playlist.
 
-A generated playlist supports up to 16,383 entries and 1 MiB of UTF-8 text. Split
-larger sets into smaller groups; an oversized set leaves its existing output unchanged.
+All generated playlists are limited to 1 MiB of UTF-8 text and 16,383 entries.
+For Amiga, Commodore 64 and VIC-20, the supported cores retain at most 20
+entries, so OptiMiyoo refuses larger sets. Split oversized sets into smaller
+groups; a refused set leaves its existing output unchanged.
 
 ### Systems and ROM folders
 

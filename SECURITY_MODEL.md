@@ -192,7 +192,11 @@ archive-member interpretations share the same bounded candidate budget. Generate
 playlist text is checked before plan acceptance or destination writes against the
 numbered-playlist reader's 1 MiB byte limit and 16,384 split-line limit, including
 its final newline. Oversized sets cannot create output that this reader cannot
-reopen.
+reopen. The parent and worker also refuse more than twenty media entries in
+Amiga, C64 and VIC-20 playlist plans: their supported PUAE/VICE disk-control
+storage cannot retain later entries. This whole-set refusal happens before
+plan acceptance or publication; it does not truncate the playlist or change
+the generic descriptor-reader limits.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

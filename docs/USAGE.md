@@ -198,6 +198,13 @@ or **4: Loose files** to keep Unicode names, or rename the members to ASCII befo
 choosing ZIP storage. OptiMiyoo refuses the incompatible ZIP plan before writing
 output; it does not rename your files.
 
+For Amiga multi-disc ZIPs, selected member names must retain the same bytes when
+written into a UTF-8 playlist. Some older ZIP filename encodings do not, so PUAE
+cannot find those members. If OptiMiyoo refuses such an archive, choose **3:
+Folders** or **4: Loose files**, or rebuild the archive with UTF-8 member names.
+Auto and ZIP storage both preserve existing ZIP bytes. This check leaves single
+games and unrelated archive side files unchanged.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

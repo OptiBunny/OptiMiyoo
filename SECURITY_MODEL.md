@@ -205,6 +205,13 @@ the original explicit member selectors. The planner refuses that mismatch before
 accepting writes; it does not normalize names or change archive bytes. Folder
 and loose-file plans preserve Unicode names. This family-specific restriction
 does not change generic ZIP decoding, single-game plans or AMIGA UTF-8 members.
+For AMIGA multi-disc input ZIPs kept zipped, media admission also compares each
+selected decoded member's UTF-8 bytes with its original central-directory name.
+PUAE extracts raw name bytes, so a legacy name that decodes differently cannot
+be addressed by the generated UTF-8 selector. The bounded inspector refuses
+that mismatch before planning; it does not guess or rewrite an encoding.
+Unselected side files, single games and extraction layouts retain their existing
+decoding. This check does not certify older cores that rename Unicode members.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

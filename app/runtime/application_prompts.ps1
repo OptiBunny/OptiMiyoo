@@ -105,7 +105,7 @@ function Get-ApplicationPromptModel {
     return Get-ApplicationPreparedPromptModel $preparation -Page $Page -Invalid:$Invalid
 }
 
-function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='',[string]$EscapeValue='B',[string[]]$ImmediateChoices=@()) {
+function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnResize,[string]$InitialText='',[string]$EscapeValue='B',[string[]]$ImmediateChoices=@(),[switch]$LiteralRows) {
     if($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Trusted policy choices require the parent console; redirected child answers are not accepted.'
     }
@@ -115,10 +115,10 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
     Reset-MioSparseCrt
     if($sparseIdle){Reset-MioIdleInput;$idleWatch=[Diagnostics.Stopwatch]::StartNew()}
     $initialResize=Update-DisplaySize
-    $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt
+    $rows=@($Model.Lines);$layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt -LiteralRows:$LiteralRows
     if(-not $script:UiVT) {
         [Console]::WriteLine($Model.Title)
-        foreach($line in @(Get-PlainMenuRows $Model.Lines -Prompt $Model.Prompt)){[Console]::WriteLine($line)}
+        foreach($line in @(Get-PlainMenuRows $Model.Lines -Prompt $Model.Prompt -LiteralRows:$LiteralRows)){[Console]::WriteLine($line)}
         $plainPrompt='INPUT >'
         [Console]::Write($plainPrompt+' ')
     }
@@ -127,7 +127,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
     while($true) {
         if(Update-DisplaySize -Throttled){
             if($ReturnOnResize -and $script:UiVT){return [pscustomobject]@{Resized=$true;InputText=$text}}
-            $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt;$dirty=$true
+            $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt -LiteralRows:$LiteralRows;$dirty=$true
         }
         $bunnyVisible=($script:UiVT -and $layout.Fits -and $layout.ShowMio)
         if($sparseIdle) {
@@ -137,7 +137,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
         if(Update-MioSparseCrt $script:UiEffectClock.Elapsed.TotalMilliseconds ($text.Length -gt 0) $bunnyVisible){$dirty=$true}
         $fits=(-not $script:UiVT -or $layout.Fits)
         if($script:UiVT -and $dirty) {
-            Draw-MenuPanel $Model.Title $rows $Model.Prompt $text $caret 'wait'
+            Draw-MenuPanel $Model.Title $rows $Model.Prompt $text $caret 'wait' -LiteralRows:$LiteralRows
             $dirty=$false
         }
         if([Console]::KeyAvailable) {
@@ -151,7 +151,7 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
             if(-not $text.Length -and [string][char]::ToUpperInvariant($key.KeyChar) -in $ImmediateChoices){return ([string][char]::ToUpperInvariant($key.KeyChar))}
             if($script:UiVT -and $key.Key -eq [ConsoleKey]::Enter -and (Update-DisplaySize)){
                 if($ReturnOnResize){return [pscustomobject]@{Resized=$true;InputText=$text}}
-                $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt;$dirty=$true;continue
+                $layout=Get-MenuLayout -Rows $rows -Prompt $Model.Prompt -LiteralRows:$LiteralRows;$dirty=$true;continue
             }
             if(-not $fits) {
                 if([char]::ToUpperInvariant($key.KeyChar) -eq 'Q'){return 'Q'}
@@ -234,11 +234,11 @@ function New-ApplicationResultLayout {
     # Without an initialized viewport, retain the conservative minimum panel.
     $textWidth=44;$pageSize=11
     if($script:UiColumns -ge 44 -and $script:UiHeight -gt 0) {
-        $whole=Get-MenuLayout -Rows $sourceLines -Prompt $prompt
+        $whole=Get-MenuLayout -Rows $sourceLines -Prompt $prompt -LiteralRows
         if($whole.Fits) {
             return [pscustomobject]@{Title=$title;PageList=@([pscustomobject]@{Rows=@($whole.Rows);Anchor=0L});Prompt=$prompt;TextWidth=$whole.TextWidth;PageSize=$whole.BodyRows}
         }
-        $empty=Get-MenuLayout -Rows @('')
+        $empty=Get-MenuLayout -Rows @('') -LiteralRows
         $textWidth=$empty.TextWidth
         $overhead=8
         if($empty.ShowMio -and $script:UiHeight -ge 26){$overhead=14}
@@ -315,7 +315,7 @@ function Read-ApplicationResult {
                 $layoutKey=$currentKey
             }
             $model=Get-ApplicationResultPage -Layout $resultLayout -Page $page -Anchor $anchor
-            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText -EscapeValue 'B' -ImmediateChoices @('B','Q','>','<')
+            $answer=Read-ApplicationConsoleChoice $model -ReturnOnResize -InitialText $inputText -EscapeValue 'B' -ImmediateChoices @('B','Q','>','<') -LiteralRows
             if($answer -isnot [string] -and $answer.Resized) {$page=$model.Page;if($anchor -lt 0){$anchor=$model.Anchor};$inputText=$answer.InputText;continue}
             $inputText='';$anchor=-1L
             if ($answer -in '', 'B') {return $true}

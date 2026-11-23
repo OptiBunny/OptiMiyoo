@@ -1172,7 +1172,7 @@ function Get-MenuSpacing([string[]]$Rows,[bool[]]$DefaultRows,[int]$MaximumRows)
     return [pscustomobject]@{Rows=$kept.ToArray();DefaultRows=$defaults.ToArray()}
 }
 
-function Get-MenuControlParts([string[]]$Rows,[bool[]]$DefaultRows) {
+function Get-MenuControlParts([string[]]$Rows,[bool[]]$DefaultRows,[switch]$LiteralRows) {
     $body=New-Object 'Collections.Generic.List[string]'
     $defaults=New-Object 'Collections.Generic.List[bool]'
     $controls=New-Object 'Collections.Generic.List[string]'
@@ -1181,8 +1181,9 @@ function Get-MenuControlParts([string[]]$Rows,[bool[]]$DefaultRows) {
         $line=$Rows[$i].Trim()
         $isDefault=($line -match '^(?:\d+|[A-Z])\..*\(default\)')
         if($null -ne $DefaultRows -and $i -lt $DefaultRows.Count){$isDefault=$DefaultRows[$i]}
-        # Match control legends, not explanations or numbered choices.
-        $isControl=$line -match '^(?:B\s*/\s*Esc(?:[.:]|\s+Back\b)|Q[.:]\s*(?:Exit|Quit)\b|A(?:\.|\s*/\s*Enter:)\s*Apply\b|Y Overwrite\s*\||A Overwrite all\s*\||Page \d+/\d+\s*\||Enter\s*/\s*B\s*/\s*Esc:|Space:\s*pause\b|N\s*/\s*Right\s*/\s*Enter:|P\s*/\s*Left:|R:\s*restart\b|E:\s*turn the CRT effect\b)'
+        # Result rows are data even when a filename resembles a menu legend.
+        # Ordinary menus retain their control legends.
+        $isControl=-not $LiteralRows -and $line -match '^(?:B\s*/\s*Esc(?:[.:]|\s+Back\b)|Q[.:]\s*(?:Exit|Quit)\b|A(?:\.|\s*/\s*Enter:)\s*Apply\b|Y Overwrite\s*\||A Overwrite all\s*\||Page \d+/\d+\s*\||Enter\s*/\s*B\s*/\s*Esc:|Space:\s*pause\b|N\s*/\s*Right\s*/\s*Enter:|P\s*/\s*Left:|R:\s*restart\b|E:\s*turn the CRT effect\b)'
         if($isControl){$controls.Add($line);$controlDefaults.Add($isDefault)}
         else {$body.Add($Rows[$i]);$defaults.Add($isDefault)}
     }
@@ -1296,9 +1297,9 @@ function Format-MenuFooterRows([object[]]$Rows,[int]$Width,[string]$PromptColor=
     }
 }
 
-function Get-PlainMenuRows([string[]]$Rows,[string]$Prompt) {
+function Get-PlainMenuRows([string[]]$Rows,[string]$Prompt,[switch]$LiteralRows) {
     $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
-    $parts=Get-MenuControlParts $Rows
+    $parts=Get-MenuControlParts $Rows -LiteralRows:$LiteralRows
     foreach($line in $parts.Rows){(ConvertTo-SafeExternalText $line).TrimStart()}
     if($PSBoundParameters.ContainsKey('Prompt')) {
         foreach($row in @(Get-MenuFooterLayout $Prompt $parts.ControlRows $parts.ControlDefaults $width)) {
@@ -1308,11 +1309,11 @@ function Get-PlainMenuRows([string[]]$Rows,[string]$Prompt) {
     } else {foreach($line in @(Get-MenuRows $parts.ControlRows $width)){Format-RightAlignedText $line $width}}
 }
 
-function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[string]$Prompt='') {
+function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[string]$Prompt='',[switch]$LiteralRows) {
     # Keep source rows intact so a later wider window can unwrap them again.
     # Reserve top padding, the compact banner, borders, prompt and a spare row.
     $width=[Math]::Max(16,[Math]::Min($script:UiWidth,$script:UiColumns-4))
-    $key=('{0}|{1}|{2}|{3}' -f $width,$script:UiColumns,$script:UiHeight,[bool]$NoInput)
+    $key=('{0}|{1}|{2}|{3}|{4}' -f $width,$script:UiColumns,$script:UiHeight,[bool]$NoInput,[bool]$LiteralRows)
     $key+='|'+($DefaultRows -join ',')+'|'+$Prompt
     $cached=$script:UiMenuLayoutCache
     if ($cached -and $cached.Key -ceq $key -and $cached.Rows.Count -eq $Rows.Count) {
@@ -1320,7 +1321,7 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[s
         for ($i=0;$i -lt $Rows.Count;$i++) {if ($Rows[$i] -cne $cached.Rows[$i]) {$same=$false;break}}
         if ($same) {return $cached.Layout}
     }
-    $parts=Get-MenuControlParts $Rows $DefaultRows
+    $parts=Get-MenuControlParts $Rows $DefaultRows -LiteralRows:$LiteralRows
     $controlDefaults=$null
     $controls=@(Get-MenuRows $parts.ControlRows $width ([ref]$controlDefaults) $parts.ControlDefaults)
     $footer=@(Get-MenuFooterLayout $Prompt $controls $controlDefaults $width)
@@ -1359,8 +1360,8 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[s
 function Draw-MenuPanel([string]$Title,[string[]]$Rows,[string]$Prompt,
                         [string]$InputText,[int]$Caret,[string]$Mood='idle',
                         [switch]$NoInput,[string]$Channel='SRC -> DST / LOCAL DISK LINK',[bool[]]$DefaultRows,
-                        [string]$PromptColor='249;202;226') {
-    $menuLayout=Get-MenuLayout $Rows -NoInput:$NoInput -DefaultRows $DefaultRows -Prompt $Prompt
+                        [string]$PromptColor='249;202;226',[switch]$LiteralRows) {
+    $menuLayout=Get-MenuLayout $Rows -NoInput:$NoInput -DefaultRows $DefaultRows -Prompt $Prompt -LiteralRows:$LiteralRows
     if (-not $menuLayout.Fits) {
         Draw-ResizePanel $Title $Prompt $InputText $Caret $menuLayout.RequiredHeight 44
         return

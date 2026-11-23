@@ -1033,7 +1033,7 @@ function Get-OptiPlaylistGuardCandidates([string]$Reference,[hashtable]$Budget,[
                 if($candidate -match '[<>:"|?*\x00-\x1f]'){continue}
                 $representable=$true
                 foreach($part in $candidate.Replace('/','\').Split('\')){
-                    if($part -notin '.','..' -and ($part.EndsWith(' ') -or $part.EndsWith('.'))){$representable=$false;break}
+                    if($part -notin '.','..' -and ($part.EndsWith(' ',[StringComparison]::Ordinal) -or $part.EndsWith('.',[StringComparison]::Ordinal))){$representable=$false;break}
                 }
                 if(-not $representable){continue}
             }

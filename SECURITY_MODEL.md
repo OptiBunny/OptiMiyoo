@@ -201,12 +201,13 @@ A leading UTF-8 byte-order mark is also a possible literal filename character
 for byte-oriented playlist consumers. Dependency guards retain both first-record
 interpretations, even before an empty or comment record, within the same line and
 descriptor candidate budgets. Cached descriptor text retains this provenance.
-Comment and rooted-path prefix checks use ordinal comparison, so a literal marker
-before a comment character or separator does not disappear during classification.
-This expansion only protects dependencies; it cannot grant ownership. A playlist
-with a UTF-8 preamble cannot establish ownership for replacement or retirement of
-existing output. Generic decoding and original descriptor bytes stay unchanged;
-UTF-16/UTF-32 preambles and later literal markers are not expanded this way.
+Comment and rooted-path prefix checks, and derived filename suffix checks, use
+ordinal comparison so literal marker characters do not disappear during path
+classification. This expansion only protects dependencies; it cannot grant
+ownership. A playlist with a UTF-8 preamble cannot establish ownership for
+replacement or retirement of existing output. Generic decoding and original
+descriptor bytes stay unchanged; UTF-16/UTF-32 preambles and later literal markers
+are not expanded this way.
 
 NIB/NBZ decoding validates bounded input and expanded sizes, track tables, and
 supported track numbers before native conversion. The trusted parent independently

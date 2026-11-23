@@ -310,6 +310,10 @@ not cause a different directory to be checked or pinned.
 Original removal requires successful publication and verification of all affected
 owning jobs and dependencies. Recheck installed output bytes, source bytes, and
 retained CUE/playlist references before deleting through held source handles.
+Retained playlists separate a `path|label` entry at its first literal `|` before
+interpreting the path; display labels cannot hide or introduce source references.
+The path keeps the existing literal, whitespace and archive-member interpretations;
+a label without a filename is refused. Descriptor bounds and bytes are unchanged.
 Skipped, failed, changed, or still-referenced sources must not be removed just
 because another job succeeded. Ambiguous ownership must preserve the affected
 files. Preserve recovery data when rollback or safe cleanup cannot complete.

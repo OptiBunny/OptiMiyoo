@@ -120,6 +120,9 @@ PlayStation CUEs must also use UTF-8 **without a byte-order mark**. PCSX ReARMed
 reads CUE commands as bytes; a different encoding can hide the track references.
 If refused, save the CUE in that encoding and retry. OptiMiyoo does not transcode
 the CUE or depend on the core finding a same-named image as a fallback.
+Use uppercase `FILE` commands for PlayStation CUEs: PCSX ReARMed ignores
+lowercase or mixed-case spellings such as `file` and `FiLe`. If refused, change
+only the command to `FILE`, keeping the referenced filename spelling intact.
 
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.

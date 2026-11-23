@@ -722,7 +722,15 @@ function Read-PlayStationCueText([string]$Path,[IO.Compression.ZipArchive]$Archi
         if ($bom) {
             throw ('PlayStation CUE text must be UTF-8 without a byte-order mark for PCSX ReARMed: '+$name+'. Save the CUE as UTF-8 without a byte-order mark, then retry. Original files kept.')
         }
-        return (Read-OptiBoundedText $stream 1MB ('CUE '+$name) $length)
+        $text=Read-OptiBoundedText $stream 1MB ('CUE '+$name) $length
+        # The shared reader serves cores that accept mixed-case commands.
+        # PCSX ReARMed compares the FILE token literally; keep filenames intact.
+        foreach ($line in [regex]::Split($text,'\r\n|\r|\n')) {
+            if ($line -cmatch '^\s*([Ff][Ii][Ll][Ee])\b' -and $Matches[1] -cne 'FILE') {
+                throw ('PlayStation CUE FILE commands must use uppercase FILE for PCSX ReARMed: '+$name+'. Uppercase the FILE command without changing filename spelling, then retry. Original files kept.')
+            }
+        }
+        return $text
     } finally {if ($stream) {$stream.Dispose()}}
 }
 function Get-CueFiles([string]$CuePath) {

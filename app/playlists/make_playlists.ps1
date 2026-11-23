@@ -515,7 +515,7 @@ function Get-PlaylistMediaIdentity([string]$Relative,[switch]$ArchiveMember) {
         $title=[regex]::Replace($title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant).Trim()
         $title=[regex]::Replace($title,'\s{2,}',' ')
     } elseif ($allowBareLabel) {
-        $bareLabel=[regex]::Match($title,'^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$',[Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        $bareLabel=[regex]::Match($title,'^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$',([Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::CultureInvariant))
         if ($bareLabel.Success) {
             $tag=$bareLabel.Groups[1].Value.ToLowerInvariant();$tagged=$true;$title=''
         }

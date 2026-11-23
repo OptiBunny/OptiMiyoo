@@ -668,14 +668,16 @@ function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
     $found=New-Object 'System.Collections.Generic.List[string]'
     foreach ($line in $Lines) {
         if ($line.Length -gt 8192) {throw "CUE line exceeds 8,192 characters: $CuePath"}
-        if ($line -match '^\s*FILE\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$') {
+        # Match ASCII command letters independently of the Windows culture.
+        # Filename captures stay literal, including Unicode and leading spaces.
+        if ($line -cmatch '^\s*[Ff][Ii][Ll][Ee]\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$') {
             $name=$Matches[1]; if (-not $name) {$name=$Matches[2]}
             # Paths are copied unchanged. Backslashes and parent traversal are
             # rejected because the target is a Linux handheld.
             Assert-RelativeName $name
             if ($found.Count -ge 1024) {throw "CUE has more than 1,024 FILE references: $CuePath"}
             $found.Add($name)
-        } elseif ($line -match '^\s*FILE\b') {throw "Unrecognized CUE FILE line in $CuePath"}
+        } elseif ($line -cmatch '^\s*[Ff][Ii][Ll][Ee]\b') {throw "Unrecognized CUE FILE line in $CuePath"}
     }
     if ($found.Count -eq 0) {throw "CUE contains no FILE entries: $CuePath"}
     return @($found)

@@ -216,7 +216,8 @@ When processing finishes, review the saved, skipped, and failed outputs, along
 with the counts of originals removed or kept. The CSV report and log are saved
 beside `SRC` and `DST`; their paths appear in the results. **Enter / B / Esc**
 returns to the main menu and **Q** exits. Long results use **> / <** to page
-through the complete details and report paths. The final results replace the
+through the complete details and report paths. Filename spaces are retained
+when result lines wrap. The final results replace the
 preparation progress screen, including when no files were published.
 
 If the results report incomplete cleanup of a previous output backup, the new

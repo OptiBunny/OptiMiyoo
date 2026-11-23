@@ -415,7 +415,9 @@ parent-verified results and report-save status. The result reader retains one
 prepared report layout for its current viewport, rebuilds it when that viewport
 changes, and clears its local layout on exit. Result content stays literal through
 layout and rendering, so filenames resembling menu legends cannot remove outcome
-rows. Ordinary selection menus retain their control detection. The shared renderer
+rows. Literal result wrapping also preserves leading and boundary whitespace,
+including nonempty whitespace continuation rows; ordinary menus retain word
+wrapping and their control detection. The shared renderer
 keeps its existing single-entry cache, keyed separately for literal result rows.
 Logs and reports can contain
 local paths, filenames, and processing details; they are not anonymized. Ordinary

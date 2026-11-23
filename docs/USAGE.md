@@ -205,6 +205,12 @@ Folders** or **4: Loose files**, or rebuild the archive with UTF-8 member names.
 Auto and ZIP storage both preserve existing ZIP bytes. This check leaves single
 games and unrelated archive side files unchanged.
 
+Amiga input ZIPs that use ZIP64 end-directory records also need **3: Folders**
+or **4: Loose files**, or rebuilding without ZIP64 before choosing ZIP storage.
+The supported PUAE reader cannot open those directory records, even when the
+archive is small. This applies to single games as well as multi-disc sets.
+OptiMiyoo leaves the original archive unchanged.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

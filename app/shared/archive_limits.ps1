@@ -23,6 +23,12 @@ namespace OptiMiyoo {
             Inspect(stream,maxTotal,maxEntry,maxEntries,maxDirectory,null);
         }
         public static void Inspect(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory,string[] utf8MemberNames) {
+            Inspect(stream,maxTotal,maxEntry,maxEntries,maxDirectory,utf8MemberNames,false);
+        }
+        public static void InspectClassicDirectory(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory,string[] utf8MemberNames) {
+            Inspect(stream,maxTotal,maxEntry,maxEntries,maxDirectory,utf8MemberNames,true);
+        }
+        private static void Inspect(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory,string[] utf8MemberNames,bool classicDirectory) {
             if (!stream.CanRead || !stream.CanSeek) throw new IOException("ZIP inspection requires a readable seekable stream.");
             long saved=stream.Position;
             try {
@@ -49,6 +55,8 @@ namespace OptiMiyoo {
                     if (endPosition>=20) {
                         stream.Position=endPosition-20;byte[] locator=Read(reader,20);
                         if (U32(locator,0)==0x07064b50U) {
+                            // PUAE's classic reader does not resolve ZIP64 end records.
+                            if (classicDirectory) throw new InvalidDataException("This Amiga ZIP uses a ZIP64 directory that the supported core cannot read. Choose Folders or Loose files storage, or rebuild the archive without ZIP64. Original kept.");
                             zip64=true;
                             if (U32(locator,4)!=0 || U32(locator,16)!=1) throw new InvalidDataException("Split ZIP64 archives are unsupported.");
                             ulong position=U64(locator,8);
@@ -147,11 +155,19 @@ namespace OptiMiyoo {
 }
 
 function Assert-ArchiveBudget {
-    param([Parameter(Mandatory=$true)][IO.Stream]$Stream,[ValidateSet('Media','Floppy')][string]$Profile='Media',[AllowNull()][string[]]$Utf8MemberNames=$null)
+    param([Parameter(Mandatory=$true)][IO.Stream]$Stream,[ValidateSet('Media','Floppy')][string]$Profile='Media',[AllowNull()][string[]]$Utf8MemberNames=$null,[switch]$ClassicDirectory)
     Initialize-ArchiveLimits
     [long]$total=64GB;[long]$entry=16GB
     if ($Profile -eq 'Floppy') {$total=8GB;$entry=512MB}
-    [OptiMiyoo.ArchiveLimits]::Inspect($Stream,$total,$entry,20000,64MB,$Utf8MemberNames)
+    if ($ClassicDirectory) {[OptiMiyoo.ArchiveLimits]::InspectClassicDirectory($Stream,$total,$entry,20000,64MB,$Utf8MemberNames)}
+    else {[OptiMiyoo.ArchiveLimits]::Inspect($Stream,$total,$entry,20000,64MB,$Utf8MemberNames)}
+}
+
+function Assert-ZipClassicDirectory {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {Assert-ArchiveBudget -Stream $stream -Profile Media -ClassicDirectory}
+    finally {$stream.Dispose()}
 }
 
 function Assert-ZipMemberUtf8Names {

@@ -212,6 +212,13 @@ be addressed by the generated UTF-8 selector. The bounded inspector refuses
 that mismatch before planning; it does not guess or rewrite an encoding.
 Unselected side files, single games and extraction layouts retain their existing
 decoding. This check does not certify older cores that rename Unicode members.
+AMIGA input ZIPs kept zipped also require classic end-directory records: the
+supported PUAE reader does not interpret ZIP64 end records or their locator.
+Media admission refuses those structures for both single and multi-disc games,
+including redundant ZIP64 end records whose ordinary fields fit in 32 bits.
+Generic ZIP64 validation and extraction layouts retain their existing behavior.
+This consumer check does not change per-entry ZIP64 extra-field handling or
+certify other ZIP64 combinations, generated archives or different core builds.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

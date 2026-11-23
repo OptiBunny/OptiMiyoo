@@ -752,6 +752,9 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
         try {
             $diskNames=@(Get-ZipDisks $archive $job.Zip)
             $effectiveStorage=if ($diskNames.Count -gt 1) {$Storage} else {$SingleStorage}
+            if ($Job.Profile.Folder -eq 'AMIGA' -and $diskNames.Count -gt 0 -and $effectiveStorage -in 'Auto','Zip') {
+                Assert-ZipClassicDirectory -Path $Job.Zip
+            }
             if ($Job.Profile.Folder -eq 'AMIGA' -and $diskNames.Count -gt 1 -and $effectiveStorage -in 'Auto','Zip') {
                 Assert-ZipMemberUtf8Names -Path $Job.Zip -Archive $archive -MemberNames $diskNames
             }

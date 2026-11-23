@@ -97,13 +97,14 @@ function Get-LauncherCommands([string]$Launch) {
 function Get-SelectedRetroArchCore([string]$Launch) {
     $calls=New-Object 'System.Collections.Generic.List[string]'
     $progdirKnown=$false
+    # Match whole words: a quoted final LF is a literal part of the value.
     foreach ($command in @(Get-LauncherCommands $Launch)) {
         $words=@($command.Tokens); $at=0
         while ($at -lt $words.Count -and $null -ne $words[$at].AssignmentName) {$at++}
         if ($at -eq $words.Count) {
             foreach ($word in $words) {
                 if ([StringComparer]::Ordinal.Equals($word.AssignmentName,'progdir')) {
-                    $progdirKnown=($word.ActualCommandSubstitution -and $word.Value -cmatch '^progdir=(?:`dirname "\$0"`|\$\(dirname "\$0"\))$' -and -not $word.LiteralDollar)
+                    $progdirKnown=($word.ActualCommandSubstitution -and $word.Value -cmatch '\Aprogdir=(?:`dirname "\$0"`|\$\(dirname "\$0"\))\z' -and -not $word.LiteralDollar)
                 }
             }
             continue
@@ -129,7 +130,7 @@ function Get-SelectedRetroArchCore([string]$Launch) {
         }
         $wasExec=[StringComparer]::Ordinal.Equals($head,'exec')
         if ($wasExec) {$at++; if ($at -ge $words.Count) {throw 'Incomplete exec command in launch.sh.'}; $head=$words[$at].Value}
-        $exePattern='^(?:retroarch|\./retroarch|/mnt/SDCARD/RetroArch/retroarch|(?:\$progdir|\$\{progdir\})/\.\./\.\./RetroArch/retroarch)$'
+        $exePattern='\A(?:retroarch|\./retroarch|/mnt/SDCARD/RetroArch/retroarch|(?:\$progdir|\$\{progdir\})/\.\./\.\./RetroArch/retroarch)\z'
         if ($head -cnotmatch $exePattern) {
             if ($wasExec) {throw 'Custom exec command in launch.sh is unverified.'}
             continue
@@ -165,7 +166,7 @@ function Get-SelectedRetroArchCore([string]$Launch) {
         }
         if ($coreArguments.Count -ne 1) {throw 'Ambiguous/custom core selection in launch.sh; no automatic changes.'}
         $argument=$coreArguments[0]
-        $pathPattern='^(?:\$progdir/\.\./\.\.|\$\{progdir\}/\.\./\.\.|/mnt/SDCARD)/RetroArch/\.retroarch/cores/(?<core>[A-Za-z0-9_]+_libretro\.so)$'
+        $pathPattern='\A(?:\$progdir/\.\./\.\.|\$\{progdir\}/\.\./\.\.|/mnt/SDCARD)/RetroArch/\.retroarch/cores/(?<core>[A-Za-z0-9_]+_libretro\.so)\z'
         if ($argument.LiteralDollar -or $argument.Value -cnotmatch $pathPattern) {throw 'Custom core path in launch.sh; no automatic changes.'}
         $core=$Matches['core']
         if ($argument.Value.Contains('$') -and -not $progdirKnown) {throw 'The core program directory is unverified.'}

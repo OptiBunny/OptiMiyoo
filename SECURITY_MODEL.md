@@ -197,6 +197,9 @@ Amiga, C64 and VIC-20 playlist plans: their supported PUAE/VICE disk-control
 storage cannot retain later entries. This whole-set refusal happens before
 plan acceptance or publication; it does not truncate the playlist or change
 the generic descriptor-reader limits.
+PlayStation plans likewise refuse more than eight media entries, matching
+the supported PCSX ReARMed disk-control capacity. The check follows the
+generic text budget and refuses the whole set before plan acceptance.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

@@ -127,6 +127,10 @@ For Amiga, Commodore 64 and VIC-20, the supported cores retain at most 20
 entries, so OptiMiyoo refuses larger sets. Split oversized sets into smaller
 groups; a refused set leaves its existing output unchanged.
 
+PlayStation playlists support at most eight discs with PCSX ReARMed. Split
+larger sets into smaller groups; OptiMiyoo refuses the whole oversized set,
+keeps its originals and leaves its existing output unchanged.
+
 ### Systems and ROM folders
 
 | # | System | Onion folder |

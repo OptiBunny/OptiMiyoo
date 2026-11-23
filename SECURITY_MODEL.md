@@ -199,6 +199,12 @@ standard core readers recognize that exact archive-member marker. An incompatibl
 name is refused before a write plan succeeds; explicit ZIP storage supplies its
 existing lowercase output name without changing Auto's filename-preservation
 contract. Single-game ZIPs and retained ownership candidates are unchanged.
+Multi-disc ZIP plans for COMMODORE and VIC20 require ASCII selected member
+paths. VICE replaces non-ASCII bytes while extracting ZIP entries but retains
+the original explicit member selectors. The planner refuses that mismatch before
+accepting writes; it does not normalize names or change archive bytes. Folder
+and loose-file plans preserve Unicode names. This family-specific restriction
+does not change generic ZIP decoding, single-game plans or AMIGA UTF-8 members.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

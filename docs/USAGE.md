@@ -191,6 +191,13 @@ member references using `.ZIP` or `.Zip`. Choose **2: ZIPs** for a matching outp
 with the lowercase `.zip` extension, or rename the source extension before Auto.
 Single-game ZIP names are unaffected.
 
+For C64 and VIC-20 multi-disc ZIPs, selected member paths must use ASCII
+characters. VICE replaces non-ASCII ZIP filename bytes with underscores, so the
+playlist cannot find those members by their original names. Choose **3: Folders**
+or **4: Loose files** to keep Unicode names, or rename the members to ASCII before
+choosing ZIP storage. OptiMiyoo refuses the incompatible ZIP plan before writing
+output; it does not rename your files.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

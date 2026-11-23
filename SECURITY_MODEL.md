@@ -157,6 +157,10 @@ member identity. Legacy names without that flag retain their existing decoding.
 Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
+Game and collection components are treated as hidden only when their first
+character is the literal ASCII period. Unicode prefixes remain filename data;
+earlier relative-path and component-name validation remains required.
+
 Archive payload import releases its destination-parent directory lease even
 when an output write and the subsequent stream close both fail. This cleanup
 does not turn an incomplete import into a successful result.

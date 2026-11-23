@@ -198,6 +198,12 @@ or **4: Loose files** to keep Unicode names, or rename the members to ASCII befo
 choosing ZIP storage. OptiMiyoo refuses the incompatible ZIP plan before writing
 output; it does not rename your files.
 
+NIB and NBZ members in C64 and VIC-20 multi-disc ZIPs must also be at the ZIP
+root. VICE loses the subfolder path when selecting its converted image. Choose
+**3: Folders** or **4: Loose files** for nested NIB/NBZ members, or move them to
+the ZIP root before choosing ZIP storage. Other supported disk formats keep
+their existing subfolder behavior.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

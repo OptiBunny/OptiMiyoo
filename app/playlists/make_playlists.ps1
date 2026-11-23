@@ -962,6 +962,10 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
             if ($name -match '[^\x00-\x7F]') {
                 throw 'ZIP-member playlists for COMMODORE and VIC20 require ASCII member names because VICE renames non-ASCII ZIP entries. Choose Folders or Loose files storage, or rename the archive members to ASCII.'
             }
+            # VICE drops the directory after converting an explicit NIB/NBZ member.
+            if ($name.Contains('/') -and ([IO.Path]::GetExtension($name) -in '.nib','.nbz')) {
+                throw 'VICE cannot select NIB/NBZ images in ZIP subfolders. Choose Folders or Loose files storage, or place those members at the ZIP root.'
+            }
         }
     }
     $flatBase=([string][IO.Path]::GetDirectoryName($Job.Stem.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')

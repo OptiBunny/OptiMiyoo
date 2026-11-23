@@ -172,6 +172,12 @@ CUE `FILE` command matching uses ASCII letter case independently of the host
 culture. This recognition preserves the literal captured filenames.
 Unquoted CUE filename fields use ASCII separators; non-ASCII whitespace remains
 part of the literal filename.
+PlayStation media discovery refuses CUE FILE references containing directories:
+the standard PCSX ReARMed reader strips those directories and can select another
+file beside the CUE. This applies to loose and archived source CUEs before a
+successful output plan. It preserves basename references in nested game folders
+and leaves generic CUE dependency/ownership parsing unchanged. Descriptors and
+track names are never rewritten or flattened to pass this check.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and

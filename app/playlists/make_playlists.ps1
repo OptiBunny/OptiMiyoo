@@ -330,7 +330,7 @@ function Copy-FileVerified([string]$Source,[string]$Destination,[string]$Name) {
         finally {if ($inputStream) { $inputStream.Dispose() }}
     }
 }
-function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
+function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath,[string]$System='') {
     Assert-ArchiveSandboxMemberBudget $Archive
     $seen=New-Object 'System.Collections.Generic.Dictionary[string,bool]' ([StringComparer]::OrdinalIgnoreCase)
     $disks=New-Object 'System.Collections.Generic.List[string]'
@@ -361,6 +361,10 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
         $lines=[regex]::Split($text,'\r\n|\r|\n')
         $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
         foreach ($track in @(Get-CueReferences @($lines) $name)) {
+            # The bundled PS core discards directories from CUE FILE names.
+            if ($System -eq 'PS' -and $track.Contains('/')) {
+                throw ('PlayStation CUE FILE entries must use filenames without folders for PCSX ReARMed: '+$name+'. Put the CUE and its tracks in the same folder, then update the FILE entries before retrying.')
+            }
             $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
             $trackEntry=$Archive.GetEntry($relative)
             if ($null -eq $trackEntry -or $trackEntry.FullName.EndsWith('/')) {throw ('Missing CUE track or spelling/case mismatch: '+$relative)}
@@ -753,7 +757,7 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
     if ($Job.Zip) {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
-            $diskNames=@(Get-ZipDisks $archive $job.Zip)
+            $diskNames=@(Get-ZipDisks $archive $job.Zip $Job.Profile.Folder)
             $effectiveStorage=if ($diskNames.Count -gt 1) {$Storage} else {$SingleStorage}
             if ($effectiveStorage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
@@ -762,7 +766,16 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
         $diskNames=@($Job.Disks | ForEach-Object {$_.Name})
         $contentNames=@($diskNames)
         foreach ($disk in $Job.Disks) {
-            if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
+            if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {
+                $references=@(Get-CueFiles $disk.Path)
+                foreach ($reference in $references) {
+                    # Keep descriptors literal; do not flatten a PS track path.
+                    if ($Job.Profile.Folder -eq 'PS' -and $reference.Contains('/')) {
+                        throw ('PlayStation CUE FILE entries must use filenames without folders for PCSX ReARMed: '+$disk.Name+'. Put the CUE and its tracks in the same folder, then update the FILE entries before retrying.')
+                    }
+                }
+                $contentNames+=$references
+            }
             $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {Get-SbiMemberName $disk.Name})
         }
     }
@@ -1988,7 +2001,7 @@ try {
                 $sourceLock=[IO.File]::Open($job.Zip,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
                 Assert-ArchiveBudget -Stream $sourceLock -Profile Media
                 $archive=New-Object IO.Compression.ZipArchive($sourceLock,[IO.Compression.ZipArchiveMode]::Read,$true)
-                $diskNames=@(Get-ZipDisks $archive $job.Zip)
+                $diskNames=@(Get-ZipDisks $archive $job.Zip $profile.Folder)
                 $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
             } else {
                 $media=Get-GameMediaNames $job $Storage $SingleStorage

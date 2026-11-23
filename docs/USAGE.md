@@ -110,6 +110,13 @@ Keep CUE files, their tracks, and any matching SBI files together. A CUE file
 and its tracks count as one disc. Keep different editions of the same game in
 separate batches.
 
+For PlayStation CUEs, each `FILE` entry must name a file beside the CUE, such as
+`FILE "Track.bin" BINARY`. The standard PCSX ReARMed core discards folders in
+these entries, so OptiMiyoo refuses entries such as `Tracks/Track.bin`. Put the
+CUE and its tracks together and update the entries before retrying. The game
+folder itself can still be inside a collection. OptiMiyoo leaves the CUE and
+track bytes unchanged.
+
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.
 ZIP filenames declared as UTF-8 must also contain valid UTF-8.

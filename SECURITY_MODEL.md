@@ -157,6 +157,11 @@ member identity. Legacy names without that flag retain their existing decoding.
 Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
+Before accepting an archive helper result, the parent checks the native job's
+recorded wall-time flag. An observed timeout remains a failure even when the
+process returned zero. This preserves the separate broker request-age limit and
+does not replace report, payload, or ownership validation.
+
 Archive payload import releases its destination-parent directory lease even
 when an output write and the subsequent stream close both fail. This cleanup
 does not turn an incomplete import into a successful result.

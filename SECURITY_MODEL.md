@@ -126,6 +126,12 @@ Low Privilege AppContainer (LPAC); HxC x86 uses regular AppContainer. All use
 zero capability SIDs, process/resource limits, and independent wall timers.
 Keep these distinct isolation modes explicit when reviewing fallback paths.
 
+Converter runtime budgets exclude input validation, hashing and sandbox staging.
+The broker starts its elapsed watchdog after native startup and retains the
+native timer's expiry result when the child exits. A completed child is not
+reclassified as timed out merely because a broker or NIB caller polls it late;
+running-child deadlines, diagnostic limits and output checks still apply.
+
 The parent retains at most 200,000 successful native conversion receipts per
 session. This allows retry headroom above the 100,000 planned output-member
 limit, including members inside ZIPs. A full receipt store refuses another

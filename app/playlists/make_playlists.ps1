@@ -1319,7 +1319,13 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
         $referenceBudget=New-OptiPlaylistReferenceBudget
         foreach($line in (Read-PlaylistLines $Path)){
             if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
-            foreach($candidate in (Get-OptiPlaylistReferenceCandidates $line $referenceBudget)){
+            # VICE M3U labels are metadata, not part of the output filename.
+            $reference=$line;$labelSeparator=$reference.IndexOf('|',[StringComparison]::Ordinal)
+            if($labelSeparator -ge 0){
+                $reference=$reference.Substring(0,$labelSeparator)
+                if([string]::IsNullOrWhiteSpace($reference)){throw 'An existing playlist has a label without a filename; output kept.'}
+            }
+            foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                 if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
@@ -1481,7 +1487,13 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
             $referenceBudget=New-OptiPlaylistReferenceBudget
             foreach ($line in (Read-PlaylistLines $file.FullName)) {
                 if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {continue}
-                foreach($candidate in (Get-OptiPlaylistReferenceCandidates $line $referenceBudget)){
+                # VICE M3U labels are metadata, not part of the output filename.
+                $reference=$line;$labelSeparator=$reference.IndexOf('|',[StringComparison]::Ordinal)
+                if($labelSeparator -ge 0){
+                    $reference=$reference.Substring(0,$labelSeparator)
+                    if([string]::IsNullOrWhiteSpace($reference)){throw 'An existing playlist has a label without a filename; output kept.'}
+                }
+                foreach($candidate in (Get-OptiPlaylistReferenceCandidates $reference $referenceBudget)){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                     if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                     $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}

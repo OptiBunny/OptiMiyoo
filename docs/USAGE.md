@@ -144,6 +144,9 @@ PlayStation playlists support at most eight discs with PCSX ReARMed. Split
 larger sets into smaller groups; OptiMiyoo refuses the whole oversized set,
 keeps its originals and leaves its existing output unchanged.
 
+MSX / MSX2 playlists support at most ten media entries with blueMSX; OptiMiyoo
+refuses larger sets and keeps their originals and existing output.
+
 ### Systems and ROM folders
 
 | # | System | Onion folder |

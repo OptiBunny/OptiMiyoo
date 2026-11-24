@@ -254,6 +254,8 @@ including mixed-case extensions. VICE writes the converted G64 in the member
 subfolder but resolves only its basename afterward. This check precedes accepted
 writes and preserves archive bytes; root-level NIB/NBZ, other disk formats,
 folder and loose-file plans retain their existing behavior.
+MSX plans refuse more than ten media entries to match blueMSX's disk-control
+capacity, after the generic text budget and before plan acceptance.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

@@ -467,9 +467,11 @@ establish terminal-cell widths, glyph shaping or complete Unicode conformance.
 
 General display fitting and wrapping count U+231A-U+231B, U+23E9-U+23EC,
 U+23F0, U+23F3, U+25FD-U+25FE, U+2B1B-U+2B1C, U+2B50 and U+2B55 as two
-console cells. These BMP symbol classifications preserve the requested row
-budget for padding, clipping and wrapping. They do not establish font-specific
-glyph appearance or complete Unicode grapheme conformance.
+console cells. Bare U+2600 and U+2764 count as one cell; elements containing
+variation selectors retain their existing classifications. These BMP symbol
+classifications preserve the requested row budget for padding, clipping and
+wrapping. They do not establish font-specific glyph appearance or complete
+Unicode grapheme conformance.
 
 Archive-service cleanup warnings are collected before the background runspace
 is disposed, including warnings raised while stopping it. A parent-owned buffer

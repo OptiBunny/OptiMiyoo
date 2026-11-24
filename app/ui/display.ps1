@@ -289,6 +289,8 @@ function Get-TextElementWidth([string]$Element) {
     $code=[char]::ConvertToUtf32($Element,0)
     $category=[Globalization.CharUnicodeInfo]::GetUnicodeCategory($Element,0)
     if ($category -in 'NonSpacingMark','EnclosingMark','Format') {return 0}
+    # Bare text sun/heart occupy one cell; keep selector sequences unchanged.
+    if ($Element.Length -eq 1 -and ($code -eq 0x2600 -or $code -eq 0x2764)) {return 1}
     # Wide CJK/fullwidth characters and emoji need two console cells. Treat
     # supplementary symbols conservatively; never split surrogate pairs.
     if ($code -ge 0x10000 -or $Element.Contains([string][char]0xFE0F) -or

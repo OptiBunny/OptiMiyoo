@@ -167,6 +167,9 @@ Before accepting an archive helper result, the parent checks the native job's
 recorded wall-time flag. An observed timeout remains a failure even when the
 process returned zero. This preserves the separate broker request-age limit and
 does not replace report, payload, or ownership validation.
+Game and collection components are treated as hidden only when their first
+character is the literal ASCII period. Unicode prefixes remain filename data;
+earlier relative-path and component-name validation remains required.
 
 Archive payload import releases its destination-parent directory lease even
 when an output write and the subsequent stream close both fail. This cleanup

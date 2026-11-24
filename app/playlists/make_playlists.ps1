@@ -633,7 +633,7 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
 function Assert-GameStem([string]$Stem) {
     Assert-PlaylistName $Stem
     foreach ($part in $Stem.Split('/')) {
-        if ($part.StartsWith('.')) {throw 'A game or collection name starts with a dot and would be hidden. Rename that input folder/file.'}
+        if ($part.StartsWith('.',[StringComparison]::Ordinal)) {throw 'A game or collection name starts with a dot and would be hidden. Rename that input folder/file.'}
     }
 }
 

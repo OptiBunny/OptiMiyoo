@@ -115,7 +115,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
     try {
         do {
             $finished = $capture.Child.HasExited
-            if ($diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
+            if (-not $finished -and $diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
             if ($capture.PSObject.Properties['Failure'] -and $capture.Failure) {throw ('nibconv failed: '+$capture.Failure+' Original kept.')}
             if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
             if ($finished -and -not $capture.WaitOutput(5000)) {throw 'nibconv diagnostic capture did not complete. Original kept.'}

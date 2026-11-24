@@ -114,15 +114,32 @@ function Get-SelectedRetroArchCore([string]$Launch) {
         foreach ($prefix in @($words | Select-Object -First $at)) {if ($prefix.Value -cmatch '^progdir=') {$progdirKnown=$false}}
         if ($words[$at].LiteralDollar -or ($head.Contains('$') -and -not $progdirKnown)) {throw 'The RetroArch program directory is unverified.'}
         $coreArguments=New-Object 'System.Collections.Generic.List[object]'
+        $contentSeen=$false
+        # An ignored option can consume -L as its value. Recognize only
+        # known argument-free flags; do not assume -- or option permutation.
         for ($j=$at+1; $j -lt $words.Count; $j++) {
             $value=$words[$j].Value
+            if ($contentSeen -and $value.StartsWith('-',[StringComparison]::Ordinal)) {
+                throw 'RetroArch options after content in launch.sh are unverified.'
+            }
             if ([StringComparer]::Ordinal.Equals($value,'-L')) {
                 $j++; if ($j -ge $words.Count) {throw 'Missing literal -L argument in launch.sh.'}
                 $coreArguments.Add($words[$j]); continue
             }
-            if ($value -cmatch '^(?:-L.|--libretro)' -or ($value.Contains('$') -and $value -cne '$1') -or $value.Contains([string][char]96)) {
+            if ([StringComparer]::Ordinal.Equals($value,'-v') -or
+                [StringComparer]::Ordinal.Equals($value,'--verbose') -or
+                [StringComparer]::Ordinal.Equals($value,'-f') -or
+                [StringComparer]::Ordinal.Equals($value,'--fullscreen')) {continue}
+            if ($value.StartsWith('-',[StringComparison]::Ordinal)) {
+                throw 'Custom RetroArch options in launch.sh are unverified.'
+            }
+            if (($value.Contains('$') -and $value -cne '$1') -or $value.Contains([string][char]96)) {
                 throw 'Dynamic or additional core arguments in launch.sh are unverified.'
             }
+            if ($coreArguments.Count -eq 0) {
+                throw 'Content before core selection in launch.sh is unverified.'
+            }
+            $contentSeen=$true
         }
         if ($coreArguments.Count -ne 1) {throw 'Ambiguous/custom core selection in launch.sh; no automatic changes.'}
         $argument=$coreArguments[0]

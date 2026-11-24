@@ -387,7 +387,12 @@ Optional explicit-SD core assessment is read-only. It parses launcher text as
 data, using ASCII shell blanks and literal `exec`/`-L` tokens; Unicode lookalikes
 do not establish a selected core. Unquoted shell redirections remain unverified:
 their filename operands must not be mistaken for core-selection arguments.
-Quoted and escaped redirection characters remain literal data.
+Quoted and escaped redirection characters remain literal data. Core selection
+recognizes only exact `-L` and separate `-v`/`--verbose`/`-f`/`--fullscreen`
+options before content. Other option forms, including `--` and value-taking
+options, remain unverified rather than treating their operands as core flags.
+Content before core selection and options after content are also unverified;
+the assessment does not assume a particular option-permutation behavior.
 Existing CRLF text handling remains supported,
 while quoted values retain their exact characters. The config root must be one
 JSON object, with only JSON whitespace before it; singleton or nested arrays

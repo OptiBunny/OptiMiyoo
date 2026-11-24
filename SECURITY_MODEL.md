@@ -264,6 +264,10 @@ must match captured source bytes. A worker's successful exit or claimed checksum
 The trusted host still parses metadata, names, descriptors, and selected media
 structures: those parsers remain attack surfaces.
 
+Headers declaring more than 168 half-track entries are refused before table
+parsing, matching the VICE reader limit. This structural bound does not establish
+playable track content or compatibility with a selected core.
+
 ### Publication, overwrite, and removal
 
 Keep originals is the default. Source-policy and overwrite choices come from the

@@ -89,6 +89,7 @@ function Assert-G64([string]$Path,[IO.Stream]$InputStream=$null) {
         if ($stream.Length -lt 12 -or -not [string]::Equals([Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)),'GCR-1541',[StringComparison]::Ordinal)) { throw 'G64 image header is invalid.' }
         if ($reader.ReadByte() -ne 0) { throw 'Unsupported G64 version.' }
         $tracks = [int]$reader.ReadByte()
+        if ($tracks -gt 168) { throw 'Unsupported G64 track count.' }
         $maxLength = [int]$reader.ReadUInt16()
         $dataStart = 12 + 8 * $tracks
         if ($tracks -eq 0 -or $stream.Length -lt $dataStart) { throw 'Truncated G64 tables.' }

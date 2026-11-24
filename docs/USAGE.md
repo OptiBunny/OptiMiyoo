@@ -296,17 +296,3 @@ folder with `.\OptiMiyoo.bat -NoAnimation`.
 In selection menus, press **Q**, then **Enter**, to quit. On results screens,
 during a demo, or while processing files, press **Q** on its own. The app may
 finish a file operation already in progress before closing.
-
-## Version labels
-
-The current development version is **0.9.0**. Version numbers use
-`major.minor.patch`; they identify releases, not percentages complete.
-
-- **0.x.y:** development versions; behavior and interfaces may still change.
-- **1.0.0-rc.1:** the first release candidate for 1.0.0, still being tested.
-  Further candidates use `rc.2`, `rc.3`, and so on.
-- **1.0.0:** the first stable release.
-
-After 1.0.0, compatible bug fixes increase the patch number, compatible features
-increase the minor number, and breaking changes increase the major number.
-A release candidate has its intended release version plus the `-rc.N` suffix.

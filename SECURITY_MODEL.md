@@ -447,8 +447,11 @@ reports use parent results and new, unique filenames. The interactive final-resu
 screen replaces worker progress only after the relay has stopped, and uses
 parent-verified results and report-save status. The result reader retains one
 prepared report layout for its current viewport, rebuilds it when that viewport
-changes, and clears its local layout on exit. The shared renderer separately
-keeps its existing single-entry menu-layout cache. Logs and reports can contain
+changes, and clears its local layout on exit. Result content stays literal through
+layout and rendering, so filenames resembling menu legends cannot remove outcome
+rows. Ordinary selection menus retain their control detection. The shared renderer
+keeps its existing single-entry cache, keyed separately for literal result rows.
+Logs and reports can contain
 local paths, filenames, and processing details; they are not anonymized. Ordinary
 hostile text can still mislead a reader outside the trusted prompts.
 

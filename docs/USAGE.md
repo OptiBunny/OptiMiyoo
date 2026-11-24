@@ -122,6 +122,10 @@ these entries, so OptiMiyoo refuses entries such as `Tracks/Track.bin`. Put the
 CUE and its tracks together and update the entries before retrying. The game
 folder itself can still be inside a collection. OptiMiyoo leaves the CUE and
 track bytes unchanged.
+Use UTF-8 for PlayStation CUEs. A UTF-8 byte-order mark is accepted before a
+short blank line or an introductory metadata line such as `REM` or `TITLE`.
+When a mark hides a command, save the CUE as UTF-8 without a byte-order mark
+and retry. Preparation preserves the original CUE bytes.
 
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.

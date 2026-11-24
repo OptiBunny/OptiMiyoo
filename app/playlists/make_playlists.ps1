@@ -357,7 +357,7 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath,[stri
     $tracks=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @($disks | Where-Object {[IO.Path]::GetExtension($_) -eq '.cue'})) {
         $entry=$Archive.GetEntry($name)
-        $text=Read-SandboxedZipText $ZipPath $Archive $entry 1MB
+        $text=if ($System -eq 'PS') {Read-PlayStationCueText $ZipPath $Archive $entry} else {Read-SandboxedZipText $ZipPath $Archive $entry 1MB}
         $lines=[regex]::Split($text,'\r\n|\r|\n')
         $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
         foreach ($track in @(Get-CueReferences @($lines) $name)) {
@@ -697,6 +697,53 @@ function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
     return @($found)
 }
 
+function Read-PlayStationCueText([string]$Path,[IO.Compression.ZipArchive]$Archive=$null,[IO.Compression.ZipArchiveEntry]$Entry=$null) {
+    if (($null -ne $Archive) -xor ($null -ne $Entry)) {throw 'A PlayStation ZIP CUE requires its archive and entry together.'}
+    $stream=$null
+    try {
+        $name=$Path
+        if ($null -ne $Archive) {
+            $index=$Archive.Entries.IndexOf($Entry)
+            if ($index -lt 0) {throw 'The PlayStation CUE entry does not belong to this archive.'}
+            $name=$Entry.FullName
+            if ($Entry.Length -gt 1MB) {throw ('CUE exceeds the text size limit: '+$name)}
+            # Generic cached text has lost its original encoding. Read bounded
+            # bytes through the existing sandbox before applying PS policy.
+            [byte[]]$bytes=Invoke-ArchiveSandbox -ZipPath $Path -Archive $Archive -Operation Read -EntryIndex $index -MaximumBytes 1MB
+            $stream=[IO.MemoryStream]::new($bytes,$false)
+            $length=$Entry.Length
+        } else {
+            $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+            $length=$stream.Length
+            if ($length -gt 1MB) {throw ('CUE exceeds the text size limit: '+$name)}
+        }
+        $prefix=New-Object byte[] 4
+        $count=0
+        while ($count -lt $prefix.Length) {
+            $read=$stream.Read($prefix,$count,$prefix.Length-$count)
+            if ($read -eq 0) {break}
+            $count+=$read
+        }
+        $stream.Position=0
+        $wideBom=($count -ge 2 -and (($prefix[0] -eq 255 -and $prefix[1] -eq 254) -or ($prefix[0] -eq 254 -and $prefix[1] -eq 255))) -or
+                 ($count -ge 4 -and $prefix[0] -eq 0 -and $prefix[1] -eq 0 -and $prefix[2] -eq 254 -and $prefix[3] -eq 255)
+        $unsafeEncoding=$wideBom
+        if (-not $wideBom) {
+            $text=Read-OptiBoundedText $stream 1MB ('CUE '+$name) $length
+            $utf8Bom=$count -ge 3 -and $prefix[0] -eq 239 -and $prefix[1] -eq 187 -and $prefix[2] -eq 191
+            if ($utf8Bom) {
+                # PCSX reads 255 bytes at a time. A mark on one complete ignored
+                # line cannot conceal a later FILE or change its chunk boundary.
+                $first=[regex]::Match($text,'\A[ \t]*(?:(?i:REM|TITLE|PERFORMER|SONGWRITER|ISRC|FLAGS)(?:[ \t][^\r\n]*)?)?\r?\n')
+                $unsafeEncoding=-not $first.Success -or [Text.Encoding]::UTF8.GetByteCount($first.Value) -gt 252
+            }
+        }
+        if ($unsafeEncoding) {
+            throw ('PlayStation CUE text must be UTF-8 without a byte-order mark for PCSX ReARMed: '+$name+'. Save the CUE as UTF-8 without a byte-order mark, then retry. Original files kept.')
+        }
+        return $text
+    } finally {if ($stream) {$stream.Dispose()}}
+}
 function Get-CueFiles([string]$CuePath) {
     $text=Read-OptiTextFile $CuePath 1MB ('CUE '+$CuePath)
     return @(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $CuePath)
@@ -779,7 +826,10 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
         $contentNames=@($diskNames)
         foreach ($disk in $Job.Disks) {
             if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {
-                $references=@(Get-CueFiles $disk.Path)
+                $references=if ($Job.Profile.Folder -eq 'PS') {
+                    $text=Read-PlayStationCueText $disk.Path
+                    @(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $disk.Path)
+                } else {@(Get-CueFiles $disk.Path)}
                 foreach ($reference in $references) {
                     # Keep descriptors literal; do not flatten a PS track path.
                     if ($Job.Profile.Folder -eq 'PS' -and $reference.Contains('/')) {

@@ -224,6 +224,12 @@ Amiga, C64 and VIC-20 playlist plans: their supported PUAE/VICE disk-control
 storage cannot retain later entries. This whole-set refusal happens before
 plan acceptance or publication; it does not truncate the playlist or change
 the generic descriptor-reader limits.
+Multi-disc ZIP plans for COMMODORE and VIC20 require ASCII selected member
+paths. VICE replaces non-ASCII bytes while extracting ZIP entries but retains
+the original explicit member selectors. The planner refuses that mismatch before
+accepting writes; it does not normalize names or change archive bytes. Folder
+and loose-file plans preserve Unicode names. This family-specific restriction
+does not change generic ZIP decoding, single-game plans or AMIGA UTF-8 members.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

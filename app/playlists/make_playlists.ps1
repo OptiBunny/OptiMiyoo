@@ -716,13 +716,22 @@ function Read-PlayStationCueText([string]$Path,[IO.Compression.ZipArchive]$Archi
             $count+=$read
         }
         $stream.Position=0
-        $bom=($count -ge 2 -and (($prefix[0] -eq 255 -and $prefix[1] -eq 254) -or ($prefix[0] -eq 254 -and $prefix[1] -eq 255))) -or
-             ($count -ge 3 -and $prefix[0] -eq 239 -and $prefix[1] -eq 187 -and $prefix[2] -eq 191) -or
-             ($count -ge 4 -and $prefix[0] -eq 0 -and $prefix[1] -eq 0 -and $prefix[2] -eq 254 -and $prefix[3] -eq 255)
-        if ($bom) {
+        $wideBom=($count -ge 2 -and (($prefix[0] -eq 255 -and $prefix[1] -eq 254) -or ($prefix[0] -eq 254 -and $prefix[1] -eq 255))) -or
+                 ($count -ge 4 -and $prefix[0] -eq 0 -and $prefix[1] -eq 0 -and $prefix[2] -eq 254 -and $prefix[3] -eq 255)
+        $unsafeEncoding=$wideBom
+        if (-not $wideBom) {
+            $text=Read-OptiBoundedText $stream 1MB ('CUE '+$name) $length
+            $utf8Bom=$count -ge 3 -and $prefix[0] -eq 239 -and $prefix[1] -eq 187 -and $prefix[2] -eq 191
+            if ($utf8Bom) {
+                # PCSX reads 255 bytes at a time. A mark on one complete ignored
+                # line cannot conceal a later FILE or change its chunk boundary.
+                $first=[regex]::Match($text,'\A[ \t]*(?:(?i:REM|TITLE|PERFORMER|SONGWRITER|ISRC|FLAGS)(?:[ \t][^\r\n]*)?)?\r?\n')
+                $unsafeEncoding=-not $first.Success -or [Text.Encoding]::UTF8.GetByteCount($first.Value) -gt 252
+            }
+        }
+        if ($unsafeEncoding) {
             throw ('PlayStation CUE text must be UTF-8 without a byte-order mark for PCSX ReARMed: '+$name+'. Save the CUE as UTF-8 without a byte-order mark, then retry. Original files kept.')
         }
-        $text=Read-OptiBoundedText $stream 1MB ('CUE '+$name) $length
         # The shared reader serves cores that accept mixed-case commands.
         # PCSX ReARMed compares the FILE token literally; keep filenames intact.
         foreach ($line in [regex]::Split($text,'\r\n|\r|\n')) {

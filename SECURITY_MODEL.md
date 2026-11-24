@@ -178,11 +178,12 @@ file beside the CUE. This applies to loose and archived source CUEs before a
 successful output plan. It preserves basename references in nested game folders
 and leaves generic CUE dependency/ownership parsing unchanged. Descriptors and
 track names are never rewritten or flattened to pass this check.
-PlayStation preparation also requires CUE text to be UTF-8 without a BOM.
-The core reads byte-oriented commands; BOM-marked text can hide FILE/TRACK
-commands even when the common decoder reads it successfully. This conservative
-policy also refuses BOM files that might work with an ignored first line or
-a same-stem raw-image fallback. The PS reader checks the original prefix in
+PlayStation preparation requires UTF-8. A UTF-8 BOM is safe on a complete
+initial blank or recognized metadata line that fits in the core's 255-byte
+read. The core ignores that physical line, so subsequent commands retain their
+original boundaries. A BOM on a command can hide a track reference. The guard
+refuses other marked layouts and avoids relying on a same-stem image fallback.
+The PS reader checks the original prefix in
 one owned read-only file stream or bounded sandbox-returned ZIP byte stream,
 then rewinds that same stream for strict decoding. It does not infer encoding
 from the generic decoded ZIP cache. Other-system CUE parsing and generic

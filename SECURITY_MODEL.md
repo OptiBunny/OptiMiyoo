@@ -204,14 +204,13 @@ paths. VICE replaces non-ASCII bytes while extracting ZIP entries but retains
 the original explicit member selectors. The planner refuses that mismatch before
 accepting writes; it does not normalize names or change archive bytes. Folder
 and loose-file plans preserve Unicode names. This family-specific restriction
-does not change generic ZIP decoding, single-game plans or AMIGA UTF-8 members.
+does not change generic ZIP decoding or single-game plans.
 For AMIGA multi-disc input ZIPs kept zipped, media admission also compares each
-selected decoded member's UTF-8 bytes with its original central-directory name.
-PUAE extracts raw name bytes, so a legacy name that decodes differently cannot
-be addressed by the generated UTF-8 selector. The bounded inspector refuses
-that mismatch before planning; it does not guess or rewrite an encoding.
-Unselected side files, single games and extraction layouts retain their existing
-decoding. This check does not certify older cores that rename Unicode members.
+selected decoded member's ASCII name with the central-directory bytes. The Onion
+OS PUAE core rewrites non-ASCII filename bytes to underscores during extraction.
+The output planner applies the same ASCII limit to selected disc names when
+creating a new ZIP playlist. Unselected side files and extraction layouts retain
+their existing decoding.
 AMIGA input ZIPs kept zipped also require classic end-directory records: the
 supported PUAE reader does not interpret ZIP64 end records or their locator.
 Media admission refuses those structures for both single and multi-disc games,

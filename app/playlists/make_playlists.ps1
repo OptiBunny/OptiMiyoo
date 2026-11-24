@@ -962,6 +962,13 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         -not $relativeData.EndsWith('.zip',[StringComparison]::Ordinal)) {
         throw 'Auto needs a lowercase .zip extension for ZIP-member playlists on this system. Choose ZIPs storage or rename the source extension to .zip.'
     }
+    if ($isMulti -and $zipMode -and $profile.Folder -eq 'AMIGA') {
+        foreach ($name in $Media.DiskNames) {
+            if ($name -match '[^\x00-\x7F]') {
+                throw 'Onion OS PUAE requires ASCII member names for Amiga multi-disc ZIP playlists. Choose Folders or Loose files storage, or use ASCII names inside the ZIP. Original kept.'
+            }
+        }
+    }
     # VICE replaces non-ASCII ZIP entry bytes without updating member selectors.
     if ($isMulti -and $zipMode -and $profile.Folder -in 'COMMODORE','VIC20') {
         foreach ($name in $Media.DiskNames) {

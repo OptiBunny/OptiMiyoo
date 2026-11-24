@@ -99,13 +99,13 @@ namespace OptiMiyoo {
                                 throw new InvalidDataException("ZIP entry name contains invalid UTF-8; source kept.",error);
                             }
                         }
-                        // PUAE extracts these bytes verbatim; an explicit UTF-8
-                        // playlist selector must identify the same member.
+                        // Onion OS PUAE substitutes underscores for non-ASCII filename bytes.
+                        // The preserved ZIP and explicit selector must agree on an ASCII name.
                         if (utf8MemberNames!=null && utf8MemberNames[(int)i]!=null) {
                             byte[] expected=new System.Text.UTF8Encoding(false,true).GetBytes(utf8MemberNames[(int)i]);
                             bool equal=name.Length==expected.Length;
-                            for (int n=0;equal && n<name.Length;n++) {equal=name[n]==expected[n];}
-                            if (!equal) throw new InvalidDataException("ZIP member names do not match UTF-8 playlist selectors. Choose Folders or Loose files storage, or rebuild the ZIP with UTF-8 member names. Original kept.");
+                            for (int n=0;equal && n<name.Length;n++) {equal=name[n]<128 && name[n]==expected[n];}
+                            if (!equal) throw new InvalidDataException("Onion OS PUAE requires ASCII member names for Amiga multi-disc ZIP playlists. Choose Folders or Loose files storage, or use ASCII names inside the ZIP. Original kept.");
                         }
                         byte[] extra=Read(reader,extraLength);stream.Position+=commentLength;
                         ulong expanded=U32(header,24),compressed=U32(header,20),localOffset=U32(header,42);

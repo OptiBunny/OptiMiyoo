@@ -208,6 +208,14 @@ letter cases, which can leave the CUE selected as image data. Both PS discovery
 routes apply this guard before accepting media; generic command matching and
 other systems stay unchanged. The check preserves text and filename spelling
 and does not claim complete CUE grammar validation.
+The PS reader also checks recognized FILE command spacing against the core's
+literal-space token boundary: indentation and the first separator after FILE
+must use ordinary spaces. Before an opening filename quote, only ASCII
+whitespace is accepted. This conservatively avoids byte-parser mismatches while
+retaining ordinary-space-plus-tab separators, literal Unicode filename bytes,
+and whitespace after a closing quote. Generic dependency/ownership parsing
+and other systems keep their existing whitespace rules. No descriptor is
+rewritten, and the earlier BOM and command-case refusals retain precedence.
 PlayStation output planning requires selected CUE filenames to end in literal
 lowercase `.cue`. The pinned core's DATA-handle replacement checks that spelling
 case-sensitively even when descriptor lookup succeeds. The guard checks physical

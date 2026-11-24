@@ -126,6 +126,12 @@ Low Privilege AppContainer (LPAC); HxC x86 uses regular AppContainer. All use
 zero capability SIDs, process/resource limits, and independent wall timers.
 Keep these distinct isolation modes explicit when reviewing fallback paths.
 
+Converter runtime budgets exclude input validation, hashing and sandbox staging.
+The broker starts its elapsed watchdog after native startup and retains the
+native timer's expiry result when the child exits. A completed child is not
+reclassified as timed out merely because a broker or NIB caller polls it late;
+running-child deadlines, diagnostic limits and output checks still apply.
+
 The parent retains at most 200,000 successful native conversion receipts per
 session. This allows retry headroom above the 100,000 planned output-member
 limit, including members inside ZIPs. A full receipt store refuses another
@@ -157,6 +163,14 @@ member identity. Legacy names without that flag retain their existing decoding.
 Derived game paths and CUE/playlist references must remain within their
 permitted roots and agree with the planned media and output layout.
 
+Before accepting an archive helper result, the parent checks the native job's
+recorded wall-time flag. An observed timeout remains a failure even when the
+process returned zero. This preserves the separate broker request-age limit and
+does not replace report, payload, or ownership validation.
+Game and collection components are treated as hidden only when their first
+character is the literal ASCII period. Unicode prefixes remain filename data;
+earlier relative-path and component-name validation remains required.
+
 Archive payload import releases its destination-parent directory lease even
 when an output write and the subsequent stream close both fail. This cleanup
 does not turn an incomplete import into a successful result.
@@ -168,6 +182,50 @@ maps, preserved playlist destination maps, copied loose-file manifests and worke
 source hashes use the same identity. Conversion archive-member maps and ZIP/folder
 staging manifests also keep distinct ordinal names. Conversion ZIP entry cleanup
 closes the converted input stream even if finalizing compressed output fails.
+CUE `FILE` command matching uses ASCII letter case independently of the host
+culture. This recognition preserves the literal captured filenames.
+Unquoted CUE filename fields use ASCII separators; non-ASCII whitespace remains
+part of the literal filename.
+PlayStation media discovery refuses CUE FILE references containing directories:
+the standard PCSX ReARMed reader strips those directories and can select another
+file beside the CUE. This applies to loose and archived source CUEs before a
+successful output plan. It preserves basename references in nested game folders
+and leaves generic CUE dependency/ownership parsing unchanged. Descriptors and
+track names are never rewritten or flattened to pass this check.
+PlayStation preparation requires UTF-8. A UTF-8 BOM is safe on a complete
+initial blank or recognized metadata line that fits in the core's 255-byte
+read. The core ignores that physical line, so subsequent commands retain their
+original boundaries. A BOM on a command can hide a track reference. The guard
+refuses other marked layouts and avoids relying on a same-stem image fallback.
+The PS reader checks the original prefix in
+one owned read-only file stream or bounded sandbox-returned ZIP byte stream,
+then rewinds that same stream for strict decoding. It does not infer encoding
+from the generic decoded ZIP cache. Other-system CUE parsing and generic
+foreign-reference/ownership readers retain UTF-8 and BOM UTF-16/UTF-32 support.
+After strict decoding, the PS-only reader also refuses recognized ASCII FILE
+command tokens whose spelling is not exactly `FILE`. The core ignores other
+letter cases, which can leave the CUE selected as image data. Both PS discovery
+routes apply this guard before accepting media; generic command matching and
+other systems stay unchanged. The check preserves text and filename spelling
+and does not claim complete CUE grammar validation.
+The PS reader also checks recognized FILE command spacing against the core's
+literal-space token boundary: indentation and the first separator after FILE
+must use ordinary spaces. Before an opening filename quote, only ASCII
+whitespace is accepted. This conservatively avoids byte-parser mismatches while
+retaining ordinary-space-plus-tab separators, literal Unicode filename bytes,
+and whitespace after a closing quote. Generic dependency/ownership parsing
+and other systems keep their existing whitespace rules. No descriptor is
+rewritten, and the earlier BOM and command-case refusals retain precedence.
+PlayStation output planning requires selected CUE filenames to end in literal
+lowercase `.cue`. The pinned core's DATA-handle replacement checks that spelling
+case-sensitively even when descriptor lookup succeeds. The guard checks physical
+source filenames for Auto loose preservation and selected media names for other
+layouts, retaining the existing lowercase extension produced when loose inputs
+are explicitly rebuilt. It checks selected descriptors rather than unrelated
+content names, refuses the complete plan before writes, and does not rename or
+rewrite source files. Other systems and the separate descriptor-text guards are
+unchanged. Core gameplay and filesystem compatibility are not established by
+this admission rule.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and
@@ -185,6 +243,10 @@ Archive playlist ordering keeps natural disk-number sorting and uses an ordinal
 final tie-breaker for linguistically equal filenames, so the parent and its
 PowerShell 5.1 worker produce the same playlist bytes for those names.
 
+Disc/disk/side label tokens use culture-invariant case matching in playlist
+and conversion planning. Bare-label recognition does not depend on the host
+language; ordinary-title guards and original source path spelling are preserved.
+
 Playlist dependency checks consider representable literal, right-trimmed, and
 fully trimmed spellings under both ASCII and Unicode whitespace rules. Removing
 ASCII padding must not erase an adjacent literal non-ASCII space from a filename.
@@ -195,6 +257,58 @@ playlist text is checked before plan acceptance or destination writes against th
 numbered-playlist reader's 1 MiB byte limit and 16,384 split-line limit, including
 its final newline. Oversized sets cannot create output that this reader cannot
 reopen.
+For profiles with supported ZIP-member playlists, multi-disc Auto planning also
+requires a preserved archive name ending in ordinal lowercase `.zip`. The
+standard core readers recognize that exact archive-member marker. An incompatible
+name is refused before a write plan succeeds; explicit ZIP storage supplies its
+existing lowercase output name without changing Auto's filename-preservation
+contract. Single-game ZIPs and retained ownership candidates are unchanged.
+The parent and worker also refuse more than twenty media entries in
+Amiga, C64 and VIC-20 playlist plans: their supported PUAE/VICE disk-control
+storage cannot retain later entries. This whole-set refusal happens before
+plan acceptance or publication; it does not truncate the playlist or change
+the generic descriptor-reader limits.
+Multi-disc ZIP plans for COMMODORE and VIC20 require ASCII selected member
+paths. VICE replaces non-ASCII bytes while extracting ZIP entries but retains
+the original explicit member selectors. The planner refuses that mismatch before
+accepting writes; it does not normalize names or change archive bytes. Folder
+and loose-file plans preserve Unicode names. This family-specific restriction
+does not change generic ZIP decoding or single-game plans.
+PlayStation plans likewise refuse more than eight media entries, matching
+the supported PCSX ReARMed disk-control capacity. The check follows the
+generic text budget and refuses the whole set before plan acceptance.
+For AMIGA multi-disc input ZIPs kept zipped, media admission also compares each
+selected decoded member's ASCII name with the central-directory bytes. The Onion
+OS PUAE core rewrites non-ASCII filename bytes to underscores during extraction.
+The output planner applies the same ASCII limit to selected disc names when
+creating a new ZIP playlist. Unselected side files and extraction layouts retain
+their existing decoding.
+The same multi-disc VICE ZIP boundary refuses selected nested NIB/NBZ members,
+including mixed-case extensions. VICE writes the converted G64 in the member
+subfolder but resolves only its basename afterward. This check precedes accepted
+writes and preserves archive bytes; root-level NIB/NBZ, other disk formats,
+folder and loose-file plans retain their existing behavior.
+MSX plans refuse more than ten media entries to match blueMSX's disk-control
+capacity, after the generic text budget and before plan acceptance.
+For existing multi-disc VICE ZIPs in Auto/ZIP storage, metadata validation also
+checks literal directory creation in central-directory order. The first selected
+member needs its parent when visited; later selected members need their parents
+by the end of that first extraction pass. Recursive directory records establish
+ancestors, and later M3U lines may retry extraction. Incompatible name diagnostics
+retain precedence. The guard does not extract, rewrite or reorder the archive;
+other profiles, extracted layouts and single-game plans remain unchanged.
+AMIGA input ZIPs kept zipped also require classic end-directory records: the
+supported PUAE reader does not interpret ZIP64 end records or their locator.
+Media admission refuses those structures for both single and multi-disc games,
+including redundant ZIP64 end records whose ordinary fields fit in 32 bits.
+Generic ZIP64 validation and extraction layouts retain their existing behavior.
+This consumer check does not change per-entry ZIP64 extra-field handling or
+certify other ZIP64 combinations, generated archives or different core builds.
+
+The [Sega CD launcher](https://github.com/OnionUI/Onion/blob/07505ea58c7bba698d6b9220ff43946a43cac76b/static/packages/Emu/Sega%20-%20CD%20(PicoDrive)/Emu/SEGACD/launch.sh) in Onion 4.4.0-beta-20260120 uses PicoDrive.
+Its [playlist reader](https://github.com/libretro/picodrive/blob/688c90d5bd017d21b9bcee99a4aa83c5224711a0/platform/libretro/libretro.c#L1330) stops after filling its [eight slots](https://github.com/libretro/picodrive/blob/688c90d5bd017d21b9bcee99a4aa83c5224711a0/platform/libretro/libretro.c#L1030).
+Sega CD planning refuses the entire set above eight entries before publication.
+
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.
@@ -235,22 +349,32 @@ lookup, avoiding attacker-chosen hash-collision chains. This is a bookkeeping
 limit, not a maximum numeric identifier. When INFO is present, its final cylinder
 and head bounds must include every recorded IMGE/TRCK coordinate; otherwise the
 bundled converter can omit a complete track. INFO must contain its used 40-byte
-prefix and fit the native reader's 84-byte modifier buffer. Inputs outside these
-conversion limits are refused; missing INFO and sparse in-range track layouts
+prefix. INFO, IMGE, TRCK and DATA metadata must fit the native reader's 84-byte
+modifier buffer; oversized known modifiers are skipped by that reader rather
+than loaded as the intended fields. This bound applies to metadata, not the
+separately bounded DATA payload. Inputs outside these conversion limits are
+refused; missing INFO and sparse in-range track layouts
 retain their previous handling.
 
 Reads and cancellation polling are bounded, including the final reference check,
 and validation restores the borrowed stream position. Paired zero-length DATA
 for empty/noise tracks, unknown extension records, extended IMGE/TRCK/DATA
-metadata tails, and absent optional DATA checksums retain their existing handling.
+metadata tails within the supported 84-byte modifier limit, and absent optional
+DATA checksums retain their existing handling.
 These checks do not establish complete track semantics or faithful conversion.
 
 G64 validation requires the exact, case-sensitive `GCR-1541` file signature.
+A nonzero track offset must describe at least one stored byte; offset-zero absent
+tracks retain their separate handling.
 G64/DSK structure checks and parent-owned receipts bind accepted converted bytes
 to the batch, converter, input hash, output hash, and length. Passthrough files
 must match captured source bytes. A worker's successful exit or claimed checksum is insufficient evidence.
 The trusted host still parses metadata, names, descriptors, and selected media
 structures: those parsers remain attack surfaces.
+
+Headers declaring more than 168 half-track entries are refused before table
+parsing, matching the VICE reader limit. This structural bound does not establish
+playable track content or compatibility with a selected core.
 
 ### Publication, overwrite, and removal
 
@@ -361,8 +485,28 @@ is shown again for correction. Retrying must not select a normalized sibling.
 
 Optional explicit-SD core assessment is read-only. It parses launcher text as
 data, using ASCII shell blanks and literal `exec`/`-L` tokens; Unicode lookalikes
-do not establish a selected core. Existing CRLF text handling remains supported,
-while quoted values retain their exact characters. The config root must be one
+do not establish a selected core. A known `progdir` requires a real ASCII
+`NAME=` assignment with no quoting or ordinary escapes in its name or equals sign,
+and an actual recognized `dirname "$0"` command substitution. Quoting the RHS and
+ordinary line continuations remain supported. Literal substitution-looking text
+does not establish directory provenance; a leading `progdir` assignment on any
+command clears an earlier dirname assumption. Shell `command` and `builtin`
+dispatch wrappers remain unverified, including harmless query forms; they can
+hide termination or changes to known directory variables. Shell `set` commands
+also remain unverified because execution modes can suppress later commands or
+change failure handling; harmless query and positional forms are refused too.
+Unquoted shell redirections remain unverified:
+their filename operands must not be mistaken for core-selection arguments.
+Quoted and escaped redirection characters remain literal data. Core selection
+recognizes only exact `-L` and separate `-v`/`--verbose`/`-f`/`--fullscreen`
+options before content. Other option forms, including `--` and value-taking
+options, remain unverified rather than treating their operands as core flags.
+Content before core selection and options after content are also unverified;
+the assessment does not assume a particular option-permutation behavior.
+Existing CRLF text handling remains supported, while quoted values retain their
+exact characters. Executable words, core paths, and recognized dirname assignments
+must match complete token values; a quoted final newline cannot establish a
+known core or directory. The config root must be one
 JSON object, with only JSON whitespace before it; singleton or nested arrays
 cannot establish support through property enumeration. The `launch` property
 must be a string naming `launch.sh`, allowing ordinary Windows filename case variants.
@@ -414,11 +558,21 @@ within the existing chunk and queue limits. If the capture limit cuts a pair, th
 queued half is omitted while the limit failure remains; response encoding must
 not fail on a character split introduced by the capture helper.
 
-Full-screen menu input uses the same limited text boundaries for caret movement,
-viewport selection, fitting and highlighting. Required legacy Unicode helper
+Full-screen selection input, including parent-owned policy choices, uses the same
+limited text boundaries for Left/Right movement, caret-relative Backspace/Delete,
+viewport selection, fitting and highlighting. Home/End selects the start/end; plain
+text prompts retain end-only editing. Required legacy Unicode helper
 initialization failures produce the fixed diagnostic instead of fallback
 boundaries. These input-field rules do not change general text wrapping or
 establish terminal-cell widths, glyph shaping or complete Unicode conformance.
+
+General display fitting and wrapping count U+231A-U+231B, U+23E9-U+23EC,
+U+23F0, U+23F3, U+25FD-U+25FE, U+2B1B-U+2B1C, U+2B50 and U+2B55 as two
+console cells. Bare U+2600 and U+2764 count as one cell; elements containing
+variation selectors retain their existing classifications. These BMP symbol
+classifications preserve the requested row budget for padding, clipping and
+wrapping. They do not establish font-specific glyph appearance or complete
+Unicode grapheme conformance.
 
 Archive-service cleanup warnings are collected before the background runspace
 is disposed, including warnings raised while stopping it. A parent-owned buffer
@@ -440,8 +594,13 @@ reports use parent results and new, unique filenames. The interactive final-resu
 screen replaces worker progress only after the relay has stopped, and uses
 parent-verified results and report-save status. The result reader retains one
 prepared report layout for its current viewport, rebuilds it when that viewport
-changes, and clears its local layout on exit. The shared renderer separately
-keeps its existing single-entry menu-layout cache. Logs and reports can contain
+changes, and clears its local layout on exit. Result content stays literal through
+layout and rendering, so filenames resembling menu legends cannot remove outcome
+rows. Literal result wrapping also preserves leading and boundary whitespace,
+including nonempty whitespace continuation rows; ordinary menus retain word
+wrapping and their control detection. The shared renderer
+keeps its existing single-entry cache, keyed separately for literal result rows.
+Logs and reports can contain
 local paths, filenames, and processing details; they are not anonymized. Ordinary
 hostile text can still mislead a reader outside the trusted prompts.
 

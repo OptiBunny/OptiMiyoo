@@ -266,6 +266,9 @@ function Invoke-ArchiveSandbox {
             if($stdout.LimitExceeded -or $stderr.LimitExceeded) {throw 'Archive sandbox diagnostic limit exceeded.'}
         }
         if(-not $stdout.Wait(5000) -or -not $stderr.Wait(5000) -or $stdout.Failure -or $stderr.Failure -or $stdout.LimitExceeded -or $stderr.LimitExceeded) {throw 'Archive sandbox diagnostic capture failed.'}
+        # The native timer can record expiry before a naturally successful exit.
+        # Keep that recorded timeout even when the final process exit code is zero.
+        if($job.WallTimeLimitExceeded) {throw 'Archive sandbox exceeded its 30-minute time limit.'}
         if($job.ExitCode -ne 0) {throw ('Archive sandbox failed: '+$stderr.Text())}
         $report=Join-Path $job.WorkPath 'result.txt'
         $reportLease=Open-SourcePolicyReadLease $report $job.WorkPath

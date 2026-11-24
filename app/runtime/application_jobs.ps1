@@ -71,7 +71,9 @@ function Invoke-ApplicationNativeRequest {
         if ($Operation -eq 'Native.Stop') {Close-ApplicationNativeJob $State $job;return @{Stopped=$true}}
         $null=& $checkCancellation
         if (-not $job.Done) {
-            $job.TimedOut=($job.Timer.Elapsed.TotalSeconds -gt $job.Timeout)
+            # A late poll must not turn an already-completed child into a timeout.
+            $nativeExited=$job.Native.HasExited
+            $job.TimedOut=([bool]$job.Native.WallTimeLimitExceeded -or (-not $nativeExited -and $job.Timer.Elapsed.TotalSeconds -gt $job.Timeout))
             $job.LimitExceeded=($job.Out.LimitExceeded -or $job.Err.LimitExceeded)
             if ($job.TimedOut -or $job.LimitExceeded) {
                 $job.Native.Kill();[void]$job.Native.WaitForExit(5000)
@@ -79,11 +81,14 @@ function Invoke-ApplicationNativeRequest {
             }
             if ($job.Native.HasExited) {
                 $job.Done=$true;$job.ExitCode=$job.Native.ExitCode
+                # The native watchdog can expire between the two exit observations.
+                $job.TimedOut=($job.TimedOut -or [bool]$job.Native.WallTimeLimitExceeded)
                 $stdoutReady=$job.Out.Wait(5000);$stderrReady=$job.Err.Wait(5000)
                 $job.LimitExceeded=($job.LimitExceeded -or $job.Out.LimitExceeded -or $job.Err.LimitExceeded)
                 $job.CaptureFailed=(-not $stdoutReady -or -not $stderrReady -or [bool]$job.Out.Failure -or [bool]$job.Err.Failure)
                 if (-not $job.Failure) {
-                    if ($job.LimitExceeded) {$job.Failure='Native diagnostic-output limit exceeded.'}
+                    if ($job.TimedOut) {$job.Failure='Native converter exceeded its time limit.'}
+                    elseif ($job.LimitExceeded) {$job.Failure='Native diagnostic-output limit exceeded.'}
                     elseif ($job.CaptureFailed) {$job.Failure='Native diagnostic capture failed or did not finish.'}
                 }
                 if ($job.ExitCode -eq 0 -and -not $job.Failure -and $job.Destination -and $State.ReceiptStore.NativeReceipts.Count -ge $maximumNativeReceipts) {
@@ -200,6 +205,8 @@ function Invoke-ApplicationNativeRequest {
         }
         $job.Native.WallTimeLimitSeconds=$job.Timeout
         $job.Native.Start($arguments)
+        # Validation, hashing and sandbox preparation are not converter run time.
+        $job.Timer.Restart()
         $null=& $checkCancellation
         $job.Out=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardOutput,1048576)
         $job.Err=New-Object OptiMiyoo.NativeTextCapture($job.Native.StandardError,1048576)

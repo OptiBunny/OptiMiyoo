@@ -89,6 +89,7 @@ function Assert-G64([string]$Path,[IO.Stream]$InputStream=$null) {
         if ($stream.Length -lt 12 -or -not [string]::Equals([Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)),'GCR-1541',[StringComparison]::Ordinal)) { throw 'G64 image header is invalid.' }
         if ($reader.ReadByte() -ne 0) { throw 'Unsupported G64 version.' }
         $tracks = [int]$reader.ReadByte()
+        if ($tracks -gt 168) { throw 'Unsupported G64 track count.' }
         $maxLength = [int]$reader.ReadUInt16()
         $dataStart = 12 + 8 * $tracks
         if ($tracks -eq 0 -or $stream.Length -lt $dataStart) { throw 'Truncated G64 tables.' }
@@ -100,7 +101,7 @@ function Assert-G64([string]$Path,[IO.Stream]$InputStream=$null) {
             if ($offsets[$i] -lt $dataStart -or ($offsets[$i] + 2) -gt $stream.Length) { throw 'Invalid G64 track offset.' }
             $stream.Position = $offsets[$i]
             $length = [int]$reader.ReadUInt16()
-            if ($length -gt $maxLength -or ($offsets[$i] + 2 + $length) -gt $stream.Length) { throw 'Truncated G64 track.' }
+            if ($length -lt 1 -or $length -gt $maxLength -or ($offsets[$i] + 2 + $length) -gt $stream.Length) { throw 'Truncated G64 track.' }
             if ($speeds[$i] -gt 3 -and ($speeds[$i] -lt $dataStart -or
                     ($speeds[$i] + [Math]::Ceiling($length / 4.0)) -gt $stream.Length)) { throw 'Invalid G64 speed map.' }
         }
@@ -115,7 +116,7 @@ function Invoke-NibConversion([string]$InputPath, [string]$OutputPath, [int]$Ind
     try {
         do {
             $finished = $capture.Child.HasExited
-            if ($diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
+            if (-not $finished -and $diskClock.Elapsed.TotalSeconds -gt 120) {throw 'nibconv exceeded its 120-second time limit. Original kept.'}
             if ($capture.PSObject.Properties['Failure'] -and $capture.Failure) {throw ('nibconv failed: '+$capture.Failure+' Original kept.')}
             if ($capture.LimitExceeded) {throw 'nibconv diagnostic-output limit exceeded. Original kept.'}
             if ($finished -and -not $capture.WaitOutput(5000)) {throw 'nibconv diagnostic capture did not complete. Original kept.'}

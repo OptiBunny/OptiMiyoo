@@ -960,10 +960,12 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
        $Budget['Count'] -lt 0 -or $Budget['Count'] -gt 65536 -or $Budget['Characters'] -lt 0 -or $Budget['Characters'] -gt 16777216){throw 'Invalid playlist reference expansion budget.'}
     if([string]::IsNullOrEmpty($Reference)){return}
     # Consumers differ: some preserve whitespace, some trim its right side,
-    # and some trim both sides. Protect every distinct literal path they can use.
+    # and some trim both sides. Byte-oriented core readers trim ASCII whitespace
+    # without removing adjacent literal Unicode spaces from a filename.
     $trimmed=$Reference.Trim();$spellings=New-Object 'Collections.Generic.List[string]'
+    $asciiWhitespace=[char[]]@(9,10,11,12,13,32)
     $seen=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-    foreach($spelling in @($Reference,$Reference.TrimEnd(),$trimmed)){
+    foreach($spelling in @($Reference,$Reference.TrimEnd(),$trimmed,$Reference.TrimEnd($asciiWhitespace),$Reference.Trim($asciiWhitespace))){
         if(-not $spelling -or -not $seen.Add($spelling)){continue}
         if(-not [StringComparer]::Ordinal.Equals($spelling,$Reference) -and $spelling.StartsWith('#')){continue}
         if(-not [StringComparer]::Ordinal.Equals($spelling,$trimmed)){

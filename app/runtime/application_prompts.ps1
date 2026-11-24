@@ -253,7 +253,7 @@ function New-ApplicationResultLayout {
         $textWidth=$empty.TextWidth
         $overhead=8
         if($empty.ShowMio -and $script:UiHeight -ge 26){$overhead=14}
-        $wrappedCount=@(Get-MenuRows $sourceLines $textWidth).Count
+        $wrappedCount=@(Get-MenuRows $sourceLines $textWidth -LiteralRows).Count
         $navigationRows=@(Get-MenuRows @(('Page {0}/{0} | > Next | < Previous' -f $wrappedCount)) $textWidth).Count
         $pageSize=[Math]::Max(3,$script:UiHeight-$overhead-$navigationRows)
     }
@@ -264,7 +264,7 @@ function New-ApplicationResultLayout {
     $separator=$false;$offset=0L;$pageAnchor=0L
     foreach ($line in $sourceLines) {
         if (-not $line) {$separator=($pageRows.Count -gt 0);continue}
-        $wrapped=@(Get-MenuRows @($line) $textWidth)
+        $wrapped=@(Get-MenuRows @($line) $textWidth -LiteralRows)
         $needed=1
         if ($line -in $SectionHeadings) {$needed=$wrapped.Count+1}
         $gap=0;if ($separator -and $pageRows.Count) {$gap=1}
@@ -275,7 +275,7 @@ function New-ApplicationResultLayout {
         $separator=$false
         foreach ($row in $wrapped) {
             if ($pageRows.Count -eq $pageSize) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor});$pageRows.Clear();$pageAnchor=$offset}
-            $pageRows.Add($row);$offset+=($row -replace '\s','').Length
+            $pageRows.Add($row);$offset+=$row.Length
         }
     }
     if ($pageRows.Count -or -not $pageList.Count) {$pageList.Add([pscustomobject]@{Rows=$pageRows.ToArray();Anchor=$pageAnchor})}

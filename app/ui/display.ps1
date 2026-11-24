@@ -1134,20 +1134,23 @@ function Write-TerminalPanel([string[]]$Lines,[int]$InputColumn=0) {
     [Console]::Write($frame.ToString())
 }
 
-function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$SourceDefaults,[switch]$NoPathBreaks) {
+function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$SourceDefaults,[switch]$NoPathBreaks,[switch]$LiteralRows) {
     $rows=[System.Collections.Generic.List[string]]::new()
     $defaults=[System.Collections.Generic.List[bool]]::new()
     $sourceIndex=0
     foreach ($text in $Lines) {
-        $line=($text -replace '[\x00-\x1f\x7f-\x9f]',' ').TrimStart()
+        $line=$text -replace '[\x00-\x1f\x7f-\x9f]',' '
+        if (-not $LiteralRows) {$line=$line.TrimStart()}
         $isDefault=($line -match '^(?:\d+|[A-Z])\..*\(default\)')
         if ($null -ne $SourceDefaults -and $sourceIndex -lt $SourceDefaults.Count) {$isDefault=$SourceDefaults[$sourceIndex]}
         # Measure each bounded prefix once instead of rescanning the whole remainder.
         while ($true) {
             $prefix=Get-TextPrefix $line $Width
             if ($prefix.Length -eq $line.Length) {break}
-            $cut=$prefix.LastIndexOf(' ')
-            if ($cut -lt [int]($prefix.Length/2)) {
+            # Literal filenames retain every wrapping space and leading character.
+            $cut=$prefix.Length
+            if (-not $LiteralRows) {$cut=$prefix.LastIndexOf(' ')}
+            if (-not $LiteralRows -and $cut -lt [int]($prefix.Length/2)) {
                 # Keep path components intact when a long token crosses the edge.
                 $separator=-1
                 if (-not $NoPathBreaks) {$separator=[Math]::Max($prefix.LastIndexOf('/'),$prefix.LastIndexOf('\'))}
@@ -1155,7 +1158,8 @@ function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$So
             }
             $rows.Add($line.Substring(0,$cut))
             $defaults.Add($isDefault)
-            $line=$line.Substring($cut).TrimStart()
+            $line=$line.Substring($cut)
+            if (-not $LiteralRows) {$line=$line.TrimStart()}
         }
         $rows.Add($line)
         $defaults.Add($isDefault)
@@ -1165,13 +1169,15 @@ function Get-MenuRows([string[]]$Lines,[int]$Width,[ref]$DefaultRows,[bool[]]$So
     return $rows.ToArray()
 }
 
-function Get-MenuSpacing([string[]]$Rows,[bool[]]$DefaultRows,[int]$MaximumRows) {
+function Get-MenuSpacing([string[]]$Rows,[bool[]]$DefaultRows,[int]$MaximumRows,[switch]$LiteralRows) {
     # Paragraph gaps are optional only when they cost artwork or usable space.
     # Remove the minimum number, starting at the bottom; never alter source rows.
     $remove=[Math]::Max(0,$Rows.Count-$MaximumRows)
     $dropped=New-Object 'Collections.Generic.HashSet[int]'
     for($i=$Rows.Count-1;$i -ge 0 -and $remove -gt 0;$i--) {
-        if([string]::IsNullOrWhiteSpace($Rows[$i])){[void]$dropped.Add($i);$remove--}
+        $isGap=[string]::IsNullOrWhiteSpace($Rows[$i])
+        if($LiteralRows){$isGap=[string]::IsNullOrEmpty($Rows[$i])}
+        if($isGap){[void]$dropped.Add($i);$remove--}
     }
     $kept=New-Object 'Collections.Generic.List[string]'
     $defaults=New-Object 'Collections.Generic.List[bool]'
@@ -1310,7 +1316,10 @@ function Format-MenuFooterRows([object[]]$Rows,[int]$Width,[string]$PromptColor=
 function Get-PlainMenuRows([string[]]$Rows,[string]$Prompt,[switch]$LiteralRows) {
     $width=[Math]::Max(40,[Math]::Min($script:UiWidth,$script:UiColumns-4))
     $parts=Get-MenuControlParts $Rows -LiteralRows:$LiteralRows
-    foreach($line in $parts.Rows){(ConvertTo-SafeExternalText $line).TrimStart()}
+    foreach($line in $parts.Rows){
+        $safe=ConvertTo-SafeExternalText $line
+        if($LiteralRows){$safe}else{$safe.TrimStart()}
+    }
     if($PSBoundParameters.ContainsKey('Prompt')) {
         foreach($row in @(Get-MenuFooterLayout $Prompt $parts.ControlRows $parts.ControlDefaults $width)) {
             $gap=[Math]::Max(0,$width-(Get-TextWidth $row.Left)-(Get-TextWidth $row.Right))
@@ -1339,8 +1348,8 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[s
     $result=$null
     if ($width -ge 72) {
         $wrappedDefaults=$null
-        $wrapped=@(Get-MenuRows $parts.Rows ($width-28) ([ref]$wrappedDefaults) $parts.DefaultRows)
-        $spacing=Get-MenuSpacing $wrapped $wrappedDefaults ([Math]::Max(12,$script:UiHeight-$fullOverhead))
+        $wrapped=@(Get-MenuRows $parts.Rows ($width-28) ([ref]$wrappedDefaults) $parts.DefaultRows -LiteralRows:$LiteralRows)
+        $spacing=Get-MenuSpacing $wrapped $wrappedDefaults ([Math]::Max(12,$script:UiHeight-$fullOverhead)) -LiteralRows:$LiteralRows
         $wrapped=$spacing.Rows;$wrappedDefaults=$spacing.DefaultRows
         $body=[Math]::Max(12,$wrapped.Count)
         # Keep the full logo when a footer needs the space normally reserved
@@ -1353,9 +1362,9 @@ function Get-MenuLayout([string[]]$Rows,[switch]$NoInput,[bool[]]$DefaultRows,[s
     # Reclaim the mascot column and empty padding before asking for more room.
     if (-not $result) {
         $wrappedDefaults=$null
-        $wrapped=@(Get-MenuRows $parts.Rows ($width-4) ([ref]$wrappedDefaults) $parts.DefaultRows)
+        $wrapped=@(Get-MenuRows $parts.Rows ($width-4) ([ref]$wrappedDefaults) $parts.DefaultRows -LiteralRows:$LiteralRows)
         $budget=$script:UiHeight-$overhead;if($width -ge 72){$budget=$script:UiHeight-$fullOverhead}
-        $spacing=Get-MenuSpacing $wrapped $wrappedDefaults $budget
+        $spacing=Get-MenuSpacing $wrapped $wrappedDefaults $budget -LiteralRows:$LiteralRows
         $wrapped=$spacing.Rows;$wrappedDefaults=$spacing.DefaultRows
         $required=$wrapped.Count+$overhead
         $result=[pscustomobject]@{Rows=$wrapped;DefaultRows=$wrappedDefaults;Width=$width;TextWidth=($width-4);BodyRows=$wrapped.Count;RequiredHeight=$required;ShowMio=$false;Fits=($script:UiColumns -ge 44 -and $script:UiHeight -ge $required)}

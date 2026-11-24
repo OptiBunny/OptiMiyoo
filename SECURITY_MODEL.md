@@ -424,8 +424,10 @@ do not establish a selected core. A known `progdir` requires a real ASCII
 and an actual recognized `dirname "$0"` command substitution. Quoting the RHS and
 ordinary line continuations remain supported. Literal substitution-looking text
 does not establish directory provenance; a leading `progdir` assignment on any
-command clears an earlier dirname assumption. Unquoted shell redirections remain
-unverified:
+command clears an earlier dirname assumption. Shell `command` and `builtin`
+dispatch wrappers remain unverified, including harmless query forms; they can
+hide termination or changes to known directory variables. Unquoted shell
+redirections remain unverified:
 their filename operands must not be mistaken for core-selection arguments.
 Quoted and escaped redirection characters remain literal data. Core selection
 recognizes only exact `-L` and separate `-v`/`--verbose`/`-f`/`--fullscreen`

@@ -116,6 +116,11 @@ function Get-SelectedRetroArchCore([string]$Launch) {
         if ($head -in 'export','readonly','local','declare','typeset','read','unset') {
             foreach ($word in $words) {if ($word.Value -cmatch '^progdir(?:=|$)') {$progdirKnown=$false}}
         }
+        # Dispatch wrappers can hide termination and directory-variable changes.
+        # Keep all wrapper forms unverified, including harmless lookup options.
+        if ([StringComparer]::Ordinal.Equals($head,'command') -or [StringComparer]::Ordinal.Equals($head,'builtin')) {
+            throw 'Conditional or custom shell execution in launch.sh is unverified.'
+        }
         if ($head -in 'if','then','elif','else','fi','case','esac','while','until','for','select','do','done','function','eval','.','source','alias','unalias','trap','exit','return','!') {
             throw 'Conditional or custom shell execution in launch.sh is unverified.'
         }

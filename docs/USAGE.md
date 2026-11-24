@@ -134,9 +134,9 @@ keeps its originals and leaves its existing output unchanged.
 MSX / MSX2 playlists support at most ten media entries with blueMSX; OptiMiyoo
 refuses larger sets and keeps their originals and existing output.
 
-Sega CD / Mega-CD playlists are limited to four media entries for compatibility
-with both supported cores. Split larger sets into smaller groups; OptiMiyoo
-keeps their originals and leaves existing output unchanged.
+Sega CD / Mega-CD playlists support up to eight discs with PicoDrive, the
+default core on Onion 4.4.0 beta. Split larger sets into smaller groups.
+OptiMiyoo keeps the originals and existing output when it refuses an oversized set.
 
 ### Systems and ROM folders
 

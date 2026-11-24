@@ -203,11 +203,9 @@ generic text budget and refuses the whole set before plan acceptance.
 MSX plans refuse more than ten media entries to match blueMSX's disk-control
 capacity, after the generic text budget and before plan acceptance.
 
-The reviewed PicoDrive implementation retains eight media entries; the inspected
-Genesis Plus GX implementation retains four. Planning does not select an
-installed core, so Sega CD plans use a conservative common limit of four.
-This deliberately refuses PicoDrive sets with five to eight entries and
-rejects the whole set before plan acceptance or publication.
+The [Sega CD launcher](https://github.com/OnionUI/Onion/blob/07505ea58c7bba698d6b9220ff43946a43cac76b/static/packages/Emu/Sega%20-%20CD%20(PicoDrive)/Emu/SEGACD/launch.sh) in Onion 4.4.0-beta-20260120 uses PicoDrive.
+Its [playlist reader](https://github.com/libretro/picodrive/blob/688c90d5bd017d21b9bcee99a4aa83c5224711a0/platform/libretro/libretro.c#L1330) stops after filling its [eight slots](https://github.com/libretro/picodrive/blob/688c90d5bd017d21b9bcee99a4aa83c5224711a0/platform/libretro/libretro.c#L1030).
+Sega CD planning refuses the entire set above eight entries before publication.
 
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;

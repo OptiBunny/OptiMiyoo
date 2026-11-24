@@ -239,6 +239,12 @@ creates while unpacking. Missing or late folder entries can leave discs out of
 the playlist. OptiMiyoo checks this before writing output. Choose **3: Folders**
 or **4: Loose files**, or rebuild the ZIP with folder entries before their files.
 
+Amiga input ZIPs that use ZIP64 end-directory records also need **3: Folders**
+or **4: Loose files**, or rebuilding without ZIP64 before choosing ZIP storage.
+The supported PUAE reader cannot open those directory records, even when the
+archive is small. This applies to single games as well as multi-disc sets.
+OptiMiyoo leaves the original archive unchanged.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

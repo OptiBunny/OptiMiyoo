@@ -273,6 +273,13 @@ by the end of that first extraction pass. Recursive directory records establish
 ancestors, and later M3U lines may retry extraction. Incompatible name diagnostics
 retain precedence. The guard does not extract, rewrite or reorder the archive;
 other profiles, extracted layouts and single-game plans remain unchanged.
+AMIGA input ZIPs kept zipped also require classic end-directory records: the
+supported PUAE reader does not interpret ZIP64 end records or their locator.
+Media admission refuses those structures for both single and multi-disc games,
+including redundant ZIP64 end records whose ordinary fields fit in 32 bits.
+Generic ZIP64 validation and extraction layouts retain their existing behavior.
+This consumer check does not change per-entry ZIP64 extra-field handling or
+certify other ZIP64 combinations, generated archives or different core builds.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

@@ -184,6 +184,13 @@ choice you make.
 Playlists can point inside ZIPs with the standard Amiga, C64 and VIC-20 cores.
 For the other systems, choose **Folders** or **Loose files** and check that
 your core supports playlists. Follow the support notes shown beside ZIP choices.
+
+For multi-disc ZIPs on Amiga, C64 and VIC-20, **Auto** requires the source
+archive's extension to be lowercase `.zip`: the standard cores do not recognize
+member references using `.ZIP` or `.Zip`. Choose **2: ZIPs** for a matching output
+with the lowercase `.zip` extension, or rename the source extension before Auto.
+Single-game ZIP names are unaffected.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

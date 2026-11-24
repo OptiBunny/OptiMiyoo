@@ -958,6 +958,11 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         $relativeData=$sourceZip.Substring($sourcePrefix.Length).Replace('\','/')
         if ($isMulti) {$relativeData='.hidden/'+$relativeData}
     }
+    # Supported core readers match the .zip# member marker case-sensitively.
+    if ($isMulti -and $autoLayout -and $Job.Zip -and $profile.ZipMemberPlaylist -and
+        -not $relativeData.EndsWith('.zip',[StringComparison]::Ordinal)) {
+        throw 'Auto needs a lowercase .zip extension for ZIP-member playlists on this system. Choose ZIPs storage or rename the source extension to .zip.'
+    }
     $flatBase=([string][IO.Path]::GetDirectoryName($Job.Stem.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     if ($flatBase) {$flatBase+='/'}
     $flatBase='.hidden/'+$flatBase

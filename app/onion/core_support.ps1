@@ -58,7 +58,9 @@ function Get-LauncherCommands([string]$Launch) {
             while ($i -lt $text.Length -and $text[$i] -ne "`n") {$i++}
             $c="`n"
         }
-        if ($c -in '|','&','(',')' -or ($c -in '{','}' -and -not $started) -or ($c -eq '<' -and $i+1 -lt $text.Length -and $text[$i+1] -eq '<')) {
+        # Redirection operands are filenames, even when they look like -L.
+        # Quoted and escaped characters were already consumed as literal data.
+        if ($c -in '|','&','(',')','<','>' -or ($c -in '{','}' -and -not $started)) {
             throw 'Conditional, compound or redirected shell execution is unverified.'
         }
         # Shell blanks are ASCII space/tab. Preserve the existing CRLF text

@@ -1180,6 +1180,9 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         if ($profile.Folder -eq 'MSX' -and $Media.DiskNames.Count -gt 10) {
             throw 'MSX supports at most 10 media entries per playlist with blueMSX. Split this set into smaller playlists. Original kept.'
         }
+        if ($profile.Folder -eq 'SEGACD' -and $Media.DiskNames.Count -gt 8) {
+            throw 'Sega CD supports at most 8 media entries per playlist with PicoDrive. Split this set into smaller playlists. Original kept.'
+        }
     }
     $flatLines=@(Get-PlaylistLines $Media.DiskNames $Job.Stem $false $true)
     $writes=@($dataWrites)

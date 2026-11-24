@@ -280,6 +280,11 @@ including redundant ZIP64 end records whose ordinary fields fit in 32 bits.
 Generic ZIP64 validation and extraction layouts retain their existing behavior.
 This consumer check does not change per-entry ZIP64 extra-field handling or
 certify other ZIP64 combinations, generated archives or different core builds.
+
+The [Sega CD launcher](https://github.com/OnionUI/Onion/blob/07505ea58c7bba698d6b9220ff43946a43cac76b/static/packages/Emu/Sega%20-%20CD%20(PicoDrive)/Emu/SEGACD/launch.sh) in Onion 4.4.0-beta-20260120 uses PicoDrive.
+Its [playlist reader](https://github.com/libretro/picodrive/blob/688c90d5bd017d21b9bcee99a4aa83c5224711a0/platform/libretro/libretro.c#L1330) stops after filling its [eight slots](https://github.com/libretro/picodrive/blob/688c90d5bd017d21b9bcee99a4aa83c5224711a0/platform/libretro/libretro.c#L1030).
+Sega CD planning refuses the entire set above eight entries before publication.
+
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

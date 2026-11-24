@@ -108,6 +108,11 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
     $parent=([string][IO.Path]::GetDirectoryName($relative)).Replace('\','/')
     $title=[IO.Path]::GetFileNameWithoutExtension($relative);$tag='';$errorText='';$usedFolderTitle=$false
     if (-not $Archive) {
+        # Keep ordinary titles in collection folders distinct, as the
+        # playlist planner does. Compact numbers and SideA/SideB remain
+        # labels; other bare letters need a space after the marker.
+        $joinedWord='(?i)\b(?:(?:disc|disk)[a-z]|side[c-z])'
+        $allowBareLabel=($parent -and -not [regex]::IsMatch($title,$joinedWord,[Text.RegularExpressions.RegexOptions]::CultureInvariant))
         $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
         $found=[regex]::Matches($title,$pattern,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
         if ($found.Count -eq 1) {
@@ -119,7 +124,7 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
             }
         }
         elseif ($found.Count -gt 1) {$errorText='Multiple disk labels in one filename; separate the input sets.'}
-        elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
+        elseif ($allowBareLabel -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
             $usedFolderTitle=$true
             $tag=$Matches[1].ToLowerInvariant();$title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
         }

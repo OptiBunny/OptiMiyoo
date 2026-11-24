@@ -106,6 +106,12 @@ Inside a folder named after the game, `Disc 1.chd` and `Disc 2.chd` also work,
 as do names such as `(Disc 1).chd` and `(Disc 2).chd`.
 For C64 tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 
+For bare letter labels, include a space, such as `Disc A.chd` or
+`Tape A.tap`, or enclose the label in brackets. Compact numbers such as
+`Disc1.chd` and the common `SideA.tap` / `SideB.tap` names also work.
+Ordinary titles such as `Disco` and `Taper` stay separate games inside
+collection folders. These disc-label rules also apply to conversion.
+
 Keep CUE files, their tracks, and any matching SBI files together. A CUE file
 and its tracks count as one disc. Keep different editions of the same game in
 separate batches.

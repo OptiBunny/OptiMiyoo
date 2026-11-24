@@ -230,6 +230,9 @@ the original explicit member selectors. The planner refuses that mismatch before
 accepting writes; it does not normalize names or change archive bytes. Folder
 and loose-file plans preserve Unicode names. This family-specific restriction
 does not change generic ZIP decoding, single-game plans or AMIGA UTF-8 members.
+PlayStation plans likewise refuse more than eight media entries, matching
+the supported PCSX ReARMed disk-control capacity. The check follows the
+generic text budget and refuses the whole set before plan acceptance.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

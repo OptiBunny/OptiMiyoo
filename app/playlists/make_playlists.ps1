@@ -1055,6 +1055,9 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         if ($profile.Folder -in 'AMIGA','COMMODORE','VIC20' -and $Media.DiskNames.Count -gt 20) {
             throw 'This system supports at most 20 media entries per playlist. Split this set into smaller playlists. Original kept.'
         }
+        if ($profile.Folder -eq 'PS' -and $Media.DiskNames.Count -gt 8) {
+            throw 'PlayStation supports at most 8 media entries per playlist with PCSX ReARMed. Split this set into smaller playlists. Original kept.'
+        }
     }
     $flatLines=@(Get-PlaylistLines $Media.DiskNames $Job.Stem $false $true)
     $writes=@($dataWrites)

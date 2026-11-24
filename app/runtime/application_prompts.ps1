@@ -159,9 +159,20 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
                 continue
             }
             if($key.Key -eq [ConsoleKey]::Enter){if(-not $script:UiVT){[Console]::WriteLine()};return $text.Trim().ToUpperInvariant()}
-            if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
-            elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
-            $caret=$text.Length;$dirty=$true
+            if($script:UiVT) {
+                if($key.Key -eq [ConsoleKey]::Backspace -and $caret -gt 0){$previous=Get-InputCaretOffset $text $caret -1;$next=Get-InputCaretOffset $text $previous 1;$text=$text.Remove($previous,$next-$previous);$caret=$previous}
+                elseif($key.Key -eq [ConsoleKey]::Delete -and $caret -lt $text.Length){$next=Get-InputCaretOffset $text $caret 1;$previous=Get-InputCaretOffset $text $next -1;$text=$text.Remove($previous,$next-$previous);$caret=$previous}
+                elseif($key.Key -eq [ConsoleKey]::LeftArrow){$caret=Get-InputCaretOffset $text $caret -1}
+                elseif($key.Key -eq [ConsoleKey]::RightArrow){$caret=Get-InputCaretOffset $text $caret 1}
+                elseif($key.Key -eq [ConsoleKey]::Home){$caret=0}
+                elseif($key.Key -eq [ConsoleKey]::End){$caret=$text.Length}
+                elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text=$text.Insert($caret,[string]$key.KeyChar);$caret++}
+            } else {
+                if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
+                elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
+                $caret=$text.Length
+            }
+            $dirty=$true
             if(-not $script:UiVT){[Console]::Write("`r"+$plainPrompt+' '+$text+' ')}
         } else {Wait-DisplayFrame 30}
     }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}

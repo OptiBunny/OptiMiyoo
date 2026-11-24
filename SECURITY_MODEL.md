@@ -429,8 +429,10 @@ within the existing chunk and queue limits. If the capture limit cuts a pair, th
 queued half is omitted while the limit failure remains; response encoding must
 not fail on a character split introduced by the capture helper.
 
-Full-screen menu input uses the same limited text boundaries for caret movement,
-viewport selection, fitting and highlighting. Required legacy Unicode helper
+Full-screen selection input, including parent-owned policy choices, uses the same
+limited text boundaries for Left/Right movement, caret-relative Backspace/Delete,
+viewport selection, fitting and highlighting. Home/End selects the start/end; plain
+text prompts retain end-only editing. Required legacy Unicode helper
 initialization failures produce the fixed diagnostic instead of fallback
 boundaries. These input-field rules do not change general text wrapping or
 establish terminal-cell widths, glyph shaping or complete Unicode conformance.

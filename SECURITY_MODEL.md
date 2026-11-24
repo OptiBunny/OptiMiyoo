@@ -472,8 +472,10 @@ options before content. Other option forms, including `--` and value-taking
 options, remain unverified rather than treating their operands as core flags.
 Content before core selection and options after content are also unverified;
 the assessment does not assume a particular option-permutation behavior.
-Existing CRLF text handling remains supported,
-while quoted values retain their exact characters. The config root must be one
+Existing CRLF text handling remains supported, while quoted values retain their
+exact characters. Executable words, core paths, and recognized dirname assignments
+must match complete token values; a quoted final newline cannot establish a
+known core or directory. The config root must be one
 JSON object, with only JSON whitespace before it; singleton or nested arrays
 cannot establish support through property enumeration. The `launch` property
 must be a string naming `launch.sh`, allowing ordinary Windows filename case variants.

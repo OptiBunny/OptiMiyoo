@@ -396,7 +396,13 @@ is shown again for correction. Retrying must not select a normalized sibling.
 
 Optional explicit-SD core assessment is read-only. It parses launcher text as
 data, using ASCII shell blanks and literal `exec`/`-L` tokens; Unicode lookalikes
-do not establish a selected core. Unquoted shell redirections remain unverified:
+do not establish a selected core. A known `progdir` requires a real ASCII
+`NAME=` assignment with no quoting or ordinary escapes in its name or equals sign,
+and an actual recognized `dirname "$0"` command substitution. Quoting the RHS and
+ordinary line continuations remain supported. Literal substitution-looking text
+does not establish directory provenance; a leading `progdir` assignment on any
+command clears an earlier dirname assumption. Unquoted shell redirections remain
+unverified:
 their filename operands must not be mistaken for core-selection arguments.
 Quoted and escaped redirection characters remain literal data. Core selection
 recognizes only exact `-L` and separate `-v`/`--verbose`/`-f`/`--fullscreen`

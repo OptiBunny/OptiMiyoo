@@ -6,6 +6,7 @@ function Get-LauncherCommands([string]$Launch) {
     $tokens=New-Object 'System.Collections.Generic.List[object]'
     $word=New-Object Text.StringBuilder
     $quote=[char]0; $started=$false; $literalDollar=$false
+    $assignmentName=$null; $assignmentEligible=$true; $actualCommandSubstitution=$false
     $text=$Launch+"`n"
     for ($i=0; $i -lt $text.Length; $i++) {
         $c=$text[$i]
@@ -19,6 +20,7 @@ function Get-LauncherCommands([string]$Launch) {
             $next=$text[$i+1]
             if ($next -eq "`r" -and $i+2 -lt $text.Length -and $text[$i+2] -eq "`n") {$i+=2; continue}
             if ($next -eq "`n") {$i++; continue}
+            $assignmentEligible=$false
             if ($quote -eq [char]34 -and $next -notin [char]34,[char]36,[char]92,[char]96) {[void]$word.Append($c); continue}
             $i++; $started=$true; [void]$word.Append($next)
             if ($next -eq '$') {$literalDollar=$true}
@@ -27,6 +29,7 @@ function Get-LauncherCommands([string]$Launch) {
         # Keep substitutions opaque so their contents cannot be mistaken for
         # top-level commands. Only the standard dirname assignment qualifies.
         if ($c -eq [char]96) {
+            $actualCommandSubstitution=$true
             $started=$true; [void]$word.Append($c); $closed=$false
             for ($i++; $i -lt $text.Length; $i++) {
                 $part=$text[$i]; [void]$word.Append($part)
@@ -37,6 +40,7 @@ function Get-LauncherCommands([string]$Launch) {
             continue
         }
         if ($c -eq '$' -and $i+1 -lt $text.Length -and $text[$i+1] -eq '(') {
+            $actualCommandSubstitution=$true
             $started=$true; [void]$word.Append('$('); $i++; $depth=1; $innerQuote=[char]0
             for ($i++; $i -lt $text.Length; $i++) {
                 $part=$text[$i]; [void]$word.Append($part)
@@ -53,7 +57,7 @@ function Get-LauncherCommands([string]$Launch) {
             if ($c -eq [char]34) {$quote=[char]0} else {[void]$word.Append($c)}
             continue
         }
-        if ($c -in [char]34,[char]39) {$quote=$c; $started=$true; continue}
+        if ($c -in [char]34,[char]39) {$quote=$c; $started=$true; $assignmentEligible=$false; continue}
         if ($c -eq '#' -and -not $started) {
             while ($i -lt $text.Length -and $text[$i] -ne "`n") {$i++}
             $c="`n"
@@ -68,13 +72,21 @@ function Get-LauncherCommands([string]$Launch) {
         $crlf=([int][char]$c -eq 13 -and $i+1 -lt $Launch.Length -and [int]$text[$i+1] -eq 10)
         if ([int][char]$c -in 9,10,32,59 -or $crlf) {
             if ($started) {
-                $tokens.Add([pscustomobject]@{Value=$word.ToString(); LiteralDollar=$literalDollar})
+                $tokens.Add([pscustomobject]@{Value=$word.ToString(); LiteralDollar=$literalDollar; AssignmentName=$assignmentName; ActualCommandSubstitution=$actualCommandSubstitution})
                 [void]$word.Clear(); $started=$false; $literalDollar=$false
+                $assignmentName=$null; $assignmentEligible=$true; $actualCommandSubstitution=$false
             }
             if ($c -eq "`n" -or $c -eq ';') {
                 if ($tokens.Count -gt 0) {$commands.Add([pscustomobject]@{Tokens=$tokens.ToArray()}); $tokens.Clear()}
             }
             continue
+        }
+        # Recognize assignment syntax before quote removal. RHS quoting is valid;
+        # quotes or ordinary escapes in the name or equals sign are not.
+        if ($c -eq '=' -and $assignmentEligible) {
+            $name=$word.ToString()
+            if ($name -cmatch '^[A-Za-z_][A-Za-z0-9_]*$') {$assignmentName=$name}
+            $assignmentEligible=$false
         }
         $started=$true; [void]$word.Append($c)
     }
@@ -87,15 +99,18 @@ function Get-SelectedRetroArchCore([string]$Launch) {
     $progdirKnown=$false
     foreach ($command in @(Get-LauncherCommands $Launch)) {
         $words=@($command.Tokens); $at=0
-        while ($at -lt $words.Count -and $words[$at].Value -match '^[A-Za-z_][A-Za-z0-9_]*=') {$at++}
+        while ($at -lt $words.Count -and $null -ne $words[$at].AssignmentName) {$at++}
         if ($at -eq $words.Count) {
             foreach ($word in $words) {
-                if ($word.Value -cmatch '^progdir=') {
-                    $progdirKnown=($word.Value -cmatch '^progdir=(?:`dirname "\$0"`|\$\(dirname "\$0"\))$' -and -not $word.LiteralDollar)
+                if ([StringComparer]::Ordinal.Equals($word.AssignmentName,'progdir')) {
+                    $progdirKnown=($word.ActualCommandSubstitution -and $word.Value -cmatch '^progdir=(?:`dirname "\$0"`|\$\(dirname "\$0"\))$' -and -not $word.LiteralDollar)
                 }
             }
             continue
         }
+        # Prefix assignments can persist for POSIX special builtins such as :.
+        # Do not retain dirname provenance after one on any command.
+        foreach ($prefix in @($words | Select-Object -First $at)) {if ([StringComparer]::Ordinal.Equals($prefix.AssignmentName,'progdir')) {$progdirKnown=$false}}
         $head=$words[$at].Value
         # A later export/read/unset must not leave a stale dirname assumption.
         if ($head -in 'export','readonly','local','declare','typeset','read','unset') {
@@ -111,7 +126,6 @@ function Get-SelectedRetroArchCore([string]$Launch) {
             if ($wasExec) {throw 'Custom exec command in launch.sh is unverified.'}
             continue
         }
-        foreach ($prefix in @($words | Select-Object -First $at)) {if ($prefix.Value -cmatch '^progdir=') {$progdirKnown=$false}}
         if ($words[$at].LiteralDollar -or ($head.Contains('$') -and -not $progdirKnown)) {throw 'The RetroArch program directory is unverified.'}
         $coreArguments=New-Object 'System.Collections.Generic.List[object]'
         $contentSeen=$false

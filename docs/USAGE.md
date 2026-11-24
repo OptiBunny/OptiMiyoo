@@ -130,6 +130,14 @@ Use uppercase `FILE` commands for PlayStation CUEs: PCSX ReARMed ignores
 lowercase or mixed-case spellings such as `file` and `FiLe`. If refused, change
 only the command to `FILE`, keeping the referenced filename spelling intact.
 
+PlayStation CUE output names must use the lowercase `.cue` extension. PCSX
+ReARMed can keep a `.CUE` or mixed-case descriptor selected as image data even
+when it finds the referenced track. Auto preserves loose source spelling, and
+extracted ZIP members keep their names. If refused, rename the descriptor's
+extension to `.cue` and retry. Explicit rebuilding of loose sources already
+produces `.cue` and remains available. Track filenames and CUE contents are
+not changed by this check.
+
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.
 ZIP filenames declared as UTF-8 must also contain valid UTF-8.

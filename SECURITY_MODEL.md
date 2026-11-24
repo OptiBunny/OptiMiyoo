@@ -208,6 +208,16 @@ letter cases, which can leave the CUE selected as image data. Both PS discovery
 routes apply this guard before accepting media; generic command matching and
 other systems stay unchanged. The check preserves text and filename spelling
 and does not claim complete CUE grammar validation.
+PlayStation output planning requires selected CUE filenames to end in literal
+lowercase `.cue`. The pinned core's DATA-handle replacement checks that spelling
+case-sensitively even when descriptor lookup succeeds. The guard checks physical
+source filenames for Auto loose preservation and selected media names for other
+layouts, retaining the existing lowercase extension produced when loose inputs
+are explicitly rebuilt. It checks selected descriptors rather than unrelated
+content names, refuses the complete plan before writes, and does not rename or
+rewrite source files. Other systems and the separate descriptor-text guards are
+unchanged. Core gameplay and filesystem compatibility are not established by
+this admission rule.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and

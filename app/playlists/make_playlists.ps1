@@ -1065,6 +1065,19 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     $looseFiles=$Storage -eq 'Loose'
     $hasPlaylist=$isMulti
     $dataFolder=$Storage -eq 'Folders'
+    if ($profile.Folder -eq 'PS') {
+        # Auto preserves physical names; rebuilt loose sources already use .cue.
+        $cueOutputNames=@($Media.DiskNames)
+        if ($autoLayout -and -not $Job.Zip) {
+            $cueOutputNames=@($Job.Disks | ForEach-Object {[IO.Path]::GetFileName($_.Path)})
+        }
+        foreach ($cueOutputName in $cueOutputNames) {
+            $extension=[IO.Path]::GetExtension($cueOutputName)
+            if ($extension.Equals('.cue',[StringComparison]::OrdinalIgnoreCase) -and -not $extension.Equals('.cue',[StringComparison]::Ordinal)) {
+                throw ('PlayStation CUE output filenames must use lowercase .cue for PCSX ReARMed: '+$cueOutputName+'. Rename the CUE extension to .cue, then retry. Original files kept.')
+            }
+        }
+    }
     $relativeData=$Job.Stem
     if ($hasPlaylist) {$relativeData='.hidden/'+$Job.Stem}
     if ($zipMode) {$relativeData+='.zip'}

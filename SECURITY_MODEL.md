@@ -226,14 +226,18 @@ lookup, avoiding attacker-chosen hash-collision chains. This is a bookkeeping
 limit, not a maximum numeric identifier. When INFO is present, its final cylinder
 and head bounds must include every recorded IMGE/TRCK coordinate; otherwise the
 bundled converter can omit a complete track. INFO must contain its used 40-byte
-prefix and fit the native reader's 84-byte modifier buffer. Inputs outside these
-conversion limits are refused; missing INFO and sparse in-range track layouts
+prefix. INFO, IMGE, TRCK and DATA metadata must fit the native reader's 84-byte
+modifier buffer; oversized known modifiers are skipped by that reader rather
+than loaded as the intended fields. This bound applies to metadata, not the
+separately bounded DATA payload. Inputs outside these conversion limits are
+refused; missing INFO and sparse in-range track layouts
 retain their previous handling.
 
 Reads and cancellation polling are bounded, including the final reference check,
 and validation restores the borrowed stream position. Paired zero-length DATA
 for empty/noise tracks, unknown extension records, extended IMGE/TRCK/DATA
-metadata tails, and absent optional DATA checksums retain their existing handling.
+metadata tails within the supported 84-byte modifier limit, and absent optional
+DATA checksums retain their existing handling.
 These checks do not establish complete track semantics or faithful conversion.
 
 G64 validation requires the exact, case-sensitive `GCR-1541` file signature.

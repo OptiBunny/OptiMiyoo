@@ -20,6 +20,15 @@ namespace OptiMiyoo {
             ulong value=U64(extra,cursor);cursor+=8;return value;
         }
         public static void Inspect(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory) {
+            Inspect(stream,maxTotal,maxEntry,maxEntries,maxDirectory,null);
+        }
+        public static void Inspect(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory,string[] utf8MemberNames) {
+            Inspect(stream,maxTotal,maxEntry,maxEntries,maxDirectory,utf8MemberNames,false);
+        }
+        public static void InspectClassicDirectory(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory,string[] utf8MemberNames) {
+            Inspect(stream,maxTotal,maxEntry,maxEntries,maxDirectory,utf8MemberNames,true);
+        }
+        private static void Inspect(Stream stream,long maxTotal,long maxEntry,int maxEntries,long maxDirectory,string[] utf8MemberNames,bool classicDirectory) {
             if (!stream.CanRead || !stream.CanSeek) throw new IOException("ZIP inspection requires a readable seekable stream.");
             long saved=stream.Position;
             try {
@@ -46,6 +55,8 @@ namespace OptiMiyoo {
                     if (endPosition>=20) {
                         stream.Position=endPosition-20;byte[] locator=Read(reader,20);
                         if (U32(locator,0)==0x07064b50U) {
+                            // PUAE's classic reader does not resolve ZIP64 end records.
+                            if (classicDirectory) throw new InvalidDataException("This Amiga ZIP uses a ZIP64 directory that the supported core cannot read. Choose Folders or Loose files storage, or rebuild the archive without ZIP64. Original kept.");
                             zip64=true;
                             if (U32(locator,4)!=0 || U32(locator,16)!=1) throw new InvalidDataException("Split ZIP64 archives are unsupported.");
                             ulong position=U64(locator,8);
@@ -65,6 +76,7 @@ namespace OptiMiyoo {
                     }
                     if (!zip64 && (size==0xffffffffU || offset==0xffffffffU)) throw new InvalidDataException("ZIP64 directory locator is missing.");
                     if (count>(ulong)maxEntries) throw new InvalidDataException("ZIP entry-count limit exceeded; split the collection into smaller archives.");
+                    if (utf8MemberNames!=null && count!=(ulong)utf8MemberNames.Length) throw new InvalidDataException("ZIP entry names changed during inspection; source kept.");
                     if (size>(ulong)maxDirectory) throw new InvalidDataException("ZIP metadata-size limit exceeded; source kept.");
                     if (onDisk!=count || count>size/46 || offset>(ulong)directoryLimit || size!=(ulong)directoryLimit-offset) throw new InvalidDataException("ZIP directory bounds are invalid.");
                     long directoryEnd=(long)(offset+size);stream.Position=(long)offset;ulong total=0;
@@ -77,13 +89,24 @@ namespace OptiMiyoo {
                         int nameLength=U16(header,28),extraLength=U16(header,30),commentLength=U16(header,32);
                         if (nameLength>4096) throw new InvalidDataException("ZIP entry name exceeds the safe path-length limit.");
                         if (nameLength+extraLength+commentLength>directoryEnd-stream.Position) throw new InvalidDataException("Truncated ZIP entry metadata.");
-                        if ((U16(header,8)&0x0800)!=0) {
-                            byte[] name=Read(reader,nameLength);
+                        bool declaredUtf8=(U16(header,8)&0x0800)!=0;
+                        byte[] name=null;
+                        if (declaredUtf8 || utf8MemberNames!=null) {name=Read(reader,nameLength);}
+                        else {stream.Position+=nameLength;}
+                        if (declaredUtf8) {
                             try {new System.Text.UTF8Encoding(false,true).GetCharCount(name);}
                             catch (System.Text.DecoderFallbackException error) {
                                 throw new InvalidDataException("ZIP entry name contains invalid UTF-8; source kept.",error);
                             }
-                        } else {stream.Position+=nameLength;}
+                        }
+                        // Onion OS PUAE substitutes underscores for non-ASCII filename bytes.
+                        // The preserved ZIP and explicit selector must agree on an ASCII name.
+                        if (utf8MemberNames!=null && utf8MemberNames[(int)i]!=null) {
+                            byte[] expected=new System.Text.UTF8Encoding(false,true).GetBytes(utf8MemberNames[(int)i]);
+                            bool equal=name.Length==expected.Length;
+                            for (int n=0;equal && n<name.Length;n++) {equal=name[n]<128 && name[n]==expected[n];}
+                            if (!equal) throw new InvalidDataException("Onion OS PUAE requires ASCII member names for Amiga multi-disc ZIP playlists. Choose Folders or Loose files storage, or use ASCII names inside the ZIP. Original kept.");
+                        }
                         byte[] extra=Read(reader,extraLength);stream.Position+=commentLength;
                         ulong expanded=U32(header,24),compressed=U32(header,20),localOffset=U32(header,42);
                         bool needExpanded=expanded==0xffffffffU,needCompressed=compressed==0xffffffffU,needOffset=localOffset==0xffffffffU;
@@ -132,11 +155,35 @@ namespace OptiMiyoo {
 }
 
 function Assert-ArchiveBudget {
-    param([Parameter(Mandatory=$true)][IO.Stream]$Stream,[ValidateSet('Media','Floppy')][string]$Profile='Media')
+    param([Parameter(Mandatory=$true)][IO.Stream]$Stream,[ValidateSet('Media','Floppy')][string]$Profile='Media',[AllowNull()][string[]]$Utf8MemberNames=$null,[switch]$ClassicDirectory)
     Initialize-ArchiveLimits
     [long]$total=64GB;[long]$entry=16GB
     if ($Profile -eq 'Floppy') {$total=8GB;$entry=512MB}
-    [OptiMiyoo.ArchiveLimits]::Inspect($Stream,$total,$entry,20000,64MB)
+    if ($ClassicDirectory) {[OptiMiyoo.ArchiveLimits]::InspectClassicDirectory($Stream,$total,$entry,20000,64MB,$Utf8MemberNames)}
+    else {[OptiMiyoo.ArchiveLimits]::Inspect($Stream,$total,$entry,20000,64MB,$Utf8MemberNames)}
+}
+
+function Assert-ZipClassicDirectory {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {Assert-ArchiveBudget -Stream $stream -Profile Media -ClassicDirectory}
+    finally {$stream.Dispose()}
+}
+
+function Assert-ZipMemberUtf8Names {
+    param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)][IO.Compression.ZipArchive]$Archive,[Parameter(Mandatory=$true)][string[]]$MemberNames)
+    $selected=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($member in $MemberNames) {[void]$selected.Add($member)}
+    $names=New-Object string[] $Archive.Entries.Count
+    $found=0
+    for ($i=0;$i -lt $Archive.Entries.Count;$i++) {
+        $name=$Archive.Entries[$i].FullName
+        if ($selected.Contains($name)) {$names[$i]=$name;$found++}
+    }
+    if ($found -ne $selected.Count) {throw 'Selected ZIP members changed during inspection; source kept.'}
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {Assert-ArchiveBudget -Stream $stream -Profile Media -Utf8MemberNames $names}
+    finally {$stream.Dispose()}
 }
 
 function Open-ArchiveWithBudget {

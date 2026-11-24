@@ -106,9 +106,41 @@ Inside a folder named after the game, `Disc 1.chd` and `Disc 2.chd` also work,
 as do names such as `(Disc 1).chd` and `(Disc 2).chd`.
 For C64 tape sides, use `Game (Side A).tap` and `Game (Side B).tap`.
 
+For bare letter labels, include a space, such as `Disc A.chd` or
+`Tape A.tap`, or enclose the label in brackets. Compact numbers such as
+`Disc1.chd` and the common `SideA.tap` / `SideB.tap` names also work.
+Ordinary titles such as `Disco` and `Taper` stay separate games inside
+collection folders. These disc-label rules also apply to conversion.
+
 Keep CUE files, their tracks, and any matching SBI files together. A CUE file
 and its tracks count as one disc. Keep different editions of the same game in
 separate batches.
+
+For PlayStation CUEs, each `FILE` entry must name a file beside the CUE, such as
+`FILE "Track.bin" BINARY`. The standard PCSX ReARMed core discards folders in
+these entries, so OptiMiyoo refuses entries such as `Tracks/Track.bin`. Put the
+CUE and its tracks together and update the entries before retrying. The game
+folder itself can still be inside a collection. OptiMiyoo leaves the CUE and
+track bytes unchanged.
+Use UTF-8 for PlayStation CUEs. A UTF-8 byte-order mark is accepted before a
+short blank line or an introductory metadata line such as `REM` or `TITLE`.
+When a mark hides a command, save the CUE as UTF-8 without a byte-order mark
+and retry. Preparation preserves the original CUE bytes.
+Use uppercase `FILE` commands for PlayStation CUEs: PCSX ReARMed ignores
+lowercase or mixed-case spellings such as `file` and `FiLe`. If refused, change
+only the command to `FILE`, keeping the referenced filename spelling intact.
+Indent `FILE` with ordinary spaces and put an ordinary space immediately after
+the keyword. Tabs may follow that space before a quoted filename. Non-ASCII
+spacing around the command can hide its track from the core; if refused, change
+only the command spacing and keep every character inside the filename intact.
+
+PlayStation CUE output names must use the lowercase `.cue` extension. PCSX
+ReARMed can keep a `.CUE` or mixed-case descriptor selected as image data even
+when it finds the referenced track. Auto preserves loose source spelling, and
+extracted ZIP members keep their names. If refused, rename the descriptor's
+extension to `.cue` and retry. Explicit rebuilding of loose sources already
+produces `.cue` and remains available. Track filenames and CUE contents are
+not changed by this check.
 
 CUE and playlist text must be valid UTF-8, or UTF-16/UTF-32 with a byte-order
 mark. OptiMiyoo refuses invalid encoding without rewriting the original files.
@@ -125,8 +157,21 @@ A game with multiple discs or tape sides gets one playlist. Its game files go
 in `DST/.hidden`, and the playlist stays outside that folder so it appears in
 Onion's game list. Games with one disc or tape side stay visible without a playlist.
 
-A generated playlist supports up to 16,383 entries and 1 MiB of UTF-8 text. Split
-larger sets into smaller groups; an oversized set leaves its existing output unchanged.
+All generated playlists are limited to 1 MiB of UTF-8 text and 16,383 entries.
+For Amiga, Commodore 64 and VIC-20, the supported cores retain at most 20
+entries, so OptiMiyoo refuses larger sets. Split oversized sets into smaller
+groups; a refused set leaves its existing output unchanged.
+
+PlayStation playlists support at most eight discs with PCSX ReARMed. Split
+larger sets into smaller groups; OptiMiyoo refuses the whole oversized set,
+keeps its originals and leaves its existing output unchanged.
+
+MSX / MSX2 playlists support at most ten media entries with blueMSX; OptiMiyoo
+refuses larger sets and keeps their originals and existing output.
+
+Sega CD / Mega-CD playlists support up to eight discs with PicoDrive, the
+default core on Onion 4.4.0 beta. Split larger sets into smaller groups.
+OptiMiyoo keeps the originals and existing output when it refuses an oversized set.
 
 ### Systems and ROM folders
 
@@ -187,6 +232,41 @@ choice you make.
 Playlists can point inside ZIPs with the standard Amiga, C64 and VIC-20 cores.
 For the other systems, choose **Folders** or **Loose files** and check that
 your core supports playlists. Follow the support notes shown beside ZIP choices.
+
+For multi-disc ZIPs on Amiga, C64 and VIC-20, **Auto** requires the source
+archive's extension to be lowercase `.zip`: the standard cores do not recognize
+member references using `.ZIP` or `.Zip`. Choose **2: ZIPs** for a matching output
+with the lowercase `.zip` extension, or rename the source extension before Auto.
+Single-game ZIP names are unaffected.
+
+For C64 and VIC-20 multi-disc ZIPs, selected member paths must use ASCII
+characters. VICE replaces non-ASCII ZIP filename bytes with underscores, so the
+playlist cannot find those members by their original names. Choose **3: Folders**
+or **4: Loose files** to keep Unicode names, or rename the members to ASCII before
+choosing ZIP storage. OptiMiyoo refuses the incompatible ZIP plan before writing
+output; it does not rename your files.
+
+For Amiga multi-disc ZIP playlists, use ASCII names for the selected discs and
+their folders inside the archive. The PUAE core bundled with Onion OS replaces
+non-ASCII filename bytes with underscores during extraction, even in UTF-8 ZIPs.
+To keep the original names, choose **3: Folders** or **4: Loose files**.
+NIB and NBZ members in C64 and VIC-20 multi-disc ZIPs must also be at the ZIP
+root. VICE loses the subfolder path when selecting its converted image. Choose
+**3: Folders** or **4: Loose files** for nested NIB/NBZ members, or move them to
+the ZIP root before choosing ZIP storage. Other supported disk formats keep
+their existing subfolder behavior.
+
+C64 and VIC-20 ZIP-member playlists also need the archive folders that VICE
+creates while unpacking. Missing or late folder entries can leave discs out of
+the playlist. OptiMiyoo checks this before writing output. Choose **3: Folders**
+or **4: Loose files**, or rebuild the ZIP with folder entries before their files.
+
+Amiga input ZIPs that use ZIP64 end-directory records also need **3: Folders**
+or **4: Loose files**, or rebuilding without ZIP64 before choosing ZIP storage.
+The supported PUAE reader cannot open those directory records, even when the
+archive is small. This applies to single games as well as multi-disc sets.
+OptiMiyoo leaves the original archive unchanged.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)
@@ -219,7 +299,8 @@ When processing finishes, review the saved, skipped, and failed outputs, along
 with the counts of originals removed or kept. The CSV report and log are saved
 beside `SRC` and `DST`; their paths appear in the results. **Enter / B / Esc**
 returns to the main menu and **Q** exits. Long results use **> / <** to page
-through the complete details and report paths. The final results replace the
+through the complete details and report paths. Filename spaces are retained
+when result lines wrap. The final results replace the
 preparation progress screen, including when no files were published.
 
 If the results report incomplete cleanup of a previous output backup, the new

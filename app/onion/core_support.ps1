@@ -6,6 +6,7 @@ function Get-LauncherCommands([string]$Launch) {
     $tokens=New-Object 'System.Collections.Generic.List[object]'
     $word=New-Object Text.StringBuilder
     $quote=[char]0; $started=$false; $literalDollar=$false
+    $assignmentName=$null; $assignmentEligible=$true; $actualCommandSubstitution=$false
     $text=$Launch+"`n"
     for ($i=0; $i -lt $text.Length; $i++) {
         $c=$text[$i]
@@ -19,6 +20,7 @@ function Get-LauncherCommands([string]$Launch) {
             $next=$text[$i+1]
             if ($next -eq "`r" -and $i+2 -lt $text.Length -and $text[$i+2] -eq "`n") {$i+=2; continue}
             if ($next -eq "`n") {$i++; continue}
+            $assignmentEligible=$false
             if ($quote -eq [char]34 -and $next -notin [char]34,[char]36,[char]92,[char]96) {[void]$word.Append($c); continue}
             $i++; $started=$true; [void]$word.Append($next)
             if ($next -eq '$') {$literalDollar=$true}
@@ -27,6 +29,7 @@ function Get-LauncherCommands([string]$Launch) {
         # Keep substitutions opaque so their contents cannot be mistaken for
         # top-level commands. Only the standard dirname assignment qualifies.
         if ($c -eq [char]96) {
+            $actualCommandSubstitution=$true
             $started=$true; [void]$word.Append($c); $closed=$false
             for ($i++; $i -lt $text.Length; $i++) {
                 $part=$text[$i]; [void]$word.Append($part)
@@ -37,6 +40,7 @@ function Get-LauncherCommands([string]$Launch) {
             continue
         }
         if ($c -eq '$' -and $i+1 -lt $text.Length -and $text[$i+1] -eq '(') {
+            $actualCommandSubstitution=$true
             $started=$true; [void]$word.Append('$('); $i++; $depth=1; $innerQuote=[char]0
             for ($i++; $i -lt $text.Length; $i++) {
                 $part=$text[$i]; [void]$word.Append($part)
@@ -53,12 +57,14 @@ function Get-LauncherCommands([string]$Launch) {
             if ($c -eq [char]34) {$quote=[char]0} else {[void]$word.Append($c)}
             continue
         }
-        if ($c -in [char]34,[char]39) {$quote=$c; $started=$true; continue}
+        if ($c -in [char]34,[char]39) {$quote=$c; $started=$true; $assignmentEligible=$false; continue}
         if ($c -eq '#' -and -not $started) {
             while ($i -lt $text.Length -and $text[$i] -ne "`n") {$i++}
             $c="`n"
         }
-        if ($c -in '|','&','(',')' -or ($c -in '{','}' -and -not $started) -or ($c -eq '<' -and $i+1 -lt $text.Length -and $text[$i+1] -eq '<')) {
+        # Redirection operands are filenames, even when they look like -L.
+        # Quoted and escaped characters were already consumed as literal data.
+        if ($c -in '|','&','(',')','<','>' -or ($c -in '{','}' -and -not $started)) {
             throw 'Conditional, compound or redirected shell execution is unverified.'
         }
         # Shell blanks are ASCII space/tab. Preserve the existing CRLF text
@@ -66,13 +72,21 @@ function Get-LauncherCommands([string]$Launch) {
         $crlf=([int][char]$c -eq 13 -and $i+1 -lt $Launch.Length -and [int]$text[$i+1] -eq 10)
         if ([int][char]$c -in 9,10,32,59 -or $crlf) {
             if ($started) {
-                $tokens.Add([pscustomobject]@{Value=$word.ToString(); LiteralDollar=$literalDollar})
+                $tokens.Add([pscustomobject]@{Value=$word.ToString(); LiteralDollar=$literalDollar; AssignmentName=$assignmentName; ActualCommandSubstitution=$actualCommandSubstitution})
                 [void]$word.Clear(); $started=$false; $literalDollar=$false
+                $assignmentName=$null; $assignmentEligible=$true; $actualCommandSubstitution=$false
             }
             if ($c -eq "`n" -or $c -eq ';') {
                 if ($tokens.Count -gt 0) {$commands.Add([pscustomobject]@{Tokens=$tokens.ToArray()}); $tokens.Clear()}
             }
             continue
+        }
+        # Recognize assignment syntax before quote removal. RHS quoting is valid;
+        # quotes or ordinary escapes in the name or equals sign are not.
+        if ($c -eq '=' -and $assignmentEligible) {
+            $name=$word.ToString()
+            if ($name -cmatch '^[A-Za-z_][A-Za-z0-9_]*$') {$assignmentName=$name}
+            $assignmentEligible=$false
         }
         $started=$true; [void]$word.Append($c)
     }
@@ -83,48 +97,76 @@ function Get-LauncherCommands([string]$Launch) {
 function Get-SelectedRetroArchCore([string]$Launch) {
     $calls=New-Object 'System.Collections.Generic.List[string]'
     $progdirKnown=$false
+    # Match whole words: a quoted final LF is a literal part of the value.
     foreach ($command in @(Get-LauncherCommands $Launch)) {
         $words=@($command.Tokens); $at=0
-        while ($at -lt $words.Count -and $words[$at].Value -match '^[A-Za-z_][A-Za-z0-9_]*=') {$at++}
+        while ($at -lt $words.Count -and $null -ne $words[$at].AssignmentName) {$at++}
         if ($at -eq $words.Count) {
             foreach ($word in $words) {
-                if ($word.Value -cmatch '^progdir=') {
-                    $progdirKnown=($word.Value -cmatch '^progdir=(?:`dirname "\$0"`|\$\(dirname "\$0"\))$' -and -not $word.LiteralDollar)
+                if ([StringComparer]::Ordinal.Equals($word.AssignmentName,'progdir')) {
+                    $progdirKnown=($word.ActualCommandSubstitution -and $word.Value -cmatch '\Aprogdir=(?:`dirname "\$0"`|\$\(dirname "\$0"\))\z' -and -not $word.LiteralDollar)
                 }
             }
             continue
         }
+        # Prefix assignments can persist for POSIX special builtins such as :.
+        # Do not retain dirname provenance after one on any command.
+        foreach ($prefix in @($words | Select-Object -First $at)) {if ([StringComparer]::Ordinal.Equals($prefix.AssignmentName,'progdir')) {$progdirKnown=$false}}
         $head=$words[$at].Value
         # A later export/read/unset must not leave a stale dirname assumption.
         if ($head -in 'export','readonly','local','declare','typeset','read','unset') {
             foreach ($word in $words) {if ($word.Value -cmatch '^progdir(?:=|$)') {$progdirKnown=$false}}
+        }
+        # Dispatch wrappers can hide termination and directory-variable changes.
+        # Shell set options can suppress execution or change failure handling.
+        # Keep all forms unverified, including harmless query/positional forms.
+        if ([StringComparer]::Ordinal.Equals($head,'command') -or
+            [StringComparer]::Ordinal.Equals($head,'builtin') -or
+            [StringComparer]::Ordinal.Equals($head,'set')) {
+            throw 'Conditional or custom shell execution in launch.sh is unverified.'
         }
         if ($head -in 'if','then','elif','else','fi','case','esac','while','until','for','select','do','done','function','eval','.','source','alias','unalias','trap','exit','return','!') {
             throw 'Conditional or custom shell execution in launch.sh is unverified.'
         }
         $wasExec=[StringComparer]::Ordinal.Equals($head,'exec')
         if ($wasExec) {$at++; if ($at -ge $words.Count) {throw 'Incomplete exec command in launch.sh.'}; $head=$words[$at].Value}
-        $exePattern='^(?:retroarch|\./retroarch|/mnt/SDCARD/RetroArch/retroarch|(?:\$progdir|\$\{progdir\})/\.\./\.\./RetroArch/retroarch)$'
+        $exePattern='\A(?:retroarch|\./retroarch|/mnt/SDCARD/RetroArch/retroarch|(?:\$progdir|\$\{progdir\})/\.\./\.\./RetroArch/retroarch)\z'
         if ($head -cnotmatch $exePattern) {
             if ($wasExec) {throw 'Custom exec command in launch.sh is unverified.'}
             continue
         }
-        foreach ($prefix in @($words | Select-Object -First $at)) {if ($prefix.Value -cmatch '^progdir=') {$progdirKnown=$false}}
         if ($words[$at].LiteralDollar -or ($head.Contains('$') -and -not $progdirKnown)) {throw 'The RetroArch program directory is unverified.'}
         $coreArguments=New-Object 'System.Collections.Generic.List[object]'
+        $contentSeen=$false
+        # An ignored option can consume -L as its value. Recognize only
+        # known argument-free flags; do not assume -- or option permutation.
         for ($j=$at+1; $j -lt $words.Count; $j++) {
             $value=$words[$j].Value
+            if ($contentSeen -and $value.StartsWith('-',[StringComparison]::Ordinal)) {
+                throw 'RetroArch options after content in launch.sh are unverified.'
+            }
             if ([StringComparer]::Ordinal.Equals($value,'-L')) {
                 $j++; if ($j -ge $words.Count) {throw 'Missing literal -L argument in launch.sh.'}
                 $coreArguments.Add($words[$j]); continue
             }
-            if ($value -cmatch '^(?:-L.|--libretro)' -or ($value.Contains('$') -and $value -cne '$1') -or $value.Contains([string][char]96)) {
+            if ([StringComparer]::Ordinal.Equals($value,'-v') -or
+                [StringComparer]::Ordinal.Equals($value,'--verbose') -or
+                [StringComparer]::Ordinal.Equals($value,'-f') -or
+                [StringComparer]::Ordinal.Equals($value,'--fullscreen')) {continue}
+            if ($value.StartsWith('-',[StringComparison]::Ordinal)) {
+                throw 'Custom RetroArch options in launch.sh are unverified.'
+            }
+            if (($value.Contains('$') -and $value -cne '$1') -or $value.Contains([string][char]96)) {
                 throw 'Dynamic or additional core arguments in launch.sh are unverified.'
             }
+            if ($coreArguments.Count -eq 0) {
+                throw 'Content before core selection in launch.sh is unverified.'
+            }
+            $contentSeen=$true
         }
         if ($coreArguments.Count -ne 1) {throw 'Ambiguous/custom core selection in launch.sh; no automatic changes.'}
         $argument=$coreArguments[0]
-        $pathPattern='^(?:\$progdir/\.\./\.\.|\$\{progdir\}/\.\./\.\.|/mnt/SDCARD)/RetroArch/\.retroarch/cores/(?<core>[A-Za-z0-9_]+_libretro\.so)$'
+        $pathPattern='\A(?:\$progdir/\.\./\.\.|\$\{progdir\}/\.\./\.\.|/mnt/SDCARD)/RetroArch/\.retroarch/cores/(?<core>[A-Za-z0-9_]+_libretro\.so)\z'
         if ($argument.LiteralDollar -or $argument.Value -cnotmatch $pathPattern) {throw 'Custom core path in launch.sh; no automatic changes.'}
         $core=$Matches['core']
         if ($argument.Value.Contains('$') -and -not $progdirKnown) {throw 'The core program directory is unverified.'}

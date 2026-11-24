@@ -330,7 +330,7 @@ function Copy-FileVerified([string]$Source,[string]$Destination,[string]$Name) {
         finally {if ($inputStream) { $inputStream.Dispose() }}
     }
 }
-function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
+function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath,[string]$System='') {
     Assert-ArchiveSandboxMemberBudget $Archive
     $seen=New-Object 'System.Collections.Generic.Dictionary[string,bool]' ([StringComparer]::OrdinalIgnoreCase)
     $disks=New-Object 'System.Collections.Generic.List[string]'
@@ -357,10 +357,14 @@ function Get-ZipDisks([IO.Compression.ZipArchive]$Archive,[string]$ZipPath) {
     $tracks=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @($disks | Where-Object {[IO.Path]::GetExtension($_) -eq '.cue'})) {
         $entry=$Archive.GetEntry($name)
-        $text=Read-SandboxedZipText $ZipPath $Archive $entry 1MB
+        $text=if ($System -eq 'PS') {Read-PlayStationCueText $ZipPath $Archive $entry} else {Read-SandboxedZipText $ZipPath $Archive $entry 1MB}
         $lines=[regex]::Split($text,'\r\n|\r|\n')
         $parent=([string][IO.Path]::GetDirectoryName($name)).Replace('\','/')
         foreach ($track in @(Get-CueReferences @($lines) $name)) {
+            # The bundled PS core discards directories from CUE FILE names.
+            if ($System -eq 'PS' -and $track.Contains('/')) {
+                throw ('PlayStation CUE FILE entries must use filenames without folders for PCSX ReARMed: '+$name+'. Put the CUE and its tracks in the same folder, then update the FILE entries before retrying.')
+            }
             $relative=$track; if ($parent) {$relative=$parent+'/'+$track}
             $trackEntry=$Archive.GetEntry($relative)
             if ($null -eq $trackEntry -or $trackEntry.FullName.EndsWith('/')) {throw ('Missing CUE track or spelling/case mismatch: '+$relative)}
@@ -482,20 +486,27 @@ function Get-TapeGrouping([string]$Title) {
     [pscustomobject]@{Title=$name; Tag=$tag; Error=$errorText}
 }
 
-function Get-PlaylistMediaIdentity([string]$Relative) {
+function Get-PlaylistMediaIdentity([string]$Relative,[switch]$ArchiveMember) {
     $parent=([string][IO.Path]::GetDirectoryName($Relative.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     $title=[IO.Path]::GetFileNameWithoutExtension($Relative);$tag='';$tagged=$false;$usedFolderTitle=$false;$errorText=$null
+    $allowBareLabel=([bool]$parent -or $ArchiveMember)
+    if ($allowBareLabel) {
+        # A folder can be a collection, not proof that an ordinary title
+        # such as Disco or Taper is a disc/tape label. Compact numbers and
+        # SideA/SideB are clear labels; other letters need a separator.
+        # Check each marker in compound tape labels too.
+        $joinedWord='(?i)\b(?:(?:disc|disk|tape|cassette)[a-z]|side[c-z])'
+        $allowBareLabel=-not [regex]::IsMatch($title,$joinedWord,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    }
     $tapeGrouping=$null
     if ([IO.Path]::GetExtension($Relative) -in '.tap','.t64') {
         $tapeGrouping=Get-TapeGrouping $title
-        if ($null -eq $tapeGrouping -and $parent) {
+        if ($null -eq $tapeGrouping -and $allowBareLabel) {
             # A bare Side A or Tape 1 Side A inside its game folder has the
             # same identity as Game (Side A) or Game (Tape 1 Side A).
             $bareGrouping=Get-TapeGrouping ('('+$title+')')
             if ($null -ne $bareGrouping -and -not $bareGrouping.Title) {
-                $tapeGrouping=$bareGrouping;$usedFolderTitle=$true
-                $tapeGrouping.Title=[IO.Path]::GetFileName($parent)
-                $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+                $tapeGrouping=$bareGrouping
             }
         }
     }
@@ -507,13 +518,15 @@ function Get-PlaylistMediaIdentity([string]$Relative) {
         $tag=$found[0].Groups[1].Value.ToLowerInvariant();$tagged=$true
         $title=[regex]::Replace($title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant).Trim()
         $title=[regex]::Replace($title,'\s{2,}',' ')
-    } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
-        $tag=$Matches[1].ToLowerInvariant();$tagged=$true
-        $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
-        $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+    } elseif ($allowBareLabel) {
+        $bareLabel=[regex]::Match($title,'^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$',([Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::CultureInvariant))
+        if ($bareLabel.Success) {
+            $tag=$bareLabel.Groups[1].Value.ToLowerInvariant();$tagged=$true;$title=''
+        }
     }
     if ($tagged -and -not $title -and $parent) {
-        # Label-only names such as (Disc 1) inherit their immediate game folder.
+        # Bare and bracketed labels inherit their game folder. At the root
+        # of a ZIP, both forms share the unnamed archive-level set.
         $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
         $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
     }
@@ -535,7 +548,7 @@ function Get-OrderedArchiveMedia([string[]]$Names) {
     foreach($name in $Names) {
         $isTape=[IO.Path]::GetExtension($name) -in '.tap','.t64'
         if($null -eq $tapeSet){$tapeSet=$isTape}elseif($tapeSet -ne $isTape){return $Names}
-        $identity=Get-PlaylistMediaIdentity $name
+        $identity=Get-PlaylistMediaIdentity $name -ArchiveMember
         if(-not $identity.Tagged -or $identity.Error){return $Names}
         if($null -eq $stem){$stem=$identity.Stem}
         elseif(-not $stem.Equals($identity.Stem,[StringComparison]::OrdinalIgnoreCase)){return $Names}
@@ -628,7 +641,7 @@ function Get-Jobs([string]$SourceRoot, $Profile) {
 function Assert-GameStem([string]$Stem) {
     Assert-PlaylistName $Stem
     foreach ($part in $Stem.Split('/')) {
-        if ($part.StartsWith('.')) {throw 'A game or collection name starts with a dot and would be hidden. Rename that input folder/file.'}
+        if ($part.StartsWith('.',[StringComparison]::Ordinal)) {throw 'A game or collection name starts with a dot and would be hidden. Rename that input folder/file.'}
     }
 }
 
@@ -668,19 +681,86 @@ function Get-CueReferences([string[]]$Lines,[string]$CuePath) {
     $found=New-Object 'System.Collections.Generic.List[string]'
     foreach ($line in $Lines) {
         if ($line.Length -gt 8192) {throw "CUE line exceeds 8,192 characters: $CuePath"}
-        if ($line -match '^\s*FILE\s+(?:"([^"]+)"|(\S+))\s+\S+\s*$') {
+        # Match ASCII command letters independently of the Windows culture.
+        # Unquoted fields use ASCII separators so Unicode spaces stay in filenames.
+        # Keep the existing quoted-field syntax and its literal captures.
+        if ($line -cmatch '^\s*[Ff][Ii][Ll][Ee](?:\s+"([^"]+)"\s+|[ \t\r\n\f\v]+([^ \t\r\n\f\v]+)[ \t\r\n\f\v]+)\S+\s*$') {
             $name=$Matches[1]; if (-not $name) {$name=$Matches[2]}
             # Paths are copied unchanged. Backslashes and parent traversal are
             # rejected because the target is a Linux handheld.
             Assert-RelativeName $name
             if ($found.Count -ge 1024) {throw "CUE has more than 1,024 FILE references: $CuePath"}
             $found.Add($name)
-        } elseif ($line -match '^\s*FILE\b') {throw "Unrecognized CUE FILE line in $CuePath"}
+        } elseif ($line -cmatch '^\s*[Ff][Ii][Ll][Ee]\b') {throw "Unrecognized CUE FILE line in $CuePath"}
     }
     if ($found.Count -eq 0) {throw "CUE contains no FILE entries: $CuePath"}
     return @($found)
 }
 
+function Read-PlayStationCueText([string]$Path,[IO.Compression.ZipArchive]$Archive=$null,[IO.Compression.ZipArchiveEntry]$Entry=$null) {
+    if (($null -ne $Archive) -xor ($null -ne $Entry)) {throw 'A PlayStation ZIP CUE requires its archive and entry together.'}
+    $stream=$null
+    try {
+        $name=$Path
+        if ($null -ne $Archive) {
+            $index=$Archive.Entries.IndexOf($Entry)
+            if ($index -lt 0) {throw 'The PlayStation CUE entry does not belong to this archive.'}
+            $name=$Entry.FullName
+            if ($Entry.Length -gt 1MB) {throw ('CUE exceeds the text size limit: '+$name)}
+            # Generic cached text has lost its original encoding. Read bounded
+            # bytes through the existing sandbox before applying PS policy.
+            [byte[]]$bytes=Invoke-ArchiveSandbox -ZipPath $Path -Archive $Archive -Operation Read -EntryIndex $index -MaximumBytes 1MB
+            $stream=[IO.MemoryStream]::new($bytes,$false)
+            $length=$Entry.Length
+        } else {
+            $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+            $length=$stream.Length
+            if ($length -gt 1MB) {throw ('CUE exceeds the text size limit: '+$name)}
+        }
+        $prefix=New-Object byte[] 4
+        $count=0
+        while ($count -lt $prefix.Length) {
+            $read=$stream.Read($prefix,$count,$prefix.Length-$count)
+            if ($read -eq 0) {break}
+            $count+=$read
+        }
+        $stream.Position=0
+        $wideBom=($count -ge 2 -and (($prefix[0] -eq 255 -and $prefix[1] -eq 254) -or ($prefix[0] -eq 254 -and $prefix[1] -eq 255))) -or
+                 ($count -ge 4 -and $prefix[0] -eq 0 -and $prefix[1] -eq 0 -and $prefix[2] -eq 254 -and $prefix[3] -eq 255)
+        $unsafeEncoding=$wideBom
+        if (-not $wideBom) {
+            $text=Read-OptiBoundedText $stream 1MB ('CUE '+$name) $length
+            $utf8Bom=$count -ge 3 -and $prefix[0] -eq 239 -and $prefix[1] -eq 187 -and $prefix[2] -eq 191
+            if ($utf8Bom) {
+                # PCSX reads 255 bytes at a time. A mark on one complete ignored
+                # line cannot conceal a later FILE or change its chunk boundary.
+                $first=[regex]::Match($text,'\A[ \t]*(?:(?i:REM|TITLE|PERFORMER|SONGWRITER|ISRC|FLAGS)(?:[ \t][^\r\n]*)?)?\r?\n')
+                $unsafeEncoding=-not $first.Success -or [Text.Encoding]::UTF8.GetByteCount($first.Value) -gt 252
+            }
+        }
+        if ($unsafeEncoding) {
+            throw ('PlayStation CUE text must be UTF-8 without a byte-order mark for PCSX ReARMed: '+$name+'. Save the CUE as UTF-8 without a byte-order mark, then retry. Original files kept.')
+        }
+        # The shared reader serves cores that accept mixed-case commands.
+        # PCSX ReARMed compares the FILE token literally; keep filenames intact.
+        foreach ($line in [regex]::Split($text,'\r\n|\r|\n')) {
+            if ($line -cmatch '^\s*([Ff][Ii][Ll][Ee])\b' -and $Matches[1] -cne 'FILE') {
+                throw ('PlayStation CUE FILE commands must use uppercase FILE for PCSX ReARMed: '+$name+'. Uppercase the FILE command without changing filename spelling, then retry. Original files kept.')
+            }
+            if ($line -cmatch '^\s*FILE\b') {
+                # The core tokenizes commands at literal spaces before scanf.
+                # Preserve literal filenames and harmless spacing after a quote.
+                $indent=[regex]::Match($line,'^\s*').Value
+                $quotedGap=[regex]::Match($line,'^ *FILE(\s+)"')
+                if ($indent -cmatch '[^ ]' -or $line -cnotmatch '^ *FILE ' -or
+                    ($quotedGap.Success -and $quotedGap.Groups[1].Value -cmatch '[^ \t\f\v]')) {
+                    throw ('PlayStation CUE FILE commands require compatible ASCII spacing for PCSX ReARMed: '+$name+'. Use spaces before FILE and after the keyword, with ASCII whitespace before quoted filenames; keep filename spelling unchanged. Original files kept.')
+                }
+            }
+        }
+        return $text
+    } finally {if ($stream) {$stream.Dispose()}}
+}
 function Get-CueFiles([string]$CuePath) {
     $text=Read-OptiTextFile $CuePath 1MB ('CUE '+$CuePath)
     return @(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $CuePath)
@@ -754,16 +834,70 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
     if ($Job.Zip) {
         $archive=Open-ArchiveWithBudget -Path $Job.Zip -Profile Media
         try {
-            $diskNames=@(Get-ZipDisks $archive $job.Zip)
+            $diskNames=@(Get-ZipDisks $archive $job.Zip $Job.Profile.Folder)
             $effectiveStorage=if ($diskNames.Count -gt 1) {$Storage} else {$SingleStorage}
+            if ($Job.Profile.Folder -eq 'AMIGA' -and $diskNames.Count -gt 0 -and $effectiveStorage -in 'Auto','Zip') {
+                Assert-ZipClassicDirectory -Path $Job.Zip
+            }
+            if ($Job.Profile.Folder -eq 'AMIGA' -and $diskNames.Count -gt 1 -and $effectiveStorage -in 'Auto','Zip') {
+                Assert-ZipMemberUtf8Names -Path $Job.Zip -Archive $archive -MemberNames $diskNames
+            }
             if ($effectiveStorage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
+            if ($diskNames.Count -gt 1 -and $effectiveStorage -in 'Auto','Zip' -and $Job.System -in 'COMMODORE','VIC20') {
+                # Keep the existing planner diagnostics for incompatible member names.
+                $priorViceError=@($diskNames | Where-Object {
+                    $_ -cmatch '[^\x00-\x7F]' -or ($_.Contains('/') -and ([IO.Path]::GetExtension($_) -in '.nib','.nbz'))
+                }).Count -gt 0
+                if (-not $priorViceError) {
+                    $directories=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+                    [void]$directories.Add('')
+                    $firstParentReady=$false
+                    foreach ($entry in $archive.Entries) {
+                        if ($entry.FullName.EndsWith('/')) {
+                            # VICE's directory-record handler creates ancestors recursively.
+                            $directory=$entry.FullName.TrimEnd('/')
+                            while ($directory) {
+                                [void]$directories.Add($directory)
+                                $separator=$directory.LastIndexOf('/')
+                                if ($separator -lt 0) {break}
+                                $directory=$directory.Substring(0,$separator)
+                            }
+                        } elseif ($entry.FullName -ceq $diskNames[0]) {
+                            $separator=$entry.FullName.LastIndexOf('/')
+                            $parent=''; if ($separator -ge 0) {$parent=$entry.FullName.Substring(0,$separator)}
+                            $firstParentReady=$directories.Contains($parent)
+                        }
+                    }
+                    # Later M3U lines re-extract after all first-pass directories exist.
+                    $missingParent=$false
+                    foreach ($name in $diskNames) {
+                        $separator=$name.LastIndexOf('/')
+                        if ($separator -ge 0 -and -not $directories.Contains($name.Substring(0,$separator))) {$missingParent=$true;break}
+                    }
+                    if (-not $firstParentReady -or $missingParent) {
+                        throw 'VICE cannot prepare this ZIP-member playlist because required archive folders are missing or created too late. Choose Folders or Loose files storage, or rebuild the ZIP with folder entries before their files.'
+                    }
+                }
+            }
         } finally {$archive.Dispose()}
     } else {
         $diskNames=@($Job.Disks | ForEach-Object {$_.Name})
         $contentNames=@($diskNames)
         foreach ($disk in $Job.Disks) {
-            if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {$contentNames+=@(Get-CueFiles $disk.Path)}
+            if ([IO.Path]::GetExtension($disk.Name) -eq '.cue') {
+                $references=if ($Job.Profile.Folder -eq 'PS') {
+                    $text=Read-PlayStationCueText $disk.Path
+                    @(Get-CueReferences ([regex]::Split($text,'\r\n|\r|\n')) $disk.Path)
+                } else {@(Get-CueFiles $disk.Path)}
+                foreach ($reference in $references) {
+                    # Keep descriptors literal; do not flatten a PS track path.
+                    if ($Job.Profile.Folder -eq 'PS' -and $reference.Contains('/')) {
+                        throw ('PlayStation CUE FILE entries must use filenames without folders for PCSX ReARMed: '+$disk.Name+'. Put the CUE and its tracks in the same folder, then update the FILE entries before retrying.')
+                    }
+                }
+                $contentNames+=$references
+            }
             $contentNames+=@(Get-SbiCompanions $disk.Path | ForEach-Object {Get-SbiMemberName $disk.Name})
         }
     }
@@ -945,6 +1079,19 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     $looseFiles=$Storage -eq 'Loose'
     $hasPlaylist=$isMulti
     $dataFolder=$Storage -eq 'Folders'
+    if ($profile.Folder -eq 'PS') {
+        # Auto preserves physical names; rebuilt loose sources already use .cue.
+        $cueOutputNames=@($Media.DiskNames)
+        if ($autoLayout -and -not $Job.Zip) {
+            $cueOutputNames=@($Job.Disks | ForEach-Object {[IO.Path]::GetFileName($_.Path)})
+        }
+        foreach ($cueOutputName in $cueOutputNames) {
+            $extension=[IO.Path]::GetExtension($cueOutputName)
+            if ($extension.Equals('.cue',[StringComparison]::OrdinalIgnoreCase) -and -not $extension.Equals('.cue',[StringComparison]::Ordinal)) {
+                throw ('PlayStation CUE output filenames must use lowercase .cue for PCSX ReARMed: '+$cueOutputName+'. Rename the CUE extension to .cue, then retry. Original files kept.')
+            }
+        }
+    }
     $relativeData=$Job.Stem
     if ($hasPlaylist) {$relativeData='.hidden/'+$Job.Stem}
     if ($zipMode) {$relativeData+='.zip'}
@@ -954,6 +1101,30 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         if (-not $sourceZip.StartsWith($sourcePrefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Source ZIP is outside SRC.'}
         $relativeData=$sourceZip.Substring($sourcePrefix.Length).Replace('\','/')
         if ($isMulti) {$relativeData='.hidden/'+$relativeData}
+    }
+    # Supported core readers match the .zip# member marker case-sensitively.
+    if ($isMulti -and $autoLayout -and $Job.Zip -and $profile.ZipMemberPlaylist -and
+        -not $relativeData.EndsWith('.zip',[StringComparison]::Ordinal)) {
+        throw 'Auto needs a lowercase .zip extension for ZIP-member playlists on this system. Choose ZIPs storage or rename the source extension to .zip.'
+    }
+    if ($isMulti -and $zipMode -and $profile.Folder -eq 'AMIGA') {
+        foreach ($name in $Media.DiskNames) {
+            if ($name -cmatch '[^\x00-\x7F]') {
+                throw 'Onion OS PUAE requires ASCII member names for Amiga multi-disc ZIP playlists. Choose Folders or Loose files storage, or use ASCII names inside the ZIP. Original kept.'
+            }
+        }
+    }
+    # VICE replaces non-ASCII ZIP entry bytes without updating member selectors.
+    if ($isMulti -and $zipMode -and $profile.Folder -in 'COMMODORE','VIC20') {
+        foreach ($name in $Media.DiskNames) {
+            if ($name -cmatch '[^\x00-\x7F]') {
+                throw 'ZIP-member playlists for COMMODORE and VIC20 require ASCII member names because VICE renames non-ASCII ZIP entries. Choose Folders or Loose files storage, or rename the archive members to ASCII.'
+            }
+            # VICE drops the directory after converting an explicit NIB/NBZ member.
+            if ($name.Contains('/') -and ([IO.Path]::GetExtension($name) -in '.nib','.nbz')) {
+                throw 'VICE cannot select NIB/NBZ images in ZIP subfolders. Choose Folders or Loose files storage, or place those members at the ZIP root.'
+            }
+        }
     }
     $flatBase=([string][IO.Path]::GetDirectoryName($Job.Stem.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     if ($flatBase) {$flatBase+='/'}
@@ -1032,6 +1203,20 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
         if ($autoLayout) {$lines=@($preservedLines)}
         else {$lines=@(Get-PlaylistLines $Media.DiskNames $Job.Stem $zipMode $looseFiles)}
         $playlistText=Get-GeneratedPlaylistText $lines
+        # PUAE and VICE keep only twenty images in their disk-control storage.
+        # Text-resource limits alone do not ensure every planned disc is retained.
+        if ($profile.Folder -in 'AMIGA','COMMODORE','VIC20' -and $Media.DiskNames.Count -gt 20) {
+            throw 'This system supports at most 20 media entries per playlist. Split this set into smaller playlists. Original kept.'
+        }
+        if ($profile.Folder -eq 'PS' -and $Media.DiskNames.Count -gt 8) {
+            throw 'PlayStation supports at most 8 media entries per playlist with PCSX ReARMed. Split this set into smaller playlists. Original kept.'
+        }
+        if ($profile.Folder -eq 'MSX' -and $Media.DiskNames.Count -gt 10) {
+            throw 'MSX supports at most 10 media entries per playlist with blueMSX. Split this set into smaller playlists. Original kept.'
+        }
+        if ($profile.Folder -eq 'SEGACD' -and $Media.DiskNames.Count -gt 8) {
+            throw 'Sega CD supports at most 8 media entries per playlist with PicoDrive. Split this set into smaller playlists. Original kept.'
+        }
     }
     $flatLines=@(Get-PlaylistLines $Media.DiskNames $Job.Stem $false $true)
     $writes=@($dataWrites)
@@ -1989,7 +2174,7 @@ try {
                 $sourceLock=[IO.File]::Open($job.Zip,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
                 Assert-ArchiveBudget -Stream $sourceLock -Profile Media
                 $archive=New-Object IO.Compression.ZipArchive($sourceLock,[IO.Compression.ZipArchiveMode]::Read,$true)
-                $diskNames=@(Get-ZipDisks $archive $job.Zip)
+                $diskNames=@(Get-ZipDisks $archive $job.Zip $profile.Folder)
                 $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
             } else {
                 $media=Get-GameMediaNames $job $Storage $SingleStorage

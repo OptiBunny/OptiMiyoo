@@ -103,6 +103,11 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
     $parent=([string][IO.Path]::GetDirectoryName($relative)).Replace('\','/')
     $title=[IO.Path]::GetFileNameWithoutExtension($relative);$tag='';$errorText='';$usedFolderTitle=$false
     if (-not $Archive) {
+        # Keep ordinary titles in collection folders distinct, as the
+        # playlist planner does. Compact numbers and SideA/SideB remain
+        # labels; other bare letters need a space after the marker.
+        $joinedWord='(?i)\b(?:(?:disc|disk)[a-z]|side[c-z])'
+        $allowBareLabel=($parent -and -not [regex]::IsMatch($title,$joinedWord,[Text.RegularExpressions.RegexOptions]::CultureInvariant))
         $pattern='(?i)\s*[\(\[]\s*(?:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?\s*[\)\]]'
         $found=[regex]::Matches($title,$pattern,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
         if ($found.Count -eq 1) {
@@ -114,9 +119,12 @@ function Get-ConversionGameIdentity([string]$Relative,[bool]$Archive) {
             }
         }
         elseif ($found.Count -gt 1) {$errorText='Multiple disk labels in one filename; separate the input sets.'}
-        elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
-            $usedFolderTitle=$true
-            $tag=$Matches[1].ToLowerInvariant();$title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+        elseif ($allowBareLabel) {
+            $bareLabel=[regex]::Match($title,'^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$',([Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::CultureInvariant))
+            if ($bareLabel.Success) {
+                $usedFolderTitle=$true
+                $tag=$bareLabel.Groups[1].Value.ToLowerInvariant();$title=[IO.Path]::GetFileName($parent);$parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+            }
         }
     }
     if (-not $Archive -and -not $usedFolderTitle -and $parent -and $title.Equals([IO.Path]::GetFileName($parent),[StringComparison]::OrdinalIgnoreCase)) {
@@ -167,6 +175,20 @@ function Get-ConversionSourceGroups([string]$SourceRoot,[string]$DestinationRoot
     New-ConversionGroups $items.ToArray() $SourceRoot $DestinationRoot $Storage
 }
 
+function Get-ConversionDiskLabelKey([string]$Label) {
+    # Only the comparison key changes: preserve each original filename. Decimal
+    # scripts and leading zeroes must not disguise a repeated logical disk.
+    return [regex]::Replace($Label.ToLowerInvariant(), '\d+', {
+        param($match)
+        $normalized=New-Object Text.StringBuilder
+        foreach($character in $match.Value.ToCharArray()) {
+            [void]$normalized.Append([char](48+[Globalization.CharUnicodeInfo]::GetDecimalDigitValue($character)))
+        }
+        $digits=$normalized.ToString().TrimStart('0');if(-not $digits){$digits='0'}
+        return $digits
+    })
+}
+
 function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$DestinationRoot,[string]$Storage) {
     if ($Storage -notin 'Auto','Zip','Loose','Folders') {throw 'Choose Auto, ZIPs, a folder per game or loose files.'}
     if ($Items.Count -gt 100000) {throw 'Conversion batch exceeds the output member limit.'}
@@ -208,13 +230,13 @@ function New-ConversionGroups([object[]]$Items,[string]$SourceRoot,[string]$Dest
         # including inputs in a conservatively refused inferred-title group.
         $sourcePaths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         $group.Paths=@($group.Items | ForEach-Object {$_.InputPath} | Sort-Object | Where-Object {$sourcePaths.Add($_)})
-        $names=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$tags=@{}
+        $names=[Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase);$tags=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         foreach ($item in $group.Items) {
             try {
                 Assert-ConversionRelativeName $item.Name
                 if ($names.ContainsKey($item.Name)) {throw 'Several input images have the same output name.'};$names[$item.Name]=$true
                 if ($item.Type -eq 'Loose' -and $group.Items.Count -gt 1) {
-                    if (-not $item.DiskTag -or $tags.ContainsKey($item.DiskTag)) {throw 'Ambiguous game set: repeated disk labels or mixed numbered and unnumbered files.'};$tags[$item.DiskTag]=$true
+                    if (-not $item.DiskTag -or -not $tags.Add((Get-ConversionDiskLabelKey $item.DiskTag))) {throw 'Ambiguous game set: repeated disk labels or mixed numbered and unnumbered files.'}
                 }
             } catch {$group.Error=$_.Exception.Message}
         }

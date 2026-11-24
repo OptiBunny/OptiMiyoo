@@ -231,8 +231,9 @@ namespace OptiMiyoo {
                     long body = size - 12;
                     // IMGE ends its used fields with did; reserved/extension tails stay streamed.
                     int metadataLength = image ? 56 : (data || track ? 16 : (info ? 40 : 0));
-                    // Bundled CAPS cannot load an INFO modifier larger than its 84-byte buffer.
+                    // Bundled CAPS cannot load known metadata beyond its 84-byte modifier buffer.
                     if (info && body > 84) throw Bad("INFO metadata exceeds the supported native layout");
+                    if ((descriptor || data) && body > 84) throw Bad("track or DATA metadata exceeds the supported native layout");
                     if (metadataLength != 0) {
                         if (body < metadataLength) throw Bad("track, INFO or DATA metadata is incomplete");
                         ReadExact(input, metadata, metadataLength, length, report);

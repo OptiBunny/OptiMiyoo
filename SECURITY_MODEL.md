@@ -249,6 +249,11 @@ OS PUAE core rewrites non-ASCII filename bytes to underscores during extraction.
 The output planner applies the same ASCII limit to selected disc names when
 creating a new ZIP playlist. Unselected side files and extraction layouts retain
 their existing decoding.
+The same multi-disc VICE ZIP boundary refuses selected nested NIB/NBZ members,
+including mixed-case extensions. VICE writes the converted G64 in the member
+subfolder but resolves only its basename afterward. This check precedes accepted
+writes and preserves archive bytes; root-level NIB/NBZ, other disk formats,
+folder and loose-file plans retain their existing behavior.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

@@ -221,6 +221,11 @@ For Amiga multi-disc ZIP playlists, use ASCII names for the selected discs and
 their folders inside the archive. The PUAE core bundled with Onion OS replaces
 non-ASCII filename bytes with underscores during extraction, even in UTF-8 ZIPs.
 To keep the original names, choose **3: Folders** or **4: Loose files**.
+NIB and NBZ members in C64 and VIC-20 multi-disc ZIPs must also be at the ZIP
+root. VICE loses the subfolder path when selecting its converted image. Choose
+**3: Folders** or **4: Loose files** for nested NIB/NBZ members, or move them to
+the ZIP root before choosing ZIP storage. Other supported disk formats keep
+their existing subfolder behavior.
 
 For conversion, **Auto** keeps the input layout while converting the files.
 

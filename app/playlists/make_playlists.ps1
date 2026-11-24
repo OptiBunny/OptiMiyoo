@@ -1323,7 +1323,7 @@ function Add-PlaylistReferenceEntry($Index,[string]$Path) {
         $referenceBudget=New-OptiPlaylistReferenceBudget;$utf8Preamble=$false;$lineNumber=0
         foreach($line in (Read-PlaylistLines $Path -Utf8Preamble ([ref]$utf8Preamble))){
             $literalPreamble=$utf8Preamble -and $lineNumber -eq 0;$lineNumber++
-            foreach($candidate in (Get-OptiPlaylistGuardCandidates $line $referenceBudget -Utf8Preamble:$literalPreamble)){
+            foreach($candidate in (Get-OptiPlaylistGuardCandidates $line $referenceBudget -Utf8Preamble:$literalPreamble -EmptyLabelError 'An existing playlist has a label without a filename; output kept.')){
                 $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                 if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                 $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}
@@ -1485,7 +1485,7 @@ function Assert-NoForeignPlaylistReferences($Plan,[object[]]$Targets,$ReferenceI
             $referenceBudget=New-OptiPlaylistReferenceBudget;$utf8Preamble=$false;$lineNumber=0
             foreach ($line in (Read-PlaylistLines $file.FullName -Utf8Preamble ([ref]$utf8Preamble))) {
                 $literalPreamble=$utf8Preamble -and $lineNumber -eq 0;$lineNumber++
-                foreach($candidate in (Get-OptiPlaylistGuardCandidates $line $referenceBudget -Utf8Preamble:$literalPreamble)){
+                foreach($candidate in (Get-OptiPlaylistGuardCandidates $line $referenceBudget -Utf8Preamble:$literalPreamble -EmptyLabelError 'An existing playlist has a label without a filename; output kept.')){
                     $candidate=$candidate.Replace('\',[IO.Path]::DirectorySeparatorChar).Replace('/',[IO.Path]::DirectorySeparatorChar)
                     if($candidate.StartsWith('\\?\',[StringComparison]::Ordinal) -or $candidate.StartsWith('\\.\',[StringComparison]::Ordinal)){throw 'An existing playlist has an unsupported device path; output kept.'}
                     $colon=$candidate.IndexOf(':');if($colon -ge 0 -and ($colon -ne 1 -or $candidate.IndexOf(':',2) -ge 0)){throw 'An existing playlist has an unsupported stream or path syntax; output kept.'}

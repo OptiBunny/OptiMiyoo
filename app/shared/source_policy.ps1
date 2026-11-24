@@ -962,8 +962,9 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
     # Consumers differ: some preserve whitespace, some trim its right side,
     # and some trim both sides. Protect every distinct literal path they can use.
     $trimmed=$Reference.Trim();$spellings=New-Object 'Collections.Generic.List[string]'
+    $asciiWhitespace=[char[]]@(9,10,11,12,13,32)
     $seen=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-    foreach($spelling in @($Reference,$Reference.TrimEnd(),$trimmed)){
+    foreach($spelling in @($Reference,$Reference.TrimEnd(),$trimmed,$Reference.TrimEnd($asciiWhitespace),$Reference.Trim($asciiWhitespace))){
         if(-not $spelling -or -not $seen.Add($spelling)){continue}
         if(-not [StringComparer]::Ordinal.Equals($spelling,$Reference) -and $spelling.StartsWith('#',[StringComparison]::Ordinal)){continue}
         if(-not [StringComparer]::Ordinal.Equals($spelling,$trimmed)){
@@ -1005,7 +1006,14 @@ function Get-OptiPlaylistReferenceCandidates([string]$Reference,[hashtable]$Budg
     }
 }
 
-function Get-OptiPlaylistGuardCandidates([string]$Reference,[hashtable]$Budget,[switch]$Utf8Preamble) {
+function Get-OptiPlaylistGuardCandidates([string]$Reference,[hashtable]$Budget,[switch]$Utf8Preamble,[string]$EmptyLabelError) {
+    if($Utf8Preamble -and $Reference.Length -ge 8192){throw 'Playlist literal preamble interpretation exceeds its 8,192-character line limit.'}
+    # Each interpretation names media before the VICE display-label separator.
+    $separator=$Reference.IndexOf('|',[StringComparison]::Ordinal)
+    if($separator -ge 0){
+        $Reference=$Reference.Substring(0,$separator)
+        if($EmptyLabelError -and [string]::IsNullOrWhiteSpace($Reference)){throw $EmptyLabelError}
+    }
     if(-not $Utf8Preamble){
         if([string]::IsNullOrWhiteSpace($Reference) -or $Reference.StartsWith('#',[StringComparison]::Ordinal)){return}
         Get-OptiPlaylistReferenceCandidates $Reference $Budget
@@ -1014,7 +1022,6 @@ function Get-OptiPlaylistGuardCandidates([string]$Reference,[hashtable]$Budget,[
     # Some cores read EF BB BF as a literal first filename character. Protect
     # both interpretations, including a marker before an empty/comment record.
     # These candidates can deny a write/removal; they never establish ownership.
-    if($Reference.Length -ge 8192){throw 'Playlist literal preamble interpretation exceeds its 8,192-character line limit.'}
     $literal=([string][char]0xFEFF)+$Reference
     $null=Get-OptiPlaylistReferenceCandidates '' $Budget
     $working=@{Count=[long]$Budget['Count'];Characters=[long]$Budget['Characters']}
@@ -1071,7 +1078,7 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
             if($CancellationCheck -and ($lineNumber -band 31) -eq 0){& $CancellationCheck | Out-Null}
             $lineNumber++
             if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
-            foreach($name in (Get-OptiPlaylistGuardCandidates -Reference $line -Budget $referenceBudget -Utf8Preamble:($offset -eq 3 -and $lineNumber -eq 1))) {
+            foreach($name in (Get-OptiPlaylistGuardCandidates -Reference $line -Budget $referenceBudget -Utf8Preamble:($offset -eq 3 -and $lineNumber -eq 1) -EmptyLabelError 'Source playlist has a label without a filename; originals kept.')) {
                 if($name.StartsWith('file://',[StringComparison]::OrdinalIgnoreCase)){throw 'Source playlist has an unsupported local file URI; originals kept.'}
                 if($name -match '^[A-Za-z][A-Za-z0-9+.-]+://'){continue}
                 $relative=$name.Replace('/',[IO.Path]::DirectorySeparatorChar).Replace('\',[IO.Path]::DirectorySeparatorChar)

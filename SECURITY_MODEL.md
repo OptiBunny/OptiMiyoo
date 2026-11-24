@@ -186,9 +186,11 @@ final tie-breaker for linguistically equal filenames, so the parent and its
 PowerShell 5.1 worker produce the same playlist bytes for those names.
 
 Playlist dependency checks consider representable literal, right-trimmed, and
-fully trimmed spellings of each non-comment line. A space before `#` can belong
-to a filename; it does not make the original line a comment. Whitespace and
-archive-member interpretations share the same bounded candidate budget. Generated
+fully trimmed spellings under both ASCII and Unicode whitespace rules. Removing
+ASCII padding must not erase an adjacent literal non-ASCII space from a filename.
+A space before `#` can belong to a filename; it does not make the original line a
+comment. Whitespace and archive-member interpretations share the same bounded
+candidate budget. Generated
 playlist text is checked before plan acceptance or destination writes against the
 numbered-playlist reader's 1 MiB byte limit and 16,384 split-line limit, including
 its final newline. Oversized sets cannot create output that this reader cannot
@@ -196,6 +198,9 @@ reopen.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.
+Supplied conversion playlists check the media path before a `|` display label
+against renamed inputs. A label cannot conceal a reference whose extension will
+change; the descriptor and input archive remain unchanged when refused.
 
 A leading UTF-8 byte-order mark is also a possible literal filename character
 for byte-oriented playlist consumers. Dependency guards retain both first-record
@@ -253,6 +258,11 @@ Keep originals is the default. Source-policy and overwrite choices come from the
 parent's trusted prompts or explicit supported caller policy, not worker output.
 Overwrite approval does not waive checks for foreign references or unrelated
 contents. The parent derives conflicts and allowed output names independently.
+Destination playlist reference checks separate a VICE `DISK_FILE|DISK_LABEL`
+entry at its first literal ASCII pipe before expanding filename candidates.
+Both indexed and uncached checks protect the filename candidates and their CUE
+dependencies. Label metadata is excluded from path and stream-syntax checks.
+A label without a filename is refused, and full descriptor and line limits remain.
 
 The final source inventory before cleanup also polls cancellation between file
 reads. Cancellation retains remaining originals without falsely reporting that
@@ -323,6 +333,10 @@ not cause a different directory to be checked or pinned.
 Original removal requires successful publication and verification of all affected
 owning jobs and dependencies. Recheck installed output bytes, source bytes, and
 retained CUE/playlist references before deleting through held source handles.
+Retained playlists separate a `path|label` entry at its first literal `|` before
+interpreting the path; display labels cannot hide or introduce source references.
+The path keeps the existing literal, whitespace and archive-member interpretations;
+a label without a filename is refused. Descriptor bounds and bytes are unchanged.
 Skipped, failed, changed, or still-referenced sources must not be removed just
 because another job succeeded. Ambiguous ownership must preserve the affected
 files. Preserve recovery data when rollback or safe cleanup cannot complete.

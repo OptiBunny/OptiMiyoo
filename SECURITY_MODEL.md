@@ -266,6 +266,13 @@ writes and preserves archive bytes; root-level NIB/NBZ, other disk formats,
 folder and loose-file plans retain their existing behavior.
 MSX plans refuse more than ten media entries to match blueMSX's disk-control
 capacity, after the generic text budget and before plan acceptance.
+For existing multi-disc VICE ZIPs in Auto/ZIP storage, metadata validation also
+checks literal directory creation in central-directory order. The first selected
+member needs its parent when visited; later selected members need their parents
+by the end of that first extraction pass. Recursive directory records establish
+ancestors, and later M3U lines may retry extraction. Incompatible name diagnostics
+retain precedence. The guard does not extract, rewrite or reorder the archive;
+other profiles, extracted layouts and single-game plans remain unchanged.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

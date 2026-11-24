@@ -234,6 +234,11 @@ root. VICE loses the subfolder path when selecting its converted image. Choose
 the ZIP root before choosing ZIP storage. Other supported disk formats keep
 their existing subfolder behavior.
 
+C64 and VIC-20 ZIP-member playlists also need the archive folders that VICE
+creates while unpacking. Missing or late folder entries can leave discs out of
+the playlist. OptiMiyoo checks this before writing output. Choose **3: Folders**
+or **4: Loose files**, or rebuild the ZIP with folder entries before their files.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

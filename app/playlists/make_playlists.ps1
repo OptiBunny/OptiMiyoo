@@ -820,6 +820,42 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
             }
             if ($effectiveStorage -in 'Loose','Folders') {Assert-ZipExtractionNames $archive}
             $contentNames=@($archive.Entries | Where-Object {-not $_.FullName.EndsWith('/')} | ForEach-Object {$_.FullName})
+            if ($diskNames.Count -gt 1 -and $effectiveStorage -in 'Auto','Zip' -and $Job.System -in 'COMMODORE','VIC20') {
+                # Keep the existing planner diagnostics for incompatible member names.
+                $priorViceError=@($diskNames | Where-Object {
+                    $_ -cmatch '[^\x00-\x7F]' -or ($_.Contains('/') -and ([IO.Path]::GetExtension($_) -in '.nib','.nbz'))
+                }).Count -gt 0
+                if (-not $priorViceError) {
+                    $directories=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+                    [void]$directories.Add('')
+                    $firstParentReady=$false
+                    foreach ($entry in $archive.Entries) {
+                        if ($entry.FullName.EndsWith('/')) {
+                            # VICE's directory-record handler creates ancestors recursively.
+                            $directory=$entry.FullName.TrimEnd('/')
+                            while ($directory) {
+                                [void]$directories.Add($directory)
+                                $separator=$directory.LastIndexOf('/')
+                                if ($separator -lt 0) {break}
+                                $directory=$directory.Substring(0,$separator)
+                            }
+                        } elseif ($entry.FullName -ceq $diskNames[0]) {
+                            $separator=$entry.FullName.LastIndexOf('/')
+                            $parent=''; if ($separator -ge 0) {$parent=$entry.FullName.Substring(0,$separator)}
+                            $firstParentReady=$directories.Contains($parent)
+                        }
+                    }
+                    # Later M3U lines re-extract after all first-pass directories exist.
+                    $missingParent=$false
+                    foreach ($name in $diskNames) {
+                        $separator=$name.LastIndexOf('/')
+                        if ($separator -ge 0 -and -not $directories.Contains($name.Substring(0,$separator))) {$missingParent=$true;break}
+                    }
+                    if (-not $firstParentReady -or $missingParent) {
+                        throw 'VICE cannot prepare this ZIP-member playlist because required archive folders are missing or created too late. Choose Folders or Loose files storage, or rebuild the ZIP with folder entries before their files.'
+                    }
+                }
+            }
         } finally {$archive.Dispose()}
     } else {
         $diskNames=@($Job.Disks | ForEach-Object {$_.Name})

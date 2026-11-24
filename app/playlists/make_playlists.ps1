@@ -757,7 +757,7 @@ function Get-GameMediaNames($Job,[ValidateSet('Auto','Zip','Loose','Folders')][s
             if ($diskNames.Count -gt 1 -and $effectiveStorage -in 'Auto','Zip' -and $Job.System -in 'COMMODORE','VIC20') {
                 # Keep the existing planner diagnostics for incompatible member names.
                 $priorViceError=@($diskNames | Where-Object {
-                    $_ -match '[^\x00-\x7F]' -or ($_.Contains('/') -and ([IO.Path]::GetExtension($_) -in '.nib','.nbz'))
+                    $_ -cmatch '[^\x00-\x7F]' -or ($_.Contains('/') -and ([IO.Path]::GetExtension($_) -in '.nib','.nbz'))
                 }).Count -gt 0
                 if (-not $priorViceError) {
                     $directories=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
@@ -995,7 +995,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     # VICE replaces non-ASCII ZIP entry bytes without updating member selectors.
     if ($isMulti -and $zipMode -and $profile.Folder -in 'COMMODORE','VIC20') {
         foreach ($name in $Media.DiskNames) {
-            if ($name -match '[^\x00-\x7F]') {
+            if ($name -cmatch '[^\x00-\x7F]') {
                 throw 'ZIP-member playlists for COMMODORE and VIC20 require ASCII member names because VICE renames non-ASCII ZIP entries. Choose Folders or Loose files storage, or rename the archive members to ASCII.'
             }
             # VICE drops the directory after converting an explicit NIB/NBZ member.

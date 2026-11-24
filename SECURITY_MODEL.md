@@ -243,6 +243,11 @@ Keep originals is the default. Source-policy and overwrite choices come from the
 parent's trusted prompts or explicit supported caller policy, not worker output.
 Overwrite approval does not waive checks for foreign references or unrelated
 contents. The parent derives conflicts and allowed output names independently.
+Destination playlist reference checks separate a VICE `DISK_FILE|DISK_LABEL`
+entry at its first literal ASCII pipe before expanding filename candidates.
+Both indexed and uncached checks protect the filename candidates and their CUE
+dependencies. Label metadata is excluded from path and stream-syntax checks.
+A label without a filename is refused, and full descriptor and line limits remain.
 
 The final source inventory before cleanup also polls cancellation between file
 reads. Cancellation retains remaining originals without falsely reporting that

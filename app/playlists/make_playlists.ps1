@@ -959,7 +959,7 @@ function Get-PlaylistOutputPlan($Job,[string]$SourceRoot,[string]$DestinationRoo
     # VICE replaces non-ASCII ZIP entry bytes without updating member selectors.
     if ($isMulti -and $zipMode -and $profile.Folder -in 'COMMODORE','VIC20') {
         foreach ($name in $Media.DiskNames) {
-            if ($name -match '[^\x00-\x7F]') {
+            if ($name -cmatch '[^\x00-\x7F]') {
                 throw 'ZIP-member playlists for COMMODORE and VIC20 require ASCII member names because VICE renames non-ASCII ZIP entries. Choose Folders or Loose files storage, or rename the archive members to ASCII.'
             }
             # VICE drops the directory after converting an explicit NIB/NBZ member.

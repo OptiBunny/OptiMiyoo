@@ -199,9 +199,11 @@ final tie-breaker for linguistically equal filenames, so the parent and its
 PowerShell 5.1 worker produce the same playlist bytes for those names.
 
 Playlist dependency checks consider representable literal, right-trimmed, and
-fully trimmed spellings of each non-comment line. A space before `#` can belong
-to a filename; it does not make the original line a comment. Whitespace and
-archive-member interpretations share the same bounded candidate budget. Generated
+fully trimmed spellings under both ASCII and Unicode whitespace rules. Removing
+ASCII padding must not erase an adjacent literal non-ASCII space from a filename.
+A space before `#` can belong to a filename; it does not make the original line a
+comment. Whitespace and archive-member interpretations share the same bounded
+candidate budget. Generated
 playlist text is checked before plan acceptance or destination writes against the
 numbered-playlist reader's 1 MiB byte limit and 16,384 split-line limit, including
 its final newline. Oversized sets cannot create output that this reader cannot

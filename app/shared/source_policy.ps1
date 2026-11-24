@@ -1032,7 +1032,13 @@ function Add-SourcePolicyPlaylistProtection($Plan,$Context,[string]$Path,[IO.Str
             $lineNumber++
             if($line.Length -gt 8192){throw 'Source playlist exceeds the 8,192-character line limit; originals kept.'}
             if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
-            foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)) {
+            # VICE M3U labels are metadata, not part of the source filename.
+            $reference=$line;$labelSeparator=$reference.IndexOf('|',[StringComparison]::Ordinal)
+            if($labelSeparator -ge 0){
+                $reference=$reference.Substring(0,$labelSeparator)
+                if([string]::IsNullOrWhiteSpace($reference)){throw 'Source playlist has a label without a filename; originals kept.'}
+            }
+            foreach($name in (Get-OptiPlaylistReferenceCandidates -Reference $reference -Budget $referenceBudget)) {
                 if($name.StartsWith('file://',[StringComparison]::OrdinalIgnoreCase)){throw 'Source playlist has an unsupported local file URI; originals kept.'}
                 if($name -match '^[A-Za-z][A-Za-z0-9+.-]+://'){continue}
                 $relative=$name.Replace('/',[IO.Path]::DirectorySeparatorChar).Replace('\',[IO.Path]::DirectorySeparatorChar)

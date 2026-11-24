@@ -174,6 +174,8 @@ maps, preserved playlist destination maps, copied loose-file manifests and worke
 source hashes use the same identity. Conversion archive-member maps and ZIP/folder
 staging manifests also keep distinct ordinal names. Conversion ZIP entry cleanup
 closes the converted input stream even if finalizing compressed output fails.
+CUE `FILE` command matching uses ASCII letter case independently of the host
+culture. This recognition preserves the literal captured filenames.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and

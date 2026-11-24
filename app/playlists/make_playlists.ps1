@@ -482,20 +482,26 @@ function Get-TapeGrouping([string]$Title) {
     [pscustomobject]@{Title=$name; Tag=$tag; Error=$errorText}
 }
 
-function Get-PlaylistMediaIdentity([string]$Relative) {
+function Get-PlaylistMediaIdentity([string]$Relative,[switch]$ArchiveMember) {
     $parent=([string][IO.Path]::GetDirectoryName($Relative.Replace('/',[IO.Path]::DirectorySeparatorChar))).Replace('\','/')
     $title=[IO.Path]::GetFileNameWithoutExtension($Relative);$tag='';$tagged=$false;$usedFolderTitle=$false;$errorText=$null
+    $allowBareLabel=[bool]$parent
+    if ($ArchiveMember -and -not $parent) {
+        # Without a game folder, words such as Disco and Taper are titles.
+        # Compact numbers and SideA/SideB are clear labels; other letters
+        # need a separator. Check each marker in compound tape labels too.
+        $joinedWord='(?i)\b(?:(?:disc|disk|tape|cassette)[a-z]|side[c-z])'
+        $allowBareLabel=-not [regex]::IsMatch($title,$joinedWord,[Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    }
     $tapeGrouping=$null
     if ([IO.Path]::GetExtension($Relative) -in '.tap','.t64') {
         $tapeGrouping=Get-TapeGrouping $title
-        if ($null -eq $tapeGrouping -and $parent) {
+        if ($null -eq $tapeGrouping -and $allowBareLabel) {
             # A bare Side A or Tape 1 Side A inside its game folder has the
             # same identity as Game (Side A) or Game (Tape 1 Side A).
             $bareGrouping=Get-TapeGrouping ('('+$title+')')
             if ($null -ne $bareGrouping -and -not $bareGrouping.Title) {
-                $tapeGrouping=$bareGrouping;$usedFolderTitle=$true
-                $tapeGrouping.Title=[IO.Path]::GetFileName($parent)
-                $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+                $tapeGrouping=$bareGrouping
             }
         }
     }
@@ -507,13 +513,12 @@ function Get-PlaylistMediaIdentity([string]$Relative) {
         $tag=$found[0].Groups[1].Value.ToLowerInvariant();$tagged=$true
         $title=[regex]::Replace($title,$pattern,'',[Text.RegularExpressions.RegexOptions]::CultureInvariant).Trim()
         $title=[regex]::Replace($title,'\s{2,}',' ')
-    } elseif ($parent -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
-        $tag=$Matches[1].ToLowerInvariant();$tagged=$true
-        $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
-        $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
+    } elseif ($allowBareLabel -and $title -match '^(?i:disc|disk|side)\s*(\d+[a-z]?|[a-z])(?:\s*(?:of|/)\s*\d+)?$') {
+        $tag=$Matches[1].ToLowerInvariant();$tagged=$true;$title=''
     }
     if ($tagged -and -not $title -and $parent) {
-        # Label-only names such as (Disc 1) inherit their immediate game folder.
+        # Bare and bracketed labels inherit their game folder. At the root
+        # of a ZIP, both forms share the unnamed archive-level set.
         $title=[IO.Path]::GetFileName($parent);$usedFolderTitle=$true
         $parent=([string][IO.Path]::GetDirectoryName($parent)).Replace('\','/')
     }
@@ -535,7 +540,7 @@ function Get-OrderedArchiveMedia([string[]]$Names) {
     foreach($name in $Names) {
         $isTape=[IO.Path]::GetExtension($name) -in '.tap','.t64'
         if($null -eq $tapeSet){$tapeSet=$isTape}elseif($tapeSet -ne $isTape){return $Names}
-        $identity=Get-PlaylistMediaIdentity $name
+        $identity=Get-PlaylistMediaIdentity $name -ArchiveMember
         if(-not $identity.Tagged -or $identity.Error){return $Names}
         if($null -eq $stem){$stem=$identity.Stem}
         elseif(-not $stem.Equals($identity.Stem,[StringComparison]::OrdinalIgnoreCase)){return $Names}

@@ -54,7 +54,12 @@ function Assert-ConversionDescriptorTargets([string]$Text,[string]$DescriptorNam
             $candidates=@($reference)
         }else{
             if([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')){continue}
-            $candidates=@(Get-OptiPlaylistReferenceCandidates -Reference $line -Budget $referenceBudget)
+            # Libretro M3U entries can append a display label after a pipe.
+            # It is not part of the media path; inspect the same filename that
+            # the core opens before deciding that conversion preserves it.
+            $reference=$line;$label=$reference.IndexOf('|',[StringComparison]::Ordinal)
+            if($label -ge 0){$reference=$reference.Substring(0,$label)}
+            $candidates=@(Get-OptiPlaylistReferenceCandidates -Reference $reference -Budget $referenceBudget)
         }
         foreach($candidate in $candidates){
             $target=Resolve-ConversionDescriptorTarget $DescriptorName $candidate

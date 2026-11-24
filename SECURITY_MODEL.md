@@ -196,6 +196,9 @@ reopen.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.
+Supplied conversion playlists check the media path before a `|` display label
+against renamed inputs. A label cannot conceal a reference whose extension will
+change; the descriptor and input archive remain unchanged when refused.
 
 NIB/NBZ decoding validates bounded input and expanded sizes, track tables, and
 supported track numbers before native conversion. The trusted parent independently

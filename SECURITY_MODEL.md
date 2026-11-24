@@ -217,6 +217,11 @@ standard core readers recognize that exact archive-member marker. An incompatibl
 name is refused before a write plan succeeds; explicit ZIP storage supplies its
 existing lowercase output name without changing Auto's filename-preservation
 contract. Single-game ZIPs and retained ownership candidates are unchanged.
+The parent and worker also refuse more than twenty media entries in
+Amiga, C64 and VIC-20 playlist plans: their supported PUAE/VICE disk-control
+storage cannot retain later entries. This whole-set refusal happens before
+plan acceptance or publication; it does not truncate the playlist or change
+the generic descriptor-reader limits.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

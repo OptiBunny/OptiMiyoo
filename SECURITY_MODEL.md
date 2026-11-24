@@ -202,6 +202,12 @@ one owned read-only file stream or bounded sandbox-returned ZIP byte stream,
 then rewinds that same stream for strict decoding. It does not infer encoding
 from the generic decoded ZIP cache. Other-system CUE parsing and generic
 foreign-reference/ownership readers retain UTF-8 and BOM UTF-16/UTF-32 support.
+After strict decoding, the PS-only reader also refuses recognized ASCII FILE
+command tokens whose spelling is not exactly `FILE`. The core ignores other
+letter cases, which can leave the CUE selected as image data. Both PS discovery
+routes apply this guard before accepting media; generic command matching and
+other systems stay unchanged. The check preserves text and filename spelling
+and does not claim complete CUE grammar validation.
 Exact CUE component spelling
 uses ordinal case-sensitive comparison. Linguistic
 equality must not merge distinct Windows filenames, including composed and

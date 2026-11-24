@@ -203,6 +203,10 @@ Archive playlist ordering keeps natural disk-number sorting and uses an ordinal
 final tie-breaker for linguistically equal filenames, so the parent and its
 PowerShell 5.1 worker produce the same playlist bytes for those names.
 
+Disc/disk/side label tokens use culture-invariant case matching in playlist
+and conversion planning. Bare-label recognition does not depend on the host
+language; ordinary-title guards and original source path spelling are preserved.
+
 Playlist dependency checks consider representable literal, right-trimmed, and
 fully trimmed spellings under both ASCII and Unicode whitespace rules. Removing
 ASCII padding must not erase an adjacent literal non-ASCII space from a filename.

@@ -217,6 +217,11 @@ or **4: Loose files** to keep Unicode names, or rename the members to ASCII befo
 choosing ZIP storage. OptiMiyoo refuses the incompatible ZIP plan before writing
 output; it does not rename your files.
 
+For Amiga multi-disc ZIP playlists, use ASCII names for the selected discs and
+their folders inside the archive. The PUAE core bundled with Onion OS replaces
+non-ASCII filename bytes with underscores during extraction, even in UTF-8 ZIPs.
+To keep the original names, choose **3: Folders** or **4: Loose files**.
+
 For conversion, **Auto** keeps the input layout while converting the files.
 
 After choosing storage, [choose what happens to the originals](#originals-and-existing-files)

@@ -239,10 +239,16 @@ paths. VICE replaces non-ASCII bytes while extracting ZIP entries but retains
 the original explicit member selectors. The planner refuses that mismatch before
 accepting writes; it does not normalize names or change archive bytes. Folder
 and loose-file plans preserve Unicode names. This family-specific restriction
-does not change generic ZIP decoding, single-game plans or AMIGA UTF-8 members.
+does not change generic ZIP decoding or single-game plans.
 PlayStation plans likewise refuse more than eight media entries, matching
 the supported PCSX ReARMed disk-control capacity. The check follows the
 generic text budget and refuses the whole set before plan acceptance.
+For AMIGA multi-disc input ZIPs kept zipped, media admission also compares each
+selected decoded member's ASCII name with the central-directory bytes. The Onion
+OS PUAE core rewrites non-ASCII filename bytes to underscores during extraction.
+The output planner applies the same ASCII limit to selected disc names when
+creating a new ZIP playlist. Unselected side files and extraction layouts retain
+their existing decoding.
 Bounded descriptor readers decode UTF-8 or BOM-marked UTF-16/UTF-32 strictly.
 Malformed bytes cannot become replacement characters that identify another file;
 valid replacement characters and original descriptor bytes remain unchanged.

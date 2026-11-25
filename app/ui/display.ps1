@@ -1793,6 +1793,7 @@ function Draw-DisplayPanel([switch]$Force) {
     if ($script:UiDemo) {$barTick=$script:UiDemoProgressTick}
     $bar=$barPrefix+(Get-ProgressBar $script:UiPercent $barWidth $barTick)+' '+$pct
     $queuePercent=[Math]::Max(0,[Math]::Min(100,100.0*$script:Processed/[Math]::Max(1,$script:Total)))
+    if ($script:Processed -lt $script:Total) { $queuePercent=[Math]::Min($queuePercent,99) }
     $queue=('Queue {0}/{1} complete' -f $script:Processed,$script:Total)
     # Overall work uses completed sets, independently of the current stage.
     # Reuse the spare body row so the panel keeps its existing minimum size.

@@ -168,12 +168,16 @@ function Read-ApplicationConsoleChoice($Model,$Session=$null,[switch]$ReturnOnRe
                 elseif($key.Key -eq [ConsoleKey]::End){$caret=$text.Length}
                 elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text=$text.Insert($caret,[string]$key.KeyChar);$caret++}
             } else {
+                $previousText=$text
                 if($key.Key -eq [ConsoleKey]::Backspace -and $text.Length){$text=$text.Substring(0,(Get-InputCaretOffset $text $text.Length -1))}
                 elseif(-not [char]::IsControl($key.KeyChar) -and $text.Length -lt 16){$text+=[string]$key.KeyChar}
                 $caret=$text.Length
             }
             $dirty=$true
-            if(-not $script:UiVT){[Console]::Write("`r"+$plainPrompt+' '+$text+' ')}
+            if(-not $script:UiVT){
+                $padding=[Math]::Max(1,(Get-TextWidth $previousText)-(Get-TextWidth $text))
+                [Console]::Write("`r"+$plainPrompt+' '+$text+(' '*$padding))
+            }
         } else {Wait-DisplayFrame 30}
     }} finally {$script:UiIdlePoseOverride=$null;Reset-MioSparseCrt;if($idleWatch){$idleWatch.Stop()}}
 }

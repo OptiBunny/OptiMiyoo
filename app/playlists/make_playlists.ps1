@@ -36,8 +36,8 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Format-Duration([double]$Seconds) {
-    if ($Seconds -lt 0 -or [double]::IsInfinity($Seconds)) { return 'calculating...' }
-    $span = [TimeSpan]::FromSeconds([Math]::Max(0, $Seconds))
+    if ($Seconds -lt 0 -or [double]::IsInfinity($Seconds) -or [double]::IsNaN($Seconds)) { return 'calculating...' }
+    $span = [TimeSpan]::FromSeconds([Math]::Floor($Seconds))
     return ('{0:00}:{1:00}:{2:00}' -f [Math]::Floor($span.TotalHours), $span.Minutes, $span.Seconds)
 }
 
